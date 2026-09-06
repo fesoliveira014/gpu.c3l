@@ -1403,6 +1403,29 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
     return pipeline;
 }
 
+<* Create a mesh pipeline from an optional task shader, a mesh shader, and a
+   fragment shader over the graphics attachment state. Requires
+   DeviceDesc.enable_mesh_shaders; a task shader needs
+   DeviceCaps.mesh_shaders.task_shaders. Mesh pipelines use the graphics root
+   push with vertex_root_gpu carrying the mesh root, and GraphicsState applies
+   unchanged (raster.topology is ignored).
+   Always checked: null descriptor, attachment formats, sample count, polygon
+   mode, shader roles, and push-block ABI.
+   Runtime failures: UNSUPPORTED_FEATURE without the feature.
+
+   @param device : "Live device."
+   @param desc : "Borrowed mesh pipeline description."
+   @return "Owning pipeline handle, or a recoverable invalid-argument, shader, support, table, or device fault." *>
+fn PipelineHandle? create_mesh_pipeline(Device* device, MeshPipelineDesc* desc) {
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    PipelineHandle pipeline =
+        gpu::internal::vk::vk_create_mesh_pipeline(operation.state, desc)!;
+    gpu::internal::retain_device_children(&operation);
+    return pipeline;
+}
+
 <* Create a KHR ray-tracing pipeline. Shader groups are ordered ray
    generation, miss, hit, then callable. A zero recursion depth selects one.
    Identical immutable descriptors may alias one backend pipeline under
@@ -2327,6 +2350,81 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
         index_count:    index_count,
         instance_count: instance_count,
         index_type:     index_type,
+    );
+}
+
+<* Dispatch mesh work groups with the mesh and fragment roots passed
+   unchanged; either may be zero. Preconditions: a mesh pipeline, render pass,
+   complete graphics state, and queue-admitted root data; shaders make zero
+   dereference safe.
+   Always checked: token phase, a bound mesh pipeline, feature presence, and
+   group counts within DeviceCaps.mesh_shaders.
+   FULL diagnostics: pipeline-kind and state misuse.
+
+   @param commands : "Live recording token inside a render pass."
+   @param mesh_root : "Root GPU address for the task or mesh stage, passed unchanged; zero is valid."
+   @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
+   @param groups : "Task work groups when the pipeline has a task shader, else mesh work groups."
+   @return "Success, or a recoverable command, pipeline, support, limit, or device fault." *>
+fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, Vec3u groups) {
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.draw_mesh_tasks(
+        record:        record,
+        mesh_root:     mesh_root,
+        fragment_root: fragment_root,
+        groups:        groups,
+    );
+}
+
+<* Dispatch mesh work groups from GPU-visible DrawMeshTasksIndirectCommand
+   records with one root pair passed unchanged to every draw.
+   Preconditions: mesh pipeline, complete graphics state, args visible to the
+   indirect stage, and queue-admitted root data.
+   Always checked: token phase, identities, bounds, overflow, a bound mesh
+   pipeline, and feature presence.
+   FULL diagnostics: pipeline-kind, state, usage, queue, and count misuse.
+
+   @param commands : "Live recording token inside a render pass."
+   @param mesh_root : "Root GPU address for the task or mesh stage, passed unchanged; zero is valid."
+   @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
+   @param args : "Non-owning array of DrawMeshTasksIndirectCommand records retained by the command."
+   @param draw_count : "Number of records to execute."
+   @return "Success, or a recoverable command, ownership, bounds, support, pipeline, state, or device fault." *>
+fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.draw_mesh_tasks_indirect(
+        record:        record,
+        mesh_root:     mesh_root,
+        fragment_root: fragment_root,
+        args:          args,
+        draw_count:    draw_count,
+    );
+}
+
+<* Dispatch mesh work groups from GPU-visible records with a GPU-written
+   count. Needs DeviceCaps.draw_indirect_count.
+   Preconditions: as cmd_draw_mesh_tasks_indirect, plus a visible count.
+   Always checked: token phase, identities, bounds, overflow, a bound mesh
+   pipeline, and feature presence.
+   FULL diagnostics: pipeline-kind, state, usage, queue, and count misuse.
+   Runtime failures: unsupported count execution faults UNSUPPORTED_FEATURE.
+
+   @param commands : "Live recording token inside a render pass."
+   @param mesh_root : "Root GPU address for the task or mesh stage, passed unchanged; zero is valid."
+   @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
+   @param args : "Non-owning array of DrawMeshTasksIndirectCommand records retained by the command."
+   @param count_span : "Non-owning span containing the GPU-written draw count."
+   @param max_draw_count : "Maximum records the GPU count may select."
+   @return "Success, or a recoverable command, ownership, bounds, support, pipeline, state, or device fault." *>
+fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count) {
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    return record.ops.draw_mesh_tasks_indirect_count(
+        record:         record,
+        mesh_root:      mesh_root,
+        fragment_root:  fragment_root,
+        args:           args,
+        count_span:     count_span,
+        max_draw_count: max_draw_count,
     );
 }
 

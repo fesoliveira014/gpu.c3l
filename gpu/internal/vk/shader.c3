@@ -374,10 +374,17 @@ fn void? check_heap_convention(
     };
 }
 
+const spvreflect::ShaderStage SPV_SHADER_STAGE_TASK_EXT = (spvreflect::ShaderStage)0x40;
+const spvreflect::ShaderStage SPV_SHADER_STAGE_MESH_EXT = (spvreflect::ShaderStage)0x80;
+
 fn gpu::internal::ShaderRole? shader_role_from_spv(
     spvreflect::ShaderStage stage,
 ) @private {
     switch (stage) {
+        case SPV_SHADER_STAGE_TASK_EXT:
+            return gpu::internal::ShaderRole.TASK;
+        case SPV_SHADER_STAGE_MESH_EXT:
+            return gpu::internal::ShaderRole.MESH;
         case spvreflect::ShaderStage.SHADER_STAGE_COMPUTE:
             return gpu::internal::ShaderRole.COMPUTE;
         case spvreflect::ShaderStage.SHADER_STAGE_VERTEX:
@@ -423,6 +430,10 @@ fn vk::ShaderStageFlagBits? shader_role_to_vk(
             return vk::ShaderStageFlagBits.INTERSECTION_BIT_KHR;
         case gpu::internal::ShaderRole.CALLABLE:
             return vk::ShaderStageFlagBits.CALLABLE_BIT_KHR;
+        case gpu::internal::ShaderRole.TASK:
+            return vk::ShaderStageFlagBits.TASK_BIT_EXT;
+        case gpu::internal::ShaderRole.MESH:
+            return vk::ShaderStageFlagBits.MESH_BIT_EXT;
         default:
             return gpu::SHADER_INVALID~;
     }
@@ -436,6 +447,8 @@ fn gpu::internal::RootAbiSpec root_abi_for_role(
             return gpu::internal::ROOT_PUSH_ABI;
         case gpu::internal::ShaderRole.VERTEX:
         case gpu::internal::ShaderRole.FRAGMENT:
+        case gpu::internal::ShaderRole.TASK:
+        case gpu::internal::ShaderRole.MESH:
             return gpu::internal::GRAPHICS_ROOT_PUSH_ABI;
         case gpu::internal::ShaderRole.RAY_GENERATION:
         case gpu::internal::ShaderRole.MISS:

@@ -18,7 +18,8 @@ flowchart LR
 
 `StageMask` bits: `all`, `host`, `transfer`, `compute`, `vertex_shader`,
 `fragment_shader`, `color_output`, `depth_output`, `present`, `indirect`,
-`acceleration_structure_build`, `ray_tracing`. `all` and `present` cannot
+`acceleration_structure_build`, `ray_tracing`, `mesh_shader` (needs `DeviceDesc.enable_mesh_shaders`; covers the
+mesh stage and the task stage when task shaders are enabled). `all` and `present` cannot
 be combined with others.
 
 ## Global barriers

@@ -746,7 +746,7 @@ fn void graphics_pipeline_key_is_compact_and_format_only() @test {
     assert(vk::key_equals(&first_key, &alias_key));
     assert(vk::hash_key(&first_key) == vk::hash_key(&alias_key));
     assert(first_key.color_formats[0] == gpu::Format.RGBA8_UNORM);
-    assert(vk::PipelineKey::size == 60,
+    assert(vk::PipelineKey::size == 64,
         "the shared pipeline key remains compact");
 
     gpu::GraphicsPipelineDesc changed = first;

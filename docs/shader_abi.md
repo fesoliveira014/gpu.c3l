@@ -14,6 +14,8 @@ shaders index into it with values stored in root data.
 
 Every pipeline kind has a fixed push-constant block. Shaders that read push
 constants declare the whole block, in this order, and nothing else in it.
+Mesh and task shaders use the graphics block; `vertex_root_gpu` carries the
+root passed as `mesh_root`.
 
 Compute and ray tracing, 8 bytes:
 

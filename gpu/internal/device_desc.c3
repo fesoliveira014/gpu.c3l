@@ -77,6 +77,16 @@ fn DeviceSupport? evaluate_device_desc_support(
             .unmet_requirement = "ray tracing pipelines",
         };
     }
+    if (normalized.enable_mesh_shaders
+        && !gpu::internal::vk::vk_adapter_supports_mesh_shaders(
+            data.state,
+            adapter.adapter_index,
+        )!) {
+        return {
+            .supported         = false,
+            .unmet_requirement = "mesh shaders",
+        };
+    }
     if (acceleration_structures
         && !gpu::internal::vk::vk_adapter_supports_ray_query_heap(
             data.state,

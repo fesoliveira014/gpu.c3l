@@ -1138,6 +1138,7 @@ fn LoweredColorState? full_prepare_color_state(
         record:        record,
         expected_kind: PipelineKind.GRAPHICS,
         operation:     operation,
+        any_raster:    true,
     )!;
     if (color.targets.len != pipeline.render.color_count) {
         return color_state_rejection(
@@ -1312,12 +1313,12 @@ fn void push_graphics_roots(
         .vertex_root_gpu   = vertex_root,
         .fragment_root_gpu = fragment_root,
     };
-    uint push_stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT
-        | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
     vk::cmd_push_constants(
         command_buffer: record.command_buffer,
         layout:         pipeline.layout,
-        stage_flags:    (vk::ShaderStageFlags)push_stages,
+        stage_flags:    pipeline.kind == PipelineKind.MESH
+            ? record.device_state.mesh_push_stages
+            : generated_graphics_shader_stages(),
         offset:         0,
         size:           GRAPHICS_ROOT_PUSH_SIZE,
         p_values:       &push,
@@ -2508,4 +2509,336 @@ fn void? full_draw_indexed_generated(
     );
     track_generated_indexed_draw(commands, &draw)!;
     record_generated_indexed_draw(commands, &draw)!;
+}
+
+struct PreparedMeshDraw {
+    BoundPipeline*  pipeline;
+    gpu::GpuAddress mesh_root;
+    gpu::GpuAddress fragment_root;
+    gpu::Vec3u      groups;
+}
+
+struct PreparedMeshIndirectDraw {
+    BoundPipeline*  pipeline;
+    ResolvedSpan    args;
+    ResolvedSpan    count;
+    gpu::GpuSpan    args_span;
+    gpu::GpuSpan    count_span;
+    gpu::GpuAddress mesh_root;
+    gpu::GpuAddress fragment_root;
+    uint            draw_count;
+    bool            counted;
+}
+
+fn BoundPipeline*? validate_mesh_execution_state(
+    VkDeviceState* state,
+    CommandRecord* record,
+    ZString operation,
+) @private {
+    BoundPipeline* pipeline = active_bound_pipeline(
+        state:         state,
+        record:        record,
+        expected_kind: PipelineKind.MESH,
+        operation:     operation,
+    )!;
+    if (!record.graphics_state_initialized) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    validate_color_execution_state(record, pipeline)!;
+    return pipeline;
+}
+
+fn void? validate_mesh_groups(
+    VkDeviceState* state,
+    BoundPipeline* pipeline,
+    gpu::Vec3u groups,
+    ZString operation,
+) @private {
+    gpu::Vec3u limit = pipeline.mesh_task_stage
+        ? state.mesh_shader_caps.max_task_work_group_count
+        : state.mesh_shader_caps.max_mesh_work_group_count;
+    if (groups.x <= limit.x && groups.y <= limit.y && groups.z <= limit.z) return;
+    return report_contract_failure(
+        state:               state,
+        operation:           operation,
+        public_fault:        gpu::INVALID_ARGUMENT,
+        resource_kind:       gpu::DebugResourceKind.PIPELINE,
+        has_public_identity: true,
+        index:               pipeline.handle.index,
+        generation:          pipeline.handle.generation,
+        debug_name:          null,
+        rejected_field:      "groups",
+        invariant:           "work-group counts must fit DeviceCaps.mesh_shaders",
+        backend_text:        null,
+    )~;
+}
+
+fn void record_mesh_draw(CommandRecord* record, PreparedMeshDraw* draw) @private {
+    push_graphics_roots(record, draw.pipeline, draw.mesh_root, draw.fragment_root);
+    record.device_state.device_dispatch.mesh_shaders.cmd_draw_mesh_tasks(
+        record.command_buffer,
+        draw.groups.x,
+        draw.groups.y,
+        draw.groups.z,
+    );
+}
+
+fn void record_mesh_indirect_draw(
+    CommandRecord* record,
+    PreparedMeshIndirectDraw* draw,
+) @private {
+    push_graphics_roots(record, draw.pipeline, draw.mesh_root, draw.fragment_root);
+    VkMeshShaderDispatch* dispatch = &record.device_state.device_dispatch.mesh_shaders;
+    if (draw.counted) {
+        dispatch.cmd_draw_mesh_tasks_indirect_count(
+            record.command_buffer,
+            draw.args.slot.buffer,
+            (vk::DeviceSize)draw.args.offset,
+            draw.count.slot.buffer,
+            (vk::DeviceSize)draw.count.offset,
+            draw.draw_count,
+            gpu::DrawMeshTasksIndirectCommand::size,
+        );
+        return;
+    }
+    dispatch.cmd_draw_mesh_tasks_indirect(
+        record.command_buffer,
+        draw.args.slot.buffer,
+        (vk::DeviceSize)draw.args.offset,
+        draw.draw_count,
+        gpu::DrawMeshTasksIndirectCommand::size,
+    );
+}
+
+fn void? trusted_draw_mesh_tasks(
+    CommandRecord* commands,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::Vec3u groups,
+) {
+    CommandRecord* record = commands;
+    if (record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    if (!record.device_state.mesh_shaders_enabled) return gpu::UNSUPPORTED_FEATURE~;
+    PreparedMeshDraw draw = {
+        .pipeline      = borrow_bound_pipeline(record)!,
+        .mesh_root     = mesh_root,
+        .fragment_root = fragment_root,
+        .groups        = groups,
+    };
+    record_mesh_draw(record, &draw);
+}
+
+fn void? full_draw_mesh_tasks(
+    CommandRecord* commands,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::Vec3u groups,
+) {
+    if (commands == null) return gpu::INVALID_ARGUMENT~;
+    CommandRecord* record = commands;
+    if (record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    VkDeviceState* state = commands.device_state;
+    if (!state.mesh_shaders_enabled) return gpu::UNSUPPORTED_FEATURE~;
+    PreparedMeshDraw draw = {
+        .pipeline      = validate_mesh_execution_state(state, record, "cmd_draw_mesh_tasks")!,
+        .mesh_root     = mesh_root,
+        .fragment_root = fragment_root,
+        .groups        = groups,
+    };
+    validate_mesh_groups(
+        state:     state,
+        pipeline:  draw.pipeline,
+        groups:    groups,
+        operation: "cmd_draw_mesh_tasks",
+    )!;
+    record_mesh_draw(record, &draw);
+}
+
+fn PreparedMeshIndirectDraw? lower_mesh_indirect_draw(
+    CommandRecord* commands,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint draw_count,
+    bool counted,
+) @private {
+    CommandRecord* record = commands;
+    if (record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    VkDeviceState* state = commands.device_state;
+    if (!state.mesh_shaders_enabled) return gpu::UNSUPPORTED_FEATURE~;
+    if (counted && !state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
+    PreparedMeshIndirectDraw draw = {
+        .pipeline = borrow_bound_pipeline(record)!,
+        .args = lower_indirect_span(
+            state:    state,
+            span:     &args,
+            arg_size: gpu::DrawMeshTasksIndirectCommand::size,
+            count:    draw_count,
+        )!,
+        .args_span     = args,
+        .count_span    = count_span,
+        .mesh_root     = mesh_root,
+        .fragment_root = fragment_root,
+        .draw_count    = draw_count,
+        .counted       = counted,
+    };
+    if (counted) {
+        draw.count = lower_indirect_span(
+            state:    state,
+            span:     &count_span,
+            arg_size: uint::size,
+            count:    1,
+        )!;
+    }
+    return draw;
+}
+
+fn PreparedMeshIndirectDraw? full_prepare_mesh_indirect_draw(
+    CommandRecord* commands,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint draw_count,
+    bool counted,
+    ZString operation,
+) @private {
+    if (commands == null) return gpu::INVALID_ARGUMENT~;
+    CommandRecord* record = commands;
+    if (record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    VkDeviceState* state = commands.device_state;
+    if (!state.mesh_shaders_enabled) return gpu::UNSUPPORTED_FEATURE~;
+    if (counted && !state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
+    PreparedMeshIndirectDraw draw = {
+        .pipeline = validate_mesh_execution_state(state, record, operation)!,
+        .args = validate_and_lower_indirect_span(
+            state:          state,
+            record:         record,
+            span:           &args,
+            arg_size:       gpu::DrawMeshTasksIndirectCommand::size,
+            count:          draw_count,
+            operation:      operation,
+            rejected_field: counted ? "args" : "draw_count",
+            max_count:      counted ? uint::max : state.caps.max_draw_indirect_count,
+        )!,
+        .args_span     = args,
+        .count_span    = count_span,
+        .mesh_root     = mesh_root,
+        .fragment_root = fragment_root,
+        .draw_count    = draw_count,
+        .counted       = counted,
+    };
+    if (counted) {
+        draw.count = validate_and_lower_indirect_span(
+            state:          state,
+            record:         record,
+            span:           &count_span,
+            arg_size:       uint::size,
+            count:          1,
+            operation:      operation,
+            rejected_field: "count_span",
+        )!;
+    }
+    return draw;
+}
+
+fn void? track_mesh_indirect_draw(
+    CommandRecord* commands,
+    PreparedMeshIndirectDraw* draw,
+) @private {
+    track_span_command_reference(commands.device_state, commands, &draw.args_span)!;
+    if (draw.counted) {
+        track_span_command_reference(commands.device_state, commands, &draw.count_span)!;
+    }
+}
+
+fn void? trusted_draw_mesh_tasks_indirect(
+    CommandRecord* commands,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+) {
+    PreparedMeshIndirectDraw draw = lower_mesh_indirect_draw(
+        commands:      commands,
+        mesh_root:     mesh_root,
+        fragment_root: fragment_root,
+        args:          args,
+        count_span:    {},
+        draw_count:    draw_count,
+        counted:       false,
+    )!;
+    record_mesh_indirect_draw(commands, &draw);
+}
+
+fn void? full_draw_mesh_tasks_indirect(
+    CommandRecord* commands,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+) {
+    PreparedMeshIndirectDraw draw = full_prepare_mesh_indirect_draw(
+        commands:      commands,
+        mesh_root:     mesh_root,
+        fragment_root: fragment_root,
+        args:          args,
+        count_span:    {},
+        draw_count:    draw_count,
+        counted:       false,
+        operation:     "cmd_draw_mesh_tasks_indirect",
+    )!;
+    track_mesh_indirect_draw(commands, &draw)!;
+    record_mesh_indirect_draw(commands, &draw);
+}
+
+fn void? trusted_draw_mesh_tasks_indirect_count(
+    CommandRecord* commands,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+) {
+    PreparedMeshIndirectDraw draw = lower_mesh_indirect_draw(
+        commands:      commands,
+        mesh_root:     mesh_root,
+        fragment_root: fragment_root,
+        args:          args,
+        count_span:    count_span,
+        draw_count:    max_draw_count,
+        counted:       true,
+    )!;
+    record_mesh_indirect_draw(commands, &draw);
+}
+
+fn void? full_draw_mesh_tasks_indirect_count(
+    CommandRecord* commands,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+) {
+    PreparedMeshIndirectDraw draw = full_prepare_mesh_indirect_draw(
+        commands:      commands,
+        mesh_root:     mesh_root,
+        fragment_root: fragment_root,
+        args:          args,
+        count_span:    count_span,
+        draw_count:    max_draw_count,
+        counted:       true,
+        operation:     "cmd_draw_mesh_tasks_indirect_count",
+    )!;
+    track_mesh_indirect_draw(commands, &draw)!;
+    record_mesh_indirect_draw(commands, &draw);
 }

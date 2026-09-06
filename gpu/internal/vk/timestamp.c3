@@ -236,6 +236,10 @@ fn vk::PipelineStageFlags2 timestamp_stage_to_vk(
         return (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2
             .STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
     }
+    if (stage.mesh_shader) {
+        return (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2
+            .STAGE_2_MESH_SHADER_BIT_EXT;
+    }
     unreachable();
 }
 
@@ -558,6 +562,7 @@ fn void? validate_full_timestamp_stage(
             completion.queue_flags,
             record.device_state.acceleration_structures_enabled,
             record.device_state.ray_tracing_pipelines_enabled,
+            record.device_state.mesh_shaders_enabled,
         )) return;
     return report_timestamp_command_failure(
         state:           record.device_state,

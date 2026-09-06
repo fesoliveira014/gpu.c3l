@@ -21,6 +21,7 @@ const gpu::StageMask TEXTURE_STATE_STAGE_MASK @private = {
     .vertex_shader,
     .fragment_shader,
     .ray_tracing,
+    .mesh_shader,
     .color_output,
     .depth_output,
     .present,
@@ -32,6 +33,7 @@ const gpu::StageMask TEXTURE_SHADER_STAGE_MASK @private = {
     .vertex_shader,
     .fragment_shader,
     .ray_tracing,
+    .mesh_shader,
 };
 const gpu::StageMask TEXTURE_COLOR_OUTPUT_STAGE @private = { .color_output };
 const gpu::StageMask TEXTURE_DEPTH_OUTPUT_STAGE @private = { .depth_output };
@@ -172,6 +174,7 @@ fn TextureStateScope texture_state_to_vk(
     gpu::Format format,
     TextureStateSide side,
     gpu::StageMask paired_stages,
+    bool task_shaders = false,
 ) {
     vk::ImageLayout layout = texture_layout_to_vk(
         state.layout,
@@ -186,37 +189,37 @@ fn TextureStateScope texture_state_to_vk(
             };
         case gpu::TextureLayout.TRANSFER_SOURCE:
             return {
-                .stages = barrier_before_stages_to_vk(state.stages),
+                .stages = barrier_before_stages_to_vk(state.stages, false, task_shaders),
                 .access = texture_access_to_vk(state.layout, state.access),
                 .layout = layout,
             };
         case gpu::TextureLayout.TRANSFER_DESTINATION:
             return {
-                .stages = barrier_before_stages_to_vk(state.stages),
+                .stages = barrier_before_stages_to_vk(state.stages, false, task_shaders),
                 .access = texture_access_to_vk(state.layout, state.access),
                 .layout = layout,
             };
         case gpu::TextureLayout.SAMPLED:
             return {
-                .stages = barrier_before_stages_to_vk(state.stages),
+                .stages = barrier_before_stages_to_vk(state.stages, false, task_shaders),
                 .access = texture_access_to_vk(state.layout, state.access),
                 .layout = layout,
             };
         case gpu::TextureLayout.STORAGE:
             return {
-                .stages = barrier_before_stages_to_vk(state.stages),
+                .stages = barrier_before_stages_to_vk(state.stages, false, task_shaders),
                 .access = texture_access_to_vk(state.layout, state.access),
                 .layout = layout,
             };
         case gpu::TextureLayout.COLOR_ATTACHMENT:
             return {
-                .stages = barrier_before_stages_to_vk(state.stages),
+                .stages = barrier_before_stages_to_vk(state.stages, false, task_shaders),
                 .access = texture_access_to_vk(state.layout, state.access),
                 .layout = layout,
             };
         case gpu::TextureLayout.DEPTH_ATTACHMENT:
             return {
-                .stages = barrier_before_stages_to_vk(state.stages),
+                .stages = barrier_before_stages_to_vk(state.stages, false, task_shaders),
                 .access = texture_access_to_vk(state.layout, state.access),
                 .layout = layout,
             };
@@ -224,7 +227,7 @@ fn TextureStateScope texture_state_to_vk(
             return {
                 // Pair the consumer stage to link the transition with readiness_before's stage-limited acquire wait.
                 .stages = side == TextureStateSide.BEFORE
-                    ? barrier_before_stages_to_vk(paired_stages)
+                    ? barrier_before_stages_to_vk(paired_stages, false, task_shaders)
                     : vk::PipelineStageFlagBits2.STAGE_2_NONE,
                 .access = vk::AccessFlagBits2.ACCESS_2_NONE,
                 .layout = layout,
@@ -262,7 +265,7 @@ fn bool texture_shader_stages_supported(
     bool graphics = queue_flags_include(flags, vk::QueueFlagBits.GRAPHICS_BIT);
     bool compute = queue_flags_include(flags, vk::QueueFlagBits.COMPUTE_BIT);
     if (stages.compute && !compute) return false;
-    if ((stages.vertex_shader || stages.fragment_shader) && !graphics) {
+    if ((stages.vertex_shader || stages.fragment_shader || stages.mesh_shader) && !graphics) {
         return false;
     }
     if (stages.ray_tracing && (!(graphics || compute)
@@ -315,7 +318,8 @@ fn TextureBarrierRejection texture_state_rejection(
     bool shader_stages = texture_state.stages.compute
         || texture_state.stages.vertex_shader
         || texture_state.stages.fragment_shader
-        || texture_state.stages.ray_tracing;
+        || texture_state.stages.ray_tracing
+        || texture_state.stages.mesh_shader;
     bool exact_read = access == (uint)TEXTURE_READ_ACCESS;
     bool exact_write = access == (uint)TEXTURE_WRITE_ACCESS;
     bool concrete_access = access != 0;
@@ -612,6 +616,7 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         format:        slot.format,
         side:          TextureStateSide.BEFORE,
         paired_stages: barrier.after.stages,
+        task_shaders:  state.task_shaders_enabled,
     );
 
     rejection = texture_state_rejection(
@@ -634,6 +639,7 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         format:        slot.format,
         side:          TextureStateSide.AFTER,
         paired_stages: barrier.before.stages,
+        task_shaders:  state.task_shaders_enabled,
     );
 
     vk::ImageMemoryBarrier2 native = vk::image_memory_barrier2()
@@ -737,6 +743,7 @@ fn void? vk_cmd_barrier_with_ops(
             completion.queue_flags,
             state.acceleration_structures_enabled,
             state.ray_tracing_pipelines_enabled,
+            state.mesh_shaders_enabled,
         );
         if (rejected_field != null) {
             invariant = "stage mask must be supported by the recording queue";
@@ -762,6 +769,7 @@ fn void? vk_cmd_barrier_with_ops(
         barrier,
         state.generated_work.enabled,
         state.ray_queries_enabled,
+        state.task_shaders_enabled,
     );
     emit_barrier(commands, &native_barrier, ops);
 }
@@ -781,6 +789,7 @@ fn void? trusted_barrier_with_ops(
         barrier,
         state.generated_work.enabled,
         state.ray_queries_enabled,
+        state.task_shaders_enabled,
     );
     emit_barrier(commands, &native_barrier, ops);
 }
@@ -833,12 +842,14 @@ fn LoweredTextureBarrier? lower_texture_barrier_trusted(
         format:        slot.format,
         side:          TextureStateSide.BEFORE,
         paired_stages: barrier.after.stages,
+        task_shaders:  state.task_shaders_enabled,
     );
     TextureStateScope after = texture_state_to_vk(
         state:         barrier.after,
         format:        slot.format,
         side:          TextureStateSide.AFTER,
         paired_stages: barrier.before.stages,
+        task_shaders:  state.task_shaders_enabled,
     );
     vk::ImageMemoryBarrier2 native = vk::image_memory_barrier2()
         .set_src_stage_mask(before.stages)

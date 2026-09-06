@@ -24,6 +24,7 @@ enum PipelineKind : int {
     COMPUTE,
     GRAPHICS,
     RAY_TRACING,
+    MESH,
 }
 
 struct OwnedRayTracingPipelineKey {
@@ -52,6 +53,7 @@ struct RayTracingPipelineKeyInput {
 struct PipelineKey {
     ShaderId                                vertex_shader;
     ShaderId                                fragment_shader;
+    ShaderId                                task_shader;
     uint                                    color_target_count;
     gpu::Format[gpu::MAX_COLOR_ATTACHMENTS] color_formats;
     gpu::Format                             depth_format;
@@ -59,7 +61,7 @@ struct PipelineKey {
     gpu::PolygonMode                        polygon_mode;
     int                                     kind;
 }
-$assert PipelineKey::size == 60;
+$assert PipelineKey::size == 64;
 
 struct PipelineCacheEntry {
     ulong                          hash;
@@ -69,6 +71,7 @@ struct PipelineCacheEntry {
     vk::IndirectCommandsLayoutEXT  generated_dispatch_layout;
     OwnedRayTracingPipelineKey     ray_tracing_key;
     ShaderId[]                     ray_tracing_shader_ids;
+    bool                           mesh_task_stage;
     uint                           refcount;
     uint                           next_free;
     uint                           next_in_bucket;
@@ -383,6 +386,28 @@ fn PipelineKey build_compute_key(ShaderId shader) @private {
     };
 }
 
+fn PipelineKey build_mesh_key(
+    gpu::MeshPipelineDesc* desc,
+    ShaderId task_shader,
+    ShaderId mesh_shader,
+    ShaderId fragment_shader,
+) @private {
+    PipelineKey key = {
+        .vertex_shader      = mesh_shader,
+        .fragment_shader    = fragment_shader,
+        .task_shader        = task_shader,
+        .color_target_count = (uint)desc.color_formats.len,
+        .depth_format       = desc.depth_format,
+        .sample_count       = desc.sample_count,
+        .polygon_mode       = desc.polygon_mode,
+        .kind               = (int)PipelineKind.MESH,
+    };
+    foreach (i, format : desc.color_formats) {
+        key.color_formats[i] = format;
+    }
+    return key;
+}
+
 fn ulong hash_key(PipelineKey* key) @private {
     return fnv64a::hash(((char*)key)[:PipelineKey::size]);
 }
@@ -594,6 +619,31 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
         object_handle: (ulong)state.graphics_layout,
         name:          "gpu_graphics_layout",
     );
+    if (state.mesh_shaders_enabled) {
+        uint mesh_stages = (uint)vk::ShaderStageFlagBits.MESH_BIT_EXT
+            | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
+        if (state.task_shaders_enabled) mesh_stages |= (uint)vk::ShaderStageFlagBits.TASK_BIT_EXT;
+        state.mesh_push_stages = (vk::ShaderStageFlags)mesh_stages;
+        vk::PushConstantRange mesh_range = {
+            .stage_flags = state.mesh_push_stages,
+            .offset      = 0,
+            .size        = GRAPHICS_ROOT_PUSH_SIZE,
+        };
+        vk::PipelineLayoutCreateInfo mesh_layout_info = vk::pipeline_layout_create_info()
+            .set_set_layouts((&state.shader_pipeline_set_layout)[:1])
+            .set_push_constant_ranges((&mesh_range)[:1]);
+        check_backend_result(
+            state:     state,
+            operation: "create_device",
+            result:    vk::create_pipeline_layout(state.device, &mesh_layout_info, null, &state.mesh_layout),
+        )!;
+        set_object_name(
+            state:         state,
+            object_type:   vk::ObjectType.PIPELINE_LAYOUT,
+            object_handle: (ulong)state.mesh_layout,
+            name:          "gpu_mesh_layout",
+        );
+    }
 
     vk::PushConstantRange compute_root = {
         .stage_flags = vk::ShaderStageFlagBits.COMPUTE_BIT,
@@ -797,6 +847,10 @@ fn void destroy_pipeline_shared(VkDeviceState* state) {
     if (state.graphics_layout != null) {
         vk::destroy_pipeline_layout(state.device, state.graphics_layout, null);
         state.graphics_layout = (vk::PipelineLayout)null;
+    }
+    if (state.mesh_layout != null) {
+        vk::destroy_pipeline_layout(state.device, state.mesh_layout, null);
+        state.mesh_layout = (vk::PipelineLayout)null;
     }
     state.shader_pipeline_set_layout = (vk::DescriptorSetLayout)null;
     if (state.driver_cache != null) {

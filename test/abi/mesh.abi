@@ -1,0 +1,8 @@
+abi mesh;
+
+root MeshArgsRoot {
+    GpuAddress args_gpu;
+    GpuAddress count_gpu;
+    uint       count_value;
+    uint       _pad0;
+}

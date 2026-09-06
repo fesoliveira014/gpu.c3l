@@ -22,6 +22,7 @@ struct VkDeviceDispatchPlan {
     bool acceleration_structure_indirect_build;
     bool ray_tracing_pipelines;
     bool ray_tracing_indirect2;
+    bool mesh_shaders;
 }
 
 struct VkInstanceDebugDispatch {
@@ -92,6 +93,12 @@ struct VkRayTracingPipelineDispatch {
     vk::PFN_vkCmdTraceRaysIndirect2KHR             cmd_trace_rays_indirect2;
 }
 
+struct VkMeshShaderDispatch {
+    vk::PFN_vkCmdDrawMeshTasksEXT              cmd_draw_mesh_tasks;
+    vk::PFN_vkCmdDrawMeshTasksIndirectEXT      cmd_draw_mesh_tasks_indirect;
+    vk::PFN_vkCmdDrawMeshTasksIndirectCountEXT cmd_draw_mesh_tasks_indirect_count;
+}
+
 struct VkDeviceDispatch {
     VkDeviceDebugDispatch        debug;
     VkDevicePresentationDispatch presentation;
@@ -99,6 +106,7 @@ struct VkDeviceDispatch {
     VkDynamicColorDispatch       dynamic_color;
     VkAccelerationStructureDispatch acceleration_structures;
     VkRayTracingPipelineDispatch    ray_tracing_pipelines;
+    VkMeshShaderDispatch            mesh_shaders;
 }
 
 fn VkInstanceDispatch load_vk_instance_dispatch(
@@ -309,6 +317,24 @@ fn VkDeviceDispatch load_vk_device_dispatch(
                 );
         }
     }
+    if (plan.mesh_shaders) {
+        dispatch.mesh_shaders = {
+            .cmd_draw_mesh_tasks = (vk::PFN_vkCmdDrawMeshTasksEXT)loader(
+                device,
+                "vkCmdDrawMeshTasksEXT",
+            ),
+            .cmd_draw_mesh_tasks_indirect =
+                (vk::PFN_vkCmdDrawMeshTasksIndirectEXT)loader(
+                    device,
+                    "vkCmdDrawMeshTasksIndirectEXT",
+                ),
+            .cmd_draw_mesh_tasks_indirect_count =
+                (vk::PFN_vkCmdDrawMeshTasksIndirectCountEXT)loader(
+                    device,
+                    "vkCmdDrawMeshTasksIndirectCountEXT",
+                ),
+        };
+    }
     dispatch.dynamic_color = {
         .set_blend_enable = (vk::PFN_vkCmdSetColorBlendEnableEXT)loader(
             device,
@@ -371,6 +397,12 @@ fn bool device_dispatch_supports_indirect_acceleration_structure_builds(
     VkDeviceDispatch* dispatch,
 ) {
     return dispatch.acceleration_structures.cmd_build_indirect != null;
+}
+
+fn bool device_dispatch_supports_mesh_shaders(VkDeviceDispatch* dispatch) {
+    return dispatch.mesh_shaders.cmd_draw_mesh_tasks != null
+        && dispatch.mesh_shaders.cmd_draw_mesh_tasks_indirect != null
+        && dispatch.mesh_shaders.cmd_draw_mesh_tasks_indirect_count != null;
 }
 
 fn bool device_dispatch_supports_ray_tracing_pipelines(

@@ -87,6 +87,27 @@ alias CmdDispatchIndirectFn @private = fn void? (
     gpu::GpuAddress,
     gpu::GpuSpan,
 );
+alias CmdDrawMeshTasksFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::Vec3u groups,
+);
+alias CmdDrawMeshTasksIndirectFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+);
+alias CmdDrawMeshTasksIndirectCountFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+);
 alias CmdDrawGeneratedFn @private = fn void? (
     CommandRecord* record,
     gpu::GpuSpan records,
@@ -175,6 +196,7 @@ struct BoundPipeline {
     PipelineKind                      kind;
     RenderCompatibility               render;
     bool                              dynamic_ray_tracing_stack_size;
+    bool                              mesh_task_stage;
 }
 
 struct NativePipelineBinding {
@@ -238,6 +260,9 @@ struct CommandOps @public {
     CmdDrawIndirectFn             draw_indirect;
     CmdDrawIndexedIndirectFn      draw_indexed_indirect;
     CmdDrawIndexedIndirectCountFn draw_indexed_indirect_count;
+    CmdDrawMeshTasksFn            draw_mesh_tasks;
+    CmdDrawMeshTasksIndirectFn    draw_mesh_tasks_indirect;
+    CmdDrawMeshTasksIndirectCountFn draw_mesh_tasks_indirect_count;
     CmdDispatchIndirectFn         dispatch_indirect;
     CmdDrawGeneratedFn            draw_generated;
     CmdDrawIndexedGeneratedFn     draw_indexed_generated;

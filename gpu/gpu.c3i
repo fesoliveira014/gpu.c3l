@@ -290,6 +290,11 @@ $assert $reflect(DispatchIndirectCommand.x).offset == 0;
 $assert $reflect(DispatchIndirectCommand.y).offset == 4;
 $assert $reflect(DispatchIndirectCommand.z).offset == 8;
 
+$assert DrawMeshTasksIndirectCommand::size == 12;
+$assert $reflect(DrawMeshTasksIndirectCommand.x).offset == 0;
+$assert $reflect(DrawMeshTasksIndirectCommand.y).offset == 4;
+$assert $reflect(DrawMeshTasksIndirectCommand.z).offset == 8;
+
 $assert TraceRaysIndirectCommand::size == 12;
 $assert $reflect(TraceRaysIndirectCommand.width).offset == 0;
 $assert $reflect(TraceRaysIndirectCommand.height).offset == 4;
@@ -414,6 +419,17 @@ struct RayTracingPipelineCaps {
     uint max_hit_attribute_size;
 }
 
+<* Mesh shading support. All zero unless DeviceDesc.enable_mesh_shaders was
+   satisfied. *>
+struct MeshShaderCaps {
+    bool  enabled;
+    bool  task_shaders;
+    Vec3u max_task_work_group_count;
+    Vec3u max_mesh_work_group_count;
+    uint  max_mesh_output_vertices;
+    uint  max_mesh_output_primitives;
+}
+
 <* Capabilities of the created device. Query with get_device_caps instead of
    hardcoding limits. *>
 struct DeviceCaps {
@@ -430,6 +446,7 @@ struct DeviceCaps {
     AccelerationStructureCaps acceleration_structures;
     RayQueryCaps ray_queries;
     RayTracingPipelineCaps ray_tracing_pipelines;
+    MeshShaderCaps mesh_shaders;
     // Configured semantic heap capacity, not the hardware maximum.
     uint texture_heap_capacity;
     // Configured semantic heap capacity, not the hardware maximum.
@@ -607,6 +624,7 @@ struct DeviceDesc {
     bool         enable_sparse_textures;
     bool         enable_ray_queries;
     bool         enable_ray_tracing_pipelines;
+    bool         enable_mesh_shaders;
 }
 
 <* Result of a read-only semantic support query. unmet_requirement is a
@@ -1192,6 +1210,21 @@ struct GraphicsPipelineDesc {
     ZString      debug_name;
 }
 
+<* A mesh pipeline: optional task shader (absent when its spirv is empty),
+   mesh shader, fragment shader, and the graphics attachment state. Mesh
+   pipelines use the graphics root push; vertex_root_gpu carries the mesh
+   root. GraphicsState applies unchanged; raster.topology is ignored. *>
+struct MeshPipelineDesc {
+    ShaderDesc   task_shader;
+    ShaderDesc   mesh_shader;
+    ShaderDesc   fragment_shader;
+    Format[]     color_formats;
+    Format       depth_format;
+    SampleCount  sample_count;
+    PolygonMode  polygon_mode;
+    ZString      debug_name;
+}
+
 <* One borrowed hit-group declaration. Shader inputs and pointed descriptors
    are call-scoped; group kind determines required and prohibited roles. *>
 struct RayTracingHitGroupDesc {
@@ -1370,6 +1403,14 @@ struct DispatchIndirectCommand {
     uint z;
 }
 $assert DispatchIndirectCommand::size == 12;
+
+<* Shader-writable work-group counts for cmd_draw_mesh_tasks_indirect. *>
+struct DrawMeshTasksIndirectCommand {
+    uint x;
+    uint y;
+    uint z;
+}
+$assert DrawMeshTasksIndirectCommand::size == 12;
 
 <* Shader-writable dimensions for cmd_trace_rays_indirect. *>
 struct TraceRaysIndirectCommand {
@@ -1576,6 +1617,7 @@ bitstruct StageMask : uint {
     bool indirect        : 9;
     bool acceleration_structure_build : 10;
     bool ray_tracing     : 11;
+    bool mesh_shader     : 13;
 }
 
 <* Texture layout for explicit transitions. *>

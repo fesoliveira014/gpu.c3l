@@ -89,6 +89,29 @@ returns the `ColorState`. `COLOR_WRITE_ALL` is the default mask.
 `MAX_COLOR_ATTACHMENTS` is 8; use `DeviceCaps.max_color_attachments` for
 the selected device.
 
+## Mesh pipelines
+
+Require `DeviceDesc.enable_mesh_shaders`; a task shader also needs
+`DeviceCaps.mesh_shaders.task_shaders`.
+
+```c3
+gpu::Format[1] mesh_targets = { gpu::Format.RGBA8_UNORM };
+gpu::MeshPipelineDesc mesh_desc = {
+    .mesh_shader     = { .spirv = MESH_SPIRV[..] },     // .task_shader is optional
+    .fragment_shader = { .spirv = FRAG_SPIRV[..] },
+    .color_formats   = mesh_targets[..],
+    .debug_name      = "meshlets",
+};
+gpu::PipelineHandle mesh_pipeline = gpu::create_mesh_pipeline(&device, &mesh_desc)!;
+```
+
+Mesh pipelines take the same attachment state and `GraphicsState` as
+graphics pipelines; `raster.topology` is ignored. They push the graphics root
+header with `vertex_root_gpu` carrying the mesh (or task) root. Draw with
+`cmd_draw_mesh_tasks` and its indirect forms; `cmd_draw*` reject a mesh
+pipeline and mesh draws reject a graphics pipeline with `INVALID_ARGUMENT`.
+Generated work does not cover mesh draws.
+
 ## Ray-tracing pipelines
 
 Require `DeviceDesc.enable_ray_tracing_pipelines`.

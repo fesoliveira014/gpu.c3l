@@ -122,6 +122,27 @@ alias CmdDispatchIndirectFn @private = fn void? (
     gpu::GpuAddress,
     gpu::GpuSpan,
 );
+alias CmdDrawMeshTasksFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::Vec3u groups,
+);
+alias CmdDrawMeshTasksIndirectFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+);
+alias CmdDrawMeshTasksIndirectCountFn @private = fn void? (
+    CommandRecord* record,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+);
 alias CmdDrawGeneratedFn @private = fn void? (
     CommandRecord* record,
     gpu::GpuSpan records,
@@ -223,6 +244,9 @@ struct CommandOps @public {
     CmdDrawIndirectFn             draw_indirect;
     CmdDrawIndexedIndirectFn      draw_indexed_indirect;
     CmdDrawIndexedIndirectCountFn draw_indexed_indirect_count;
+    CmdDrawMeshTasksFn            draw_mesh_tasks;
+    CmdDrawMeshTasksIndirectFn    draw_mesh_tasks_indirect;
+    CmdDrawMeshTasksIndirectCountFn draw_mesh_tasks_indirect_count;
     CmdDispatchIndirectFn         dispatch_indirect;
     CmdDrawGeneratedFn            draw_generated;
     CmdDrawIndexedGeneratedFn     draw_indexed_generated;
@@ -802,6 +826,15 @@ fn gpu::PipelineHandle? vk_create_graphics_pipeline(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
+fn gpu::PipelineHandle? vk_create_mesh_pipeline(
+    VkDeviceState* state,
+    gpu::MeshPipelineDesc* desc,
+) {
+    (void)state;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
 fn gpu::PipelineHandle? vk_create_ray_tracing_pipeline(
     VkDeviceState* state,
     gpu::RayTracingPipelineDesc* desc,
@@ -950,6 +983,16 @@ fn bool? vk_adapter_supports_ray_tracing_pipelines(
         return gpu::INVALID_ARGUMENT~;
     }
     return configured_ray_tracing_pipeline_support;
+}
+
+fn bool? vk_adapter_supports_mesh_shaders(
+    VkRuntimeState* state,
+    uint adapter_index,
+) {
+    if (state == null || adapter_index >= state.adapter_count) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return true;
 }
 
 fn bool ray_tracing_queue_request_compatible(gpu::QueueRequest* request) {
@@ -1852,6 +1895,16 @@ fn gpu::Device? create_vk_device(
             }
             : {},
         .ray_queries = { .enabled = normalized.enable_ray_queries },
+        .mesh_shaders = normalized.enable_mesh_shaders
+            ? (gpu::MeshShaderCaps){
+                .enabled                    = true,
+                .task_shaders               = true,
+                .max_task_work_group_count  = { 65535, 65535, 65535 },
+                .max_mesh_work_group_count  = { 65535, 65535, 65535 },
+                .max_mesh_output_vertices   = 256,
+                .max_mesh_output_primitives = 256,
+            }
+            : {},
         .ray_tracing_pipelines = normalized.enable_ray_tracing_pipelines
             ? (gpu::RayTracingPipelineCaps){
                 .enabled = true,
