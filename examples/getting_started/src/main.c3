@@ -46,11 +46,11 @@ fn void? run() {
         gpu::allocate_mapped_memory(&device, &input_desc)!;
     gpu::GpuAllocation input_allocation = input.span.allocation();
     defer (void)gpu::free_allocation(&device, &input_allocation);
-    gpu::GpuAllocation output =
-        gpu::allocate_memory(&device, &output_desc)!;
-    defer (void)gpu::free_allocation(&device, &output);
+    gpu::MappedGpuSpan output =
+        gpu::allocate_mapped_memory(&device, &output_desc)!;
+    gpu::GpuAllocation output_allocation = output.span.allocation();
+    defer (void)gpu::free_allocation(&device, &output_allocation);
 
-    gpu::GpuSpan out_span = gpu::get_allocation_span(&device, output)!;
     float* in_data = (float*)input.bytes.ptr;
     for (uint i = 0; i < COUNT; i++) in_data[i] = (float)i;
     gpu::flush_mapped_span(&device, input.span)!;
@@ -81,11 +81,11 @@ fn void? run() {
         device:      &device,
         pipeline:    pipeline,
         input_span:  input.span,
-        output_span: out_span,
+        output_span: output.span,
         root:        root,
     )!;
-    gpu::invalidate_mapped_span(&device, out_span)!;
-    float* out_data = (float*)gpu::get_span_mapping(&device, out_span)!.ptr;
+    gpu::invalidate_mapped_span(&device, output.span)!;
+    float* out_data = (float*)output.bytes.ptr;
     for (uint i = 0; i < COUNT; i++) {
         if (out_data[i] != (float)i * 2.0f) return gpu::INVALID_ARGUMENT~;
     }

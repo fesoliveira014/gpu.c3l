@@ -1,6 +1,7 @@
 module gpu::internal @private;
 
 import gpu;
+import gpu::internal::vk @public;
 
 <* Overflow-safe bounds check: offset + size must fit in limit. A zero size
    only checks the offset; each caller defines what zero means. *>
@@ -101,4 +102,19 @@ fn void? validate_texture_allocation(
         *alignment = max(*alignment, requirements.alignment);
     }
     if (compatibility == 0) return gpu::INVALID_ARGUMENT~;
+}
+
+fn MappedGpuSpan? mapped_allocation_views(Device* device, GpuAllocation allocation) @private {
+    GpuSpan span = gpu::get_allocation_span(device, allocation)!;
+    return gpu::mapped_gpu_span(device, span);
+}
+
+<* Free an allocation whose public creation could not complete. Proceeds on a
+   lost device so the token is not stranded. *>
+fn void release_incomplete_allocation(Device* device, GpuAllocation allocation) @private {
+    DeviceOperation? operation = begin_device_operation(device, allow_lost: true);
+    if (catch operation) return;
+    defer end_device_operation(&operation);
+    if (catch gpu::internal::vk::vk_free_allocation(operation.state, allocation)) return;
+    release_device_children(&operation);
 }

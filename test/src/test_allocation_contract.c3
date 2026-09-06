@@ -129,6 +129,13 @@ fn void mapped_allocation_composes_views_and_frees_through_span() @test {
     assert(@catch(gpu::allocate_mapped_memory(&device, &private_desc)) == gpu::INVALID_ARGUMENT,
         "an unmapped class faults before allocating");
     assert(!state.allocation_live, "a rejected class leaves nothing allocated");
+
+    state.mapping_unavailable = true;
+    assert(@catch(gpu::allocate_mapped_memory(&device, &desc)) == gpu::BACKEND_ERROR,
+        "a mapping failure after allocation propagates the mapping fault");
+    assert(!state.allocation_live && state.allocation_free_calls == 2,
+        "a mapping failure after allocation frees the allocation");
+    state.mapping_unavailable = false;
     gpu::destroy_device(&device)!!;
 }
 

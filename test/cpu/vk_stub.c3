@@ -416,6 +416,7 @@ struct VkDeviceState @public {
     bool                 destroy_busy;
     bool                 publish_child_on_check;
     bool                 allocation_block_free;
+    bool                 mapping_unavailable;
     bool                 allocation_out_of_memory;
     bool                 texture_out_of_memory;
     bool                 block_memory_stats;
@@ -1461,6 +1462,7 @@ fn char[]? vk_get_span_mapping(VkDeviceState* state, gpu::GpuSpan span) {
         || state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE) {
         return gpu::INVALID_ARGUMENT~;
     }
+    if (state.mapping_unavailable) return gpu::BACKEND_ERROR~;
     if (!gpu::internal::range_fits(
         state.allocation_desc.size,
         span.offset,

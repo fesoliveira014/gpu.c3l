@@ -718,17 +718,12 @@ fn MappedGpuSpan? allocate_mapped_memory(Device* device, AllocationDesc* desc) {
         return INVALID_ARGUMENT~;
     }
     GpuAllocation allocation = allocate_memory(device, desc)!;
-    MappedGpuSpan? mapped = mapped_allocation(device, allocation);
+    MappedGpuSpan? mapped = gpu::internal::mapped_allocation_views(device, allocation);
     if (catch err = mapped) {
-        (void)free_allocation(device, &allocation);
+        gpu::internal::release_incomplete_allocation(device, allocation);
         return err~;
     }
     return mapped;
-}
-
-fn MappedGpuSpan? mapped_allocation(Device* device, GpuAllocation allocation) @private {
-    GpuSpan span = get_allocation_span(device, allocation)!;
-    return mapped_gpu_span(device, span);
 }
 
 <* Make CPU writes to a live mapped allocation range visible to the GPU.
