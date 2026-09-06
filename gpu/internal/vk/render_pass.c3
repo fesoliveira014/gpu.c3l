@@ -216,7 +216,8 @@ fn PreparedRenderPass? lower_render_pass(
 ) {
     if (desc == null
         || desc.colors.len > gpu::MAX_COLOR_ATTACHMENTS
-        || (desc.colors.len > 0 && desc.colors.ptr == null)) {
+        || (desc.colors.len > 0 && desc.colors.ptr == null)
+        || (desc.width == 0) != (desc.height == 0)) {
         return gpu::INVALID_ARGUMENT~;
     }
     CommandRecord* record = commands;

@@ -2950,6 +2950,9 @@ fn void trusted_zero_extent_pass_without_attachments_faults() @test {
     gpu::RenderPassDesc empty = {};
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &empty)) == gpu::INVALID_ARGUMENT,
         "a zero extent with no attachment faults under TRUSTED");
+    gpu::RenderPassDesc half_zero = { .width = 16 };
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &half_zero)) == gpu::INVALID_ARGUMENT,
+        "a mixed extent faults under TRUSTED");
 }
 
 fn void render_pass_color_count_limits_validate_before_lookup() @test {

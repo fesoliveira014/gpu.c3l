@@ -2212,11 +2212,12 @@ fn GraphicsState? render_geometry_state(uint width, uint height) {
 
 <* Begin a render pass without changing command-buffer graphics state.
    Preconditions: attachments, layouts, queue access, dimensions, and pass phase are valid.
-   Always checked: token phase, host-safe descriptor shape, identities, and safe lowering.
+   Always checked: token phase, host-safe descriptor shape, a render area zero in
+   exactly one dimension, identities, and safe lowering.
    FULL diagnostics: attachment, usage, queue, compatibility, and render-area misuse.
 
    @param commands : "Live recording token outside a render pass."
-   @param desc : "Borrowed attachment and render-area description copied into the command stream."
+   @param desc : "Borrowed attachment and render-area description copied into the command stream; a zero extent selects the first attachment's extent."
    @return "Success, or a recoverable command, validation, ownership, compatibility, or device fault." *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
