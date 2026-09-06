@@ -773,7 +773,9 @@ fn void? trusted_barrier_with_ops(
     gpu::Barrier* barrier,
     BarrierEmitOps* ops,
 ) {
-    if (barrier == null) return gpu::INVALID_ARGUMENT~;
+    if (barrier == null || barrier.before.index_input) {
+        return gpu::INVALID_ARGUMENT~;
+    }
     CommandRecord* record = commands;
     if (record.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;

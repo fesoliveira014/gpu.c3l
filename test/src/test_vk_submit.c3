@@ -1071,10 +1071,10 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
         .readiness_before = { .index_input },
     };
     assert(@catch(vk::vk_submit_with(
-        state,
-        graphics,
-        &index_input_stage,
-        &accept_swapchain_submit,
+        state:     state,
+        queue:     graphics,
+        desc:      &index_input_stage,
+        submit_fn: &accept_swapchain_submit,
     )) == gpu::INVALID_ARGUMENT,
         "readiness rejects an index input destination stage");
     assert(accepted_swapchain_submit_calls == 0,

@@ -2553,7 +2553,8 @@ fn TextureBarrier? texture_transition(TextureHandle texture, TextureState before
 
 <* Record a global semantic execution and memory barrier.
    Preconditions: stages are known, consistent, and queue-supported.
-   Always checked: token identity, authoritative phase, and required pointer.
+   Always checked: token identity, authoritative phase, required pointer, and
+   `index_input` on the source side.
    FULL diagnostics: stage and queue-support misuse.
 
    @param commands : "Live recording token."

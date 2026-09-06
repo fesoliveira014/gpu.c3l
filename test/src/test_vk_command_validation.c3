@@ -305,6 +305,26 @@ fn void index_input_source_barrier_faults() @test {
     gpu::cmd_barrier(&commands, &reversed)!!;
 }
 
+fn void index_input_source_barrier_faults_under_trusted() @test {
+    gpu::RuntimeDesc desc = {
+        .contract_validation      = gpu::ContractValidation.TRUSTED,
+        .enable_vulkan_validation = true,
+        .application_name  = "gpu_trusted_index_input_test",
+    };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::Barrier barrier = { .before = { .index_input }, .after = { .compute } };
+    assert(@catch(gpu::cmd_barrier(&commands, &barrier)) == gpu::INVALID_ARGUMENT,
+        "trusted recording rejects index_input on the source side");
+    gpu::Barrier reversed = { .before = { .compute }, .after = { .index_input } };
+    gpu::cmd_barrier(&commands, &reversed)!!;
+}
+
 fn void pipeline_only_build_to_trace_barrier_keeps_acceleration_read() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
