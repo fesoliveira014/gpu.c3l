@@ -38,3 +38,17 @@ $assert $reflect(ShadowProbeRoot.ref_lo).offset == 24;
 $assert $reflect(ShadowProbeRoot.ref_hi).offset == 28;
 $assert $reflect(ShadowProbeRoot._pad0).offset == 32;
 $assert $reflect(ShadowProbeRoot._pad1).offset == 36;
+
+struct FetchStencilRoot {
+    GpuAddress   out_gpu;
+    TextureIndex texture_index;
+    uint         x;
+    uint         y;
+    uint         _pad0;
+}
+$assert FetchStencilRoot::size == 24;
+$assert $reflect(FetchStencilRoot.out_gpu).offset == 0;
+$assert $reflect(FetchStencilRoot.texture_index).offset == 8;
+$assert $reflect(FetchStencilRoot.x).offset == 12;
+$assert $reflect(FetchStencilRoot.y).offset == 16;
+$assert $reflect(FetchStencilRoot._pad0).offset == 20;

@@ -172,7 +172,14 @@ store_storage_texture(root.image, coord, v * 2.0);
 
 // depth compare; sampler must have compare_enable
 float lit = sample_shadow_2d(root.shadow_map, root.shadow_sampler, vec3(uv, depth));
+
+// integer fetch: a stencil-aspect view or an integer color format
+uint id = gpu_fetch_uint(root.stencil_mask, ivec2(coord), 0);
 ```
+
+`gpu_fetch_uint` reads binding 0 through a `utexture2D` alias, the same
+aliasing the shadow sampler uses on binding 2, so integer-format textures
+published with `create_texture_view` are readable without a sampler.
 
 3D variants are `sample_texture_3d`, `sample_texture_3d_implicit`,
 `load_storage_texture_3d`, and `store_storage_texture_3d`. Cube views are

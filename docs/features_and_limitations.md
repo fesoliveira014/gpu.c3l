@@ -94,7 +94,10 @@ by CPU tests but has not run on hardware that reports the capability.
   cube-array views, and no format reinterpretation.
 - Multisample textures are 2D attachments with one mip. They are resolved,
   not sampled or copied.
-- Depth format is `D32_FLOAT`. There is no stencil.
+- Depth-stencil formats are `D32_FLOAT`, `D24_UNORM_S8_UINT`,
+  `D32_FLOAT_S8_UINT`, and `S8_UINT` where the device reports them. The two
+  aspects of a combined texture share one layout and transition together;
+  a copy or sampled view of a combined texture selects one aspect.
 - Block-compressed textures are sampled-only, single-sampled 2D images.
   They are not storage images, attachments, or sparse textures, and the
   library never encodes, decodes, or generates mips.

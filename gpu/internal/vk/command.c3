@@ -1528,8 +1528,11 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
     uint width,
     uint height,
     uint depth,
+    gpu::TextureAspect aspect = gpu::TextureAspect.AUTO,
 ) @private {
     if (mip >= slot.mip_levels) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::internal::texture_aspect_valid(aspect)) return gpu::INVALID_ARGUMENT~;
+    vk::ImageAspectFlags aspect_mask = resolve_aspect(slot.format, aspect)!;
     MipExtent extent = texture_mip_extent(slot, mip);
     bool is_3d = texture_slot_is_3d(slot);
     if (x > extent.width || y > extent.height) {
@@ -1567,7 +1570,7 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
         return gpu::INVALID_ARGUMENT~;
     }
 
-    gpu::internal::FormatBlock block = gpu::internal::format_block(slot.format);
+    gpu::internal::FormatBlock block = gpu::internal::format_aspect_block(slot.format, aspect);
     if (block.bytes == 0) return gpu::INVALID_ARGUMENT~;
     if (x % block.width != 0 || y % block.height != 0) {
         return gpu::INVALID_ARGUMENT~;
@@ -1600,7 +1603,7 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
         .buffer_row_length   = row_length_texels,
         .buffer_image_height = 0,
         .image_subresource   = {
-            .aspect_mask      = format_aspect(slot.format),
+            .aspect_mask      = aspect_mask,
             .mip_level        = mip,
             .base_array_layer = is_3d ? 0 : base_layer,
             .layer_count      = is_3d ? 1 : layers,
@@ -1654,6 +1657,7 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
             width:             desc.width,
             height:            desc.height,
             depth:             desc.depth,
+            aspect:            desc.aspect,
         )!,
     };
 }
@@ -1727,6 +1731,7 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
             width:             desc.width,
             height:            desc.height,
             depth:             desc.depth,
+            aspect:            desc.aspect,
         )!,
     };
 }

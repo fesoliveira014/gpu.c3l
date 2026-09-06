@@ -74,13 +74,14 @@ const uint TEXTURE_FREE_NONE = 0;
 const sz INITIAL_CACHED_VIEW_CAPACITY = 8;
 
 struct CachedView {
-    vk::ImageView     view;
-    uint              base_mip;
-    uint              mip_count;
-    uint              base_layer;
-    uint              layer_count;
-    vk::ImageViewType view_type;
-    bool              used;
+    vk::ImageView       view;
+    uint                base_mip;
+    uint                mip_count;
+    uint                base_layer;
+    uint                layer_count;
+    vk::ImageViewType   view_type;
+    vk::ImageAspectFlags aspect;
+    bool                used;
 }
 
 struct CachedViewCreation {
@@ -253,6 +254,9 @@ fn vk::Format format_to_vk(gpu::Format format) {
         case gpu::Format.RG32_FLOAT:        return vk::Format.R32G32_SFLOAT;
         case gpu::Format.RGBA32_FLOAT:      return vk::Format.R32G32B32A32_SFLOAT;
         case gpu::Format.D32_FLOAT:         return vk::Format.D32_SFLOAT;
+        case gpu::Format.D24_UNORM_S8_UINT: return vk::Format.D24_UNORM_S8_UINT;
+        case gpu::Format.D32_FLOAT_S8_UINT: return vk::Format.D32_SFLOAT_S8_UINT;
+        case gpu::Format.S8_UINT:           return vk::Format.S8_UINT;
         case gpu::Format.BC1_RGBA_UNORM:    return vk::Format.BC1_RGBA_UNORM_BLOCK;
         case gpu::Format.BC1_RGBA_SRGB:     return vk::Format.BC1_RGBA_SRGB_BLOCK;
         case gpu::Format.BC3_UNORM:         return vk::Format.BC3_UNORM_BLOCK;
@@ -342,7 +346,7 @@ fn gpu::TextureFormatSupport? vk_get_texture_format_support(
 
     gpu::TextureUsage attachment_usage;
     bool attachment_supported;
-    if (format == gpu::Format.D32_FLOAT) {
+    if (gpu::internal::format_is_depth_stencil(format)) {
         attachment_usage = { .depth_attach };
         attachment_supported = support.features.depth_attach;
     } else {
@@ -480,12 +484,38 @@ fn MipExtent texture_mip_extent(TextureSlot* slot, uint mip) {
     };
 }
 
+<* Every aspect of the format: attachment views, barrier ranges, default views. *>
 fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
-    switch (format) {
-        case gpu::Format.D32_FLOAT:
+    uint mask;
+    if (gpu::internal::format_has_depth(format)) {
+        mask |= (uint)vk::ImageAspectFlagBits.DEPTH_BIT;
+    }
+    if (gpu::internal::format_has_stencil(format)) {
+        mask |= (uint)vk::ImageAspectFlagBits.STENCIL_BIT;
+    }
+    if (mask == 0) mask = (uint)vk::ImageAspectFlagBits.COLOR_BIT;
+    return (vk::ImageAspectFlags)mask;
+}
+
+<* One aspect selected by a sampled view or a copy. *>
+fn vk::ImageAspectFlags? resolve_aspect(
+    gpu::Format format,
+    gpu::TextureAspect aspect,
+) @private {
+    bool depth = gpu::internal::format_has_depth(format);
+    bool stencil = gpu::internal::format_has_stencil(format);
+    switch (aspect) {
+        case gpu::TextureAspect.AUTO:
+            if (depth && stencil) return gpu::INVALID_ARGUMENT~;
+            return format_aspect(format);
+        case gpu::TextureAspect.DEPTH:
+            if (!depth) return gpu::INVALID_ARGUMENT~;
             return (vk::ImageAspectFlags)vk::ImageAspectFlagBits.DEPTH_BIT;
+        case gpu::TextureAspect.STENCIL:
+            if (!stencil) return gpu::INVALID_ARGUMENT~;
+            return (vk::ImageAspectFlags)vk::ImageAspectFlagBits.STENCIL_BIT;
         default:
-            return (vk::ImageAspectFlags)vk::ImageAspectFlagBits.COLOR_BIT;
+            return gpu::INVALID_ARGUMENT~;
     }
 }
 
@@ -548,7 +578,12 @@ fn vk::ImageView? resolve_texture_view_tracked(
     CachedViewCreation* creation,
 ) @private {
     *creation = {};
-    if (view == null) return slot.default_view;
+    bool combined = gpu::internal::format_is_combined_depth_stencil(slot.format);
+    if (view == null) {
+        if (combined) return gpu::INVALID_ARGUMENT~;
+        return slot.default_view;
+    }
+    vk::ImageAspectFlags aspect = resolve_aspect(slot.format, view.aspect)!;
     if (view.base_mip >= slot.mip_levels || view.base_layer >= slot.array_layers) return gpu::INVALID_ARGUMENT~;
 
     uint mip_count   = view.mip_count == 0 ? slot.mip_levels - view.base_mip : view.mip_count;
@@ -571,13 +606,14 @@ fn vk::ImageView? resolve_texture_view_tracked(
                 : vk::ImageViewType.TYPE_2D;
     bool full_range = view.base_mip == 0 && mip_count == slot.mip_levels
         && view.base_layer == 0 && layer_count == slot.array_layers;
-    if (full_range && !view.cube) return slot.default_view;
+    if (full_range && !view.cube && !combined) return slot.default_view;
 
     foreach (&cached : slot.views) {
         if (cached.used
             && cached.base_mip == view.base_mip && cached.mip_count == mip_count
             && cached.base_layer == view.base_layer && cached.layer_count == layer_count
-            && cached.view_type == view_type) {
+            && cached.view_type == view_type
+            && cached.aspect == aspect) {
             return cached.view;
         }
     }
@@ -595,7 +631,7 @@ fn vk::ImageView? resolve_texture_view_tracked(
         .set_view_type(view_type)
         .set_format(format_to_vk(slot.format))
         .set_subresource_range({
-            .aspect_mask      = format_aspect(slot.format),
+            .aspect_mask      = aspect,
             .base_mip_level   = view.base_mip,
             .level_count      = mip_count,
             .base_array_layer = view.base_layer,
@@ -639,6 +675,7 @@ fn vk::ImageView? resolve_texture_view_tracked(
         .base_layer  = view.base_layer,
         .layer_count = layer_count,
         .view_type   = view_type,
+        .aspect      = aspect,
         .used        = true,
     };
     return image_view;

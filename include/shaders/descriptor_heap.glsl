@@ -21,6 +21,7 @@
 
 #extension GL_EXT_nonuniform_qualifier : require
 #extension GL_EXT_shader_image_load_formatted : require
+#extension GL_EXT_samplerless_texture_functions : require
 
 layout(set = 0, binding = 0) uniform texture2D gpu_texture_heap[];
 layout(set = 0, binding = 1) uniform image2D gpu_storage_heap[];
@@ -31,8 +32,16 @@ layout(set = 0, binding = 6) uniform textureCube gpu_texture_cube_heap[];
 // Aliased view of the sampler binding for depth-compare (shadow) access;
 // SPIR-V samplers are untyped, so both views share binding 2.
 layout(set = 0, binding = 2) uniform samplerShadow gpu_shadow_sampler_heap[];
+// Aliased integer view of the sampled binding for stencil and integer color
+// formats; sampled images are typed per access, so both views share binding 0.
+layout(set = 0, binding = 0) uniform utexture2D gpu_utexture_heap[];
 
 #define GPU_HEAP_SLOT(index) ((index) - 1u)
+
+// Integer texel fetch: stencil aspects and integer color formats.
+uint gpu_fetch_uint(uint tex_index, ivec2 texel, int lod) {
+    return texelFetch(gpu_utexture_heap[nonuniformEXT(GPU_HEAP_SLOT(tex_index))], texel, lod).x;
+}
 
 // Explicit-LOD sampling: usable from compute, where derivatives don't exist.
 vec4 sample_texture_2d(uint tex_index, uint smp_index, vec2 uv) {

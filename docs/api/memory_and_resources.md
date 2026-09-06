@@ -133,7 +133,13 @@ allocation. It fails with `RESOURCE_IN_USE` while a view or attachment view
 is live.
 
 Limits: 2D and 3D only; multisample textures are single-mip attachments;
-depth is `D32_FLOAT`; no stencil.
+depth-stencil formats are 2D, single-sampled or attachment-only, never
+storage or cube. `DeviceCaps.depth_stencil_format` names the first supported
+combined format. A sampled view of a combined format sets
+`TextureViewDesc.aspect` to `DEPTH` or `STENCIL`; copies of a combined format
+set the same field on the copy descriptor and size buffers with
+`texture_mip_aspect_bytes`. `TextureBarrier.view.aspect` stays `AUTO`: both
+aspects move together.
 
 A cube map is a 2D texture with `cube_compatible` set: equal width and
 height, single-sampled, and a layer count that is a multiple of six. Layers

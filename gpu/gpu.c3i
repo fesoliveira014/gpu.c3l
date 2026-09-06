@@ -449,6 +449,8 @@ struct DeviceCaps {
     // 0 means anisotropic filtering is unsupported.
     float max_sampler_anisotropy;
     SparseTextureCaps sparse_textures;
+    // First of D24_UNORM_S8_UINT, D32_FLOAT_S8_UINT with depth_attach support.
+    Format depth_stencil_format;
 }
 
 <* Selects library contract behavior; this is independent of Vulkan validation
@@ -805,6 +807,18 @@ enum Format : int {
     BC6H_UFLOAT,
     BC7_UNORM,
     BC7_SRGB,
+    D24_UNORM_S8_UINT,
+    D32_FLOAT_S8_UINT,
+    S8_UINT,
+}
+
+<* Aspect of a depth-stencil texture selected by a sampled view or a copy.
+   AUTO is color for color formats, depth for depth-only formats, stencil for
+   S8_UINT, and INVALID_ARGUMENT for combined formats. *>
+enum TextureAspect : int {
+    AUTO,
+    DEPTH,
+    STENCIL,
 }
 
 <* Rasterization samples per texel. The zero value is single-sampled. *>
@@ -988,6 +1002,8 @@ struct TextureViewDesc {
     uint   layer_count;
     // Sampled cube of the six layers from base_layer.
     bool   cube;
+    // Aspect for sampled views of depth-stencil textures; AUTO in barriers.
+    TextureAspect aspect;
 }
 
 <* Semantic parameters for intern_sampler. *>
@@ -1138,6 +1154,38 @@ struct DepthState {
     bool      test_enable;
     bool      write_enable;
     CompareOp compare;
+}
+
+<* Stencil result operation. *>
+enum StencilOp : int {
+    KEEP,
+    ZERO,
+    REPLACE,
+    INCREMENT_CLAMP,
+    DECREMENT_CLAMP,
+    INVERT,
+    INCREMENT_WRAP,
+    DECREMENT_WRAP,
+}
+
+<* Per-face stencil test. The zero value never passes; set `compare`
+   explicitly. *>
+struct StencilFaceState {
+    CompareOp compare;
+    StencilOp fail;
+    StencilOp pass;
+    StencilOp depth_fail;
+    uint      compare_mask;
+    uint      write_mask;
+    uint      reference;
+}
+
+<* Stencil state; the zero value means stencil off. Face state is emitted
+   only when `test_enable` is set. *>
+struct StencilState {
+    bool             test_enable;
+    StencilFaceState front;
+    StencilFaceState back;
 }
 
 <* Blend equation for one color target; disabled is the zero value. *>
@@ -1340,6 +1388,7 @@ struct GraphicsState {
     ScissorRect        scissor;
     DynamicRasterState raster;
     DepthState         depth;
+    StencilState       stencil;
     ColorState         color;
 }
 
@@ -1471,6 +1520,8 @@ struct BufferTextureCopyDesc {
     uint          width;
     uint          height;
     uint          depth;
+    // Required for combined depth-stencil formats.
+    TextureAspect aspect;
 }
 
 <* Texture-to-buffer readback region with the same dimension-specific
@@ -1488,6 +1539,8 @@ struct TextureBufferCopyDesc {
     uint          width;
     uint          height;
     uint          depth;
+    // Required for combined depth-stencil formats.
+    TextureAspect aspect;
 }
 
 const uint DEFAULT_ATTACHMENT_VIEW_CAPACITY = 4096;
@@ -1513,9 +1566,10 @@ union ClearColor {
 }
 $assert ClearColor::size == 16;
 
-<* Depth clear value; depth in [0, 1]. *>
+<* Depth and stencil clear values; depth in [0, 1]. *>
 struct ClearDepth {
     float depth;
+    uint  stencil;
 }
 
 <* One texture subresource prepared for render-pass attachment use.
@@ -1535,11 +1589,15 @@ struct ColorTargetDesc {
     ClearColor           clear;
 }
 
-<* One depth attachment. `clear` applies only with LoadOp.CLEAR. *>
+<* One depth-stencil attachment. The depth ops apply to the depth aspect and
+   the stencil ops to the stencil aspect; each `clear` value applies only with
+   its LoadOp.CLEAR. Zero stencil ops are LOAD and STORE. *>
 struct DepthTargetDesc {
     AttachmentViewHandle view;
     LoadOp               load_op;
     StoreOp              store_op;
+    LoadOp               stencil_load_op;
+    StoreOp              stencil_store_op;
     ClearDepth           clear;
 }
 

@@ -773,10 +773,29 @@ fn uint texture_mip_dimension(uint size, uint mip) {
    @param mip : "Zero-based mip level below the description's mip count."
    @return "The byte footprint, or INVALID_ARGUMENT for a null or undefined-format description or a missing mip." *>
 fn usz? texture_mip_bytes(TextureDesc* desc, uint mip) {
+    return texture_mip_aspect_bytes(desc, mip, TextureAspect.AUTO);
+}
+
+<* Tightly packed bytes of one aspect of one array layer of a mip. The depth
+   aspect of a combined format is 4 bytes per texel and stencil is 1; `AUTO`
+   faults for a combined format.
+
+   @param desc : "Borrowed texture description."
+   @param mip : "Zero-based mip level below the description's mip count."
+   @param aspect : "Aspect to size; AUTO for single-aspect formats."
+   @return "The byte footprint, or INVALID_ARGUMENT for a null description, a missing mip, or an aspect the format cannot select." *>
+fn usz? texture_mip_aspect_bytes(TextureDesc* desc, uint mip, TextureAspect aspect) {
     if (desc == null || mip >= gpu::internal::texture_mip_levels(desc)) {
         return INVALID_ARGUMENT~;
     }
-    gpu::internal::FormatBlock block = gpu::internal::format_block(desc.format);
+    if (!gpu::internal::texture_aspect_valid(aspect)) return INVALID_ARGUMENT~;
+    if (aspect == TextureAspect.DEPTH && !gpu::internal::format_has_depth(desc.format)) {
+        return INVALID_ARGUMENT~;
+    }
+    if (aspect == TextureAspect.STENCIL && !gpu::internal::format_has_stencil(desc.format)) {
+        return INVALID_ARGUMENT~;
+    }
+    gpu::internal::FormatBlock block = gpu::internal::format_aspect_block(desc.format, aspect);
     if (block.bytes == 0) return INVALID_ARGUMENT~;
     usz row_blocks = ((usz)texture_mip_dimension(desc.width, mip) + block.width - 1)
         / block.width;
@@ -2181,6 +2200,25 @@ fn void? destroy_attachment_view(Device* device, AttachmentViewHandle view) {
     )!;
     gpu::internal::vk::vk_destroy_attachment_view(operation.state, view)!;
     gpu::internal::release_device_children(&operation);
+}
+
+<* A stencil face that keeps on fail and depth-fail with full masks. Covers
+   writing an id (`ALWAYS` / `REPLACE`) and masking by id (`EQUAL` / `KEEP`).
+
+   @param compare : "Stencil comparison."
+   @param pass : "Operation when stencil and depth pass."
+   @param reference : "Reference value for the comparison and REPLACE."
+   @return "A caller-owned face state." *>
+fn StencilFaceState stencil_face(CompareOp compare, StencilOp pass, uint reference) {
+    return {
+        .compare      = compare,
+        .fail         = StencilOp.KEEP,
+        .pass         = pass,
+        .depth_fail   = StencilOp.KEEP,
+        .compare_mask = 0xff,
+        .write_mask   = 0xff,
+        .reference    = reference,
+    };
 }
 
 <* Construct full-area viewport/scissor with zero raster/depth state.

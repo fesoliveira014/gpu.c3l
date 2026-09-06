@@ -1281,6 +1281,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         max_timeline_difference: &state.max_timeline_semaphore_value_difference,
         non_coherent_atom_size:  &state.non_coherent_atom_size,
     );
+    state.caps.depth_stencil_format = select_depth_stencil_format(state.physical_device);
     state.caps.timestamps = query_timestamp_caps(
         state.physical_device,
         &families,
@@ -2107,4 +2108,24 @@ fn gpu::DeviceCaps build_caps(
         .max_sampler_lod_bias       = props.limits.max_sampler_lod_bias,
         .max_sampler_anisotropy     = base.sampler_anisotropy != 0 ? props.limits.max_sampler_anisotropy : 0.0f,
     };
+}
+
+fn gpu::Format select_depth_stencil_format(vk::PhysicalDevice physical_device) @private {
+    gpu::Format[2] candidates = {
+        gpu::Format.D24_UNORM_S8_UINT,
+        gpu::Format.D32_FLOAT_S8_UINT,
+    };
+    foreach (format : candidates) {
+        vk::FormatProperties properties;
+        vk::get_physical_device_format_properties(
+            physical_device,
+            format_to_vk(format),
+            &properties,
+        );
+        if (((uint)properties.optimal_tiling_features
+            & (uint)vk::FormatFeatureFlagBits.DEPTH_STENCIL_ATTACHMENT_BIT) != 0) {
+            return format;
+        }
+    }
+    return gpu::Format.UNDEFINED;
 }
