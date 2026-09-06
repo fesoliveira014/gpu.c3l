@@ -159,10 +159,12 @@ fn void emit_raster_state(
     gpu::DynamicRasterState* raster,
 ) @private {
     CommandRecord* record = commands;
-    vk::cmd_set_primitive_topology(
-        record.command_buffer,
-        topology_to_vk(raster.topology),
-    );
+    if (record.logical_pipeline.kind != PipelineKind.MESH) {
+        vk::cmd_set_primitive_topology(
+            record.command_buffer,
+            topology_to_vk(raster.topology),
+        );
+    }
     vk::cmd_set_cull_mode(
         record.command_buffer,
         (vk::CullModeFlags)cull_mode_to_vk(raster.cull_mode),
