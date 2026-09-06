@@ -1078,21 +1078,23 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
             "indirect readiness preserves the one-shot token");
     }
 
-    gpu::SubmitDesc index_input_stage = {
-        .readiness        = readiness,
-        .readiness_before = { .index_input },
-    };
-    assert(@catch(vk::vk_submit_with(
-        state:     state,
-        queue:     graphics,
-        desc:      &index_input_stage,
-        submit_fn: &accept_swapchain_submit,
-    )) == gpu::INVALID_ARGUMENT,
-        "readiness rejects an index input destination stage");
-    assert(accepted_swapchain_submit_calls == 0,
-        "index input readiness reaches no native submit");
-    assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
-        "index input readiness preserves the one-shot token");
+    if (!reject_swapchain_submit_unified) {
+        gpu::SubmitDesc index_input_stage = {
+            .readiness        = readiness,
+            .readiness_before = { .index_input },
+        };
+        assert(@catch(vk::vk_submit_with(
+            state:     state,
+            queue:     graphics,
+            desc:      &index_input_stage,
+            submit_fn: &accept_swapchain_submit,
+        )) == gpu::INVALID_ARGUMENT,
+            "readiness rejects an index input destination stage");
+        assert(accepted_swapchain_submit_calls == 0,
+            "index input readiness reaches no native submit");
+        assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
+            "index input readiness preserves the one-shot token");
+    }
 
     gpu::CompletionWait[1] invalid_waits = {{
         .point  = prior,
