@@ -83,6 +83,12 @@ struct TextureView {
 }
 $assert TextureView::size <= ulong::size * 2;
 
+<* `count` contiguous ascending texture-heap slots owned by the caller. *>
+struct TextureIndexRange {
+    TextureIndex base;
+    uint         count;
+}
+
 <* Owning CPU token for one published top-level acceleration structure. *>
 struct AccelerationStructureView {
     ulong                      owner;

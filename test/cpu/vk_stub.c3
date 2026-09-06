@@ -759,6 +759,44 @@ fn void? vk_create_texture_views(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
+fn gpu::TextureIndexRange? vk_reserve_texture_indices(VkDeviceState* state, uint count) {
+    (void)state;
+    (void)count;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_release_texture_indices(VkDeviceState* state, gpu::TextureIndexRange range) {
+    (void)state;
+    (void)range;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::TextureView? vk_create_texture_view_at(
+    VkDeviceState* state,
+    gpu::TextureIndex slot,
+    gpu::TextureHandle texture,
+    gpu::TextureViewDesc* desc,
+) {
+    (void)state;
+    (void)slot;
+    (void)texture;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_update_texture_view(
+    VkDeviceState* state,
+    gpu::TextureView* view,
+    gpu::TextureHandle texture,
+    gpu::TextureViewDesc* desc,
+) {
+    (void)state;
+    (void)view;
+    (void)texture;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
 fn gpu::SamplerIndex? vk_intern_sampler(
     VkDeviceState* state,
     gpu::SamplerDesc* desc,

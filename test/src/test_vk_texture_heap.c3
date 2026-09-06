@@ -1041,3 +1041,168 @@ fn void anisotropy_range_validated() @test {
     assert(over_limit_fault == gpu::INVALID_ARGUMENT,
         "max_anisotropy above the reported limit faults INVALID_ARGUMENT");
 }
+
+fn void updated_view_samples_new_texture_at_same_index() @test {
+    gpu::RuntimeDesc device_desc = {
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .enable_vulkan_validation = true,
+        .application_name  = "gpu_texture_update_test",
+    };
+    gpu::Device device = create_test_device(&device_desc)!!;
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+
+    const uint SMALL = 8;
+    gpu::TextureDesc large_desc = {
+        .access    = { .graphics, .compute, .transfer },
+        .width      = TEX_SIZE,
+        .height     = TEX_SIZE,
+        .format     = gpu::Format.RGBA8_UNORM,
+        .usage      = { .sampled, .storage },
+        .debug_name = "update_large",
+    };
+    gpu::TextureDesc small_desc = large_desc;
+    small_desc.width = SMALL;
+    small_desc.height = SMALL;
+    small_desc.debug_name = "update_small";
+    gpu::TextureHandle large = gpu::create_texture(&device, &large_desc)!!;
+    defer gpu::destroy_texture(&device, large)!!;
+    gpu::TextureHandle small = gpu::create_texture(&device, &small_desc)!!;
+    defer gpu::destroy_texture(&device, small)!!;
+    gpu::TextureView large_write = gpu::create_texture_view(&device, large, null)!!;
+    defer gpu::destroy_texture_view(&device, large_write)!!;
+    gpu::TextureView small_write = gpu::create_texture_view(&device, small, null)!!;
+    defer gpu::destroy_texture_view(&device, small_write)!!;
+
+    gpu::TextureIndexRange range = gpu::reserve_texture_indices(&device, 1)!!;
+    gpu::TextureView slot = gpu::create_texture_view_at(&device, range.base, large, null)!!;
+    gpu::TextureView stale = slot;
+
+    gpu::SamplerDesc sampler_desc = {
+        .min_filter = gpu::Filter.NEAREST,
+        .mag_filter = gpu::Filter.NEAREST,
+        .address_u  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_v  = gpu::AddressMode.CLAMP_TO_EDGE,
+        .address_w  = gpu::AddressMode.CLAMP_TO_EDGE,
+    };
+    gpu::SamplerIndex sampler = gpu::intern_sampler(&device, &sampler_desc)!!;
+    OwnedSpan output = allocate_owned_span(
+        device:       &device,
+        size:         TEX_SIZE * TEX_SIZE * 16,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "update_output",
+    )!!;
+    defer free_owned_span(&device, &output)!!;
+    gpu::ShaderDesc write_shader = { .spirv = HEAP_WRITE_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc sample_shader = { .spirv = HEAP_SAMPLE_SPIRV[..], .entry_point = "main" };
+    gpu::ComputePipelineDesc write_pipe_desc = { .shader = write_shader };
+    gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_pipe_desc)!!;
+    defer gpu::destroy_pipeline(&device, write_pipe)!!;
+    gpu::ComputePipelineDesc sample_pipe_desc = { .shader = sample_shader };
+    gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pipe_desc)!!;
+    defer gpu::destroy_pipeline(&device, sample_pipe)!!;
+
+    OwnedSpan roots = allocate_owned_span(
+        device:       &device,
+        size:         WriteRoot::size * 2 + SampleRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "update_roots",
+    )!!;
+    defer free_owned_span(&device, &roots)!!;
+    gpu::GpuSpan large_root_span = roots.span.checked_subspan(0, WriteRoot::size)!!;
+    gpu::GpuSpan small_root_span = roots.span.checked_subspan(WriteRoot::size, WriteRoot::size)!!;
+    gpu::GpuSpan sample_root_span = roots.span.checked_subspan(WriteRoot::size * 2, SampleRoot::size)!!;
+    WriteRoot* large_root = (WriteRoot*)test_span_mapping(&device, large_root_span).ptr;
+    *large_root = { .texture_index = large_write.index, .width = TEX_SIZE, .height = TEX_SIZE };
+    WriteRoot* small_root = (WriteRoot*)test_span_mapping(&device, small_root_span).ptr;
+    *small_root = { .texture_index = small_write.index, .width = SMALL, .height = SMALL };
+    SampleRoot* sample_root = (SampleRoot*)test_span_mapping(&device, sample_root_span).ptr;
+    *sample_root = {
+        .output_gpu    = test_span_address(&device, output.span),
+        .texture_index = slot.index,
+        .sampler_index = sampler,
+        .width         = TEX_SIZE,
+        .height        = TEX_SIZE,
+    };
+    gpu::flush_mapped_span(&device, roots.span)!!;
+
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&cmd)!!;
+    gpu::TextureHandle[2] targets = { large, small };
+    gpu::GpuSpan[2] write_roots = { large_root_span, small_root_span };
+    uint[2] sizes = { TEX_SIZE, SMALL };
+    for (uint i = 0; i < 2; i++) {
+        gpu::TextureBarrier to_write = gpu::texture_transition(
+            texture: targets[i],
+            before:  { .layout = gpu::TextureLayout.UNDEFINED },
+            after:   gpu::storage_at({ .compute }, { .write }),
+        )!!;
+        gpu::cmd_texture_barrier(&cmd, &to_write)!!;
+        bind_test_compute_pipeline(&cmd, write_pipe);
+        uint groups = (sizes[i] + 7) / 8;
+        gpu::cmd_dispatch(
+            commands: &cmd,
+            root:     test_span_address(&device, write_roots[i]),
+            groups:   { groups, groups, 1 },
+        )!!;
+        gpu::TextureBarrier to_read = gpu::texture_transition(
+            texture: targets[i],
+            before:  gpu::storage_at({ .compute }, { .write }),
+            after:   gpu::storage_at({ .compute }, { .read }),
+        )!!;
+        gpu::cmd_texture_barrier(&cmd, &to_read)!!;
+    }
+    bind_test_compute_pipeline(&cmd, sample_pipe);
+    gpu::cmd_dispatch(
+        commands: &cmd,
+        root:     test_span_address(&device, sample_root_span),
+        groups:   { (TEX_SIZE + 7) / 8, (TEX_SIZE + 7) / 8, 1 },
+    )!!;
+    gpu::Barrier to_host = { .before = { .compute }, .after = { .host } };
+    gpu::cmd_barrier(&cmd, &to_host)!!;
+    gpu::ExecutableCommandList first_list = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&first_list)!!;
+    gpu::ExecutableCommandList[1] first_lists = { first_list };
+    gpu::SubmitDesc first_submit = { .command_lists = first_lists[..] };
+    gpu::wait_completion(submit_test_queue(&device, gpu::QueueKind.COMPUTE, &first_submit)!!)!!;
+    assert_heap_pattern(&device, output.span, TEX_SIZE);
+
+    gpu::update_texture_view(&device, &slot, small, null)!!;
+    assert(slot.index.value == range.base.value && slot.generation != stale.generation,
+        "an update keeps the index and advances the generation");
+    assert(@catch(gpu::destroy_texture_view(&device, stale)) == gpu::INVALID_HANDLE,
+        "a token from before the update is stale");
+    assert(@catch(gpu::update_texture_view(&device, &stale, small, null)) == gpu::INVALID_HANDLE
+        && @catch(gpu::update_texture_view(&device, null, small, null)) == gpu::INVALID_HANDLE,
+        "stale and null tokens are rejected before heap mutation");
+    assert(state.textures.get(large)!!.live_descriptor_views == 1
+        && state.textures.get(small)!!.live_descriptor_views == 2,
+        "the live-view count moves to the new texture");
+
+    sample_root.width = SMALL;
+    sample_root.height = SMALL;
+    gpu::flush_mapped_span(&device, sample_root_span)!!;
+    gpu::CommandList second = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&second)!!;
+    bind_test_compute_pipeline(&second, sample_pipe);
+    gpu::cmd_dispatch(
+        commands: &second,
+        root:     test_span_address(&device, sample_root_span),
+        groups:   { (SMALL + 7) / 8, (SMALL + 7) / 8, 1 },
+    )!!;
+    gpu::cmd_barrier(&second, &to_host)!!;
+    gpu::ExecutableCommandList second_list = gpu::end_commands(&second)!!;
+    defer discard_test_executable(&second_list)!!;
+    gpu::ExecutableCommandList[1] second_lists = { second_list };
+    gpu::SubmitDesc second_submit = { .command_lists = second_lists[..] };
+    gpu::wait_completion(submit_test_queue(&device, gpu::QueueKind.COMPUTE, &second_submit)!!)!!;
+    assert_heap_pattern(&device, output.span, SMALL);
+
+    gpu::destroy_texture_view(&device, slot)!!;
+    gpu::release_texture_indices(&device, range)!!;
+}

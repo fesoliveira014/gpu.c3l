@@ -176,9 +176,27 @@ gpu::TextureView[2] views;
 gpu::create_texture_views(&device, descs[..], views[..])!;
 ```
 
-Indices are independent values. Do not compute one from another. The
+Indices are independent values unless they come from a reservation. The
 texture must have `sampled` or `storage` usage. `DESCRIPTOR_HEAP_FULL`
 means the runtime's `texture_heap_capacity` is exhausted.
+
+A reservation is `count` contiguous ascending slots that `create_texture_view`
+never hands out. Publish into a reserved slot with `create_texture_view_at`,
+and rewrite any live view's descriptor in place with `update_texture_view`:
+
+```c3
+gpu::TextureIndexRange row = gpu::reserve_texture_indices(&device, 4)!;
+gpu::TextureIndex second = { .value = row.base.value + 1 };
+gpu::TextureView slot1 = gpu::create_texture_view_at(&device, second, a, null)!;
+gpu::update_texture_view(&device, &slot1, b, null)!;   // same index, new texture
+gpu::destroy_texture_view(&device, slot1)!;            // slot stays reserved
+gpu::release_texture_indices(&device, row)!;           // every slot must be empty
+```
+
+`update_texture_view` rewrites the caller's token in place; copies taken
+before the call are stale. Releasing the lowest reservation returns it and any released
+reservations above it to the general region. The hazard rule is the same
+as for creation and destruction: no executing command may read the slot.
 
 A view with `cube` set publishes six consecutive layers from `base_layer`
 as one sampled cube. The texture must be `cube_compatible` with `sampled`

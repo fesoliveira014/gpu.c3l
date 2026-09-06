@@ -169,6 +169,32 @@ Keep `view` alive until the last shader read completes, then
 `destroy_texture_view`. The sampler index never needs freeing. Shader side:
 [textures and samplers](shader_abi.md#textures-and-samplers).
 
+## Double-buffer render-target descriptors
+
+Reserve one row of slots per frame in flight so a shader addresses a
+G-buffer texture as `row_base + attachment`, and retarget a row in place
+when the attachments are recreated:
+
+```c3
+gpu::TextureIndexRange rows = gpu::reserve_texture_indices(device, FRAMES * GBUFFER_COUNT)!;
+gpu::TextureView[FRAMES * GBUFFER_COUNT] views;
+for (uint frame = 0; frame < FRAMES; frame++) {
+    for (uint i = 0; i < GBUFFER_COUNT; i++) {
+        uint at = frame * GBUFFER_COUNT + i;
+        gpu::TextureIndex slot = { .value = rows.base.value + at };
+        views[at] = gpu::create_texture_view_at(device, slot, gbuffer[frame][i], null)!;
+    }
+}
+root.gbuffer_base = rows.base;          // shader adds frame * GBUFFER_COUNT + i
+
+// after a resize, once the old textures are no longer read:
+gpu::update_texture_view(device, &views[at], resized[frame][i], null)!;
+```
+
+Slots keep their indices across `update_texture_view`, so root records that
+store `rows.base` need no rewrite. Destroy every view before
+`release_texture_indices`.
+
 ## Write a storage image, then sample it
 
 ```c3
