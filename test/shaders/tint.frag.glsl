@@ -1,0 +1,18 @@
+#version 460
+#include "generated/shader_abi.glsl"
+#include "generated/offscreen_abi.glsl"
+#include "generated/tint_abi.glsl"
+#include "descriptor_heap.glsl"
+
+layout(location = 0) in vec2 in_uv;
+layout(location = 0) out vec4 out_color;
+
+void main() {
+    if (pc.fragment_root_gpu == 0ul) {
+        out_color = vec4(0.0);
+        return;
+    }
+
+    FragRoot frag_root = FragRoot(pc.fragment_root_gpu);
+    out_color = sample_texture_2d(frag_root.texture_index, frag_root.sampler_index, in_uv) * pc.tint;
+}

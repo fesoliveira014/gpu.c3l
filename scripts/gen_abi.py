@@ -164,7 +164,7 @@ def main():
 
     gen_gpu(gen_bin, check)
 
-    for name in ["root_pointer", "bindless", "offscreen", "depth", "indirect", "generated_work"]:
+    for name in ["root_pointer", "inline_root", "tint", "bindless", "offscreen", "depth", "indirect", "generated_work"]:
         gen(gen_bin, check, "gpu_test",
             ROOT / "test" / "src" / f"{name}_abi.c3",
             ROOT / "test" / "shaders" / "generated" / f"{name}_abi.glsl",

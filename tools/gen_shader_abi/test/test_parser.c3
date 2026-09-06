@@ -217,3 +217,48 @@ fn void non_reserved_names_still_accepted() @test {
     `, &schema, &types)!!;
     assert(schema.structs.get_ref(0).fields.get_ref(0).name == "heap_sampler");
 }
+
+fn void push_roles_parse_and_bare_push_keeps_header_meaning() @test {
+    Schema schema;
+    schema.init();
+    defer schema.free();
+    TypeTable types;
+    types.init();
+    defer types.free();
+    build_schema(`
+        abi t;
+        push compute Tint {
+            vec4 color;
+        }
+        push graphics Material {
+            uint id;
+            uint _pad0;
+            uint _pad1;
+            uint _pad2;
+            vec4 albedo;
+        }
+        push Plain {
+            GpuAddress root_gpu;
+        }
+    `, &schema, &types)!!;
+    assert(schema.structs.get_ref(0).push_role == PushRole.COMPUTE);
+    assert(schema.structs.get_ref(1).push_role == PushRole.GRAPHICS);
+    assert(schema.structs.get_ref(2).push_role == PushRole.NONE);
+    assert(schema.structs.get_ref(1).size == 32);
+}
+
+fn void oversized_push_payload_rejected() @test {
+    @expect_fault(`
+        abi t;
+        push compute Big {
+            vec4 a;
+            vec4 b;
+            vec4 c;
+            vec4 d;
+            vec4 e;
+            vec4 f;
+            vec4 g;
+            vec4 h;
+        }
+    `, LAYOUT_ERROR);
+}

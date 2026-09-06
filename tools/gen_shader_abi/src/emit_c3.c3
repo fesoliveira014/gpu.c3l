@@ -52,10 +52,13 @@ fn void emit_c3(Schema* schema, TypeTable* types, String module_name, DString* o
         foreach (&field : decl.fields) {
             out.appendf("$assert $reflect(%s.%s).offset == %d;\n", decl.name, field.name, field.offset);
         }
+        if (decl.push_role != PushRole.NONE) {
+            out.appendf("$assert %s::size <= %sINLINE_ROOT_CAPACITY;\n", decl.name, module_name == "gpu" ? "" : "gpu::");
+        }
     }
 
     foreach (&decl : schema.structs) {
-        if (decl.kind == DeclKind.PUSH) {
+        if (decl.kind == DeclKind.PUSH && decl.push_role == PushRole.NONE) {
             emit_root_abi_spec(decl, types, max_push_members, out);
         }
     }
@@ -64,7 +67,9 @@ fn void emit_c3(Schema* schema, TypeTable* types, String module_name, DString* o
 fn uint max_push_member_count(Schema* schema) {
     uint max_members = 0;
     foreach (&decl : schema.structs) {
-        if (decl.kind == DeclKind.PUSH && decl.fields.len() > max_members) {
+        if (decl.kind == DeclKind.PUSH
+            && decl.push_role == PushRole.NONE
+            && decl.fields.len() > max_members) {
             max_members = (uint)decl.fields.len();
         }
     }

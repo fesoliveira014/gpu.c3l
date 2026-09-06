@@ -9,6 +9,7 @@ alias TraceRaysPushRootFn @private = fn void (
     vk::CommandBuffer command_buffer,
     vk::PipelineLayout layout,
     gpu::GpuAddress root,
+    char[] inline_root,
 );
 
 alias TraceRaysEmitFn @private = fn void (
@@ -584,16 +585,17 @@ fn void push_trace_root_real(
     vk::CommandBuffer command_buffer,
     vk::PipelineLayout layout,
     gpu::GpuAddress root,
+    char[] inline_root,
 ) {
     (void)user_data;
     gpu::RootPush push = { .root_gpu = root };
-    vk::cmd_push_constants(
+    push_root_block(
         command_buffer: command_buffer,
+        inline_root:    inline_root,
         layout:         layout,
-        stage_flags:    ray_tracing_shader_stage_flags(),
-        offset:         0,
-        size:           gpu::RootPush::size,
-        p_values:       &push,
+        stages:         ray_tracing_shader_stage_flags(),
+        header:         &push,
+        header_size:    gpu::RootPush::size,
     );
 }
 
@@ -834,6 +836,7 @@ fn void record_trace_rays_with_ops(
         command_buffer: record.command_buffer,
         layout:         trace.state.pipeline.layout,
         root:           trace.state.root,
+        inline_root:    record.inline_root,
     );
     ops.trace(
         user_data:      ops.user_data,
@@ -858,6 +861,7 @@ fn void record_trace_rays_indirect_with_ops(
         command_buffer: record.command_buffer,
         layout:         trace.state.pipeline.layout,
         root:           trace.state.root,
+        inline_root:    record.inline_root,
     );
     ops.trace_indirect(
         user_data:       ops.user_data,
@@ -880,6 +884,7 @@ fn void record_trace_rays_indirect2_with_ops(
         command_buffer: record.command_buffer,
         layout:         trace.pipeline.layout,
         root:           trace.root,
+        inline_root:    record.inline_root,
     );
     ops.trace_indirect2(
         ops.user_data,

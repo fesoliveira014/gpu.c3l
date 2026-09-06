@@ -520,10 +520,11 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         } else if (try idx = insert_entry(
             state: state,
             value: {
-                .hash     = hash,
-                .key      = key,
-                .pipeline = pipeline,
-                .layout   = state.graphics_layout,
+                .hash            = hash,
+                .key             = key,
+                .pipeline        = pipeline,
+                .layout          = state.graphics_layout,
+                .push_block_size = max(vertex_shader.push_block_size, fragment_shader.push_block_size),
             },
         )) {
             transfer_prepared_shader(prepared_vertex_shader);

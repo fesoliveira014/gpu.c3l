@@ -198,6 +198,15 @@ struct CommandRecord @public {
     gpu::internal::CommandListHandle identity;
     gpu::internal::CommandState      state;
     gpu::Queue                       queue;
+    char[]                           inline_root;
+}
+
+fn void? set_inline_root(CommandRecord* record, char[] inline_root, ZString operation) {
+    (void)operation;
+    if (inline_root.len % 4 != 0 || inline_root.len > gpu::INLINE_ROOT_CAPACITY) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    record.inline_root = inline_root;
 }
 
 struct CommandOps @public {

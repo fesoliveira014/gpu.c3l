@@ -42,7 +42,15 @@ fn void? compute_struct_layout(StructDecl* decl, TypeTable* types) {
     }
     decl.size = total;
     decl.alignment = struct_align;
+    if (decl.push_role != PushRole.NONE && total > INLINE_ROOT_CAPACITY) {
+        diagnostic(decl.loc, "push payload '%s' is %d bytes; inline roots hold at most %d",
+            decl.name, total, INLINE_ROOT_CAPACITY);
+        return LAYOUT_ERROR~;
+    }
 }
+
+const uint INLINE_ROOT_OFFSET = 16;
+const uint INLINE_ROOT_CAPACITY = 112;
 
 fn String pad_suggestion(uint gap_bytes) {
     switch (gap_bytes / 4) {

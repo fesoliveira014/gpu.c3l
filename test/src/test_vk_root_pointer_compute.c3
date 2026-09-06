@@ -7,6 +7,7 @@ import gpu::internal::vk @public;
 const char[*] ROOT_POINTER_SPIRV = $embed("shaders/root_pointer.comp.spv");
 const char[*] ROOT_REFERENCE_SPIRV = $embed("shaders/root_ref.comp.spv");
 const char[*] ROOT_SIGNED_SPIRV = $embed("shaders/root_signed.comp.spv");
+const char[*] ROOT_INLINE_SPIRV = $embed("shaders/root_inline.comp.spv");
 
 struct DirectReferenceRoot {
     gpu::GpuAddress input_gpu;
@@ -255,4 +256,79 @@ fn void signed_root_runtime_evidence() @test {
     uint* output_value = (uint*)test_span_mapping(&device, output.span).ptr;
     assert(*output_value == EXPECTED,
         "signed root preserves the nonzero address bits before conversion");
+}
+
+fn void inline_root_payload_reaches_shader() @test {
+    const uint COUNT = 128;
+    gpu::RuntimeDesc device_desc = {
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .enable_vulkan_validation = true,
+        .application_name         = "gpu_inline_root_test",
+    };
+    gpu::Device device = create_test_device(&device_desc)!!;
+    defer destroy_test_device(&device)!!;
+
+    OwnedSpan output = allocate_owned_span(
+        device:       &device,
+        size:         COUNT * float::size,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .compute },
+        debug_name:   "inline_output",
+    )!!;
+    defer free_owned_span(&device, &output)!!;
+    OwnedSpan root_owned = allocate_owned_span(
+        device:       &device,
+        size:         InlineOutput::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        access:       { .compute },
+        debug_name:   "inline_root",
+    )!!;
+    defer free_owned_span(&device, &root_owned)!!;
+    InlineOutput* root = (InlineOutput*)test_span_mapping(&device, root_owned.span).ptr;
+    root.output_gpu = test_span_address(&device, output.span);
+    root.count = COUNT;
+    gpu::flush_mapped_span(&device, root_owned.span)!!;
+
+    gpu::ShaderDesc shader = { .spirv = ROOT_INLINE_SPIRV[..], .entry_point = "main" };
+    gpu::ComputePipelineDesc pipeline_desc = { .shader = shader };
+    gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    bind_test_compute_pipeline(&commands, pipeline);
+    InlineRoot payload = { .a = 1, .b = 2, .c = 3, .d = 4, .e = 5, .f = 6 };
+    gpu::cmd_dispatch(
+        commands:    &commands,
+        root:        test_span_address(&device, root_owned.span),
+        groups:      { (COUNT + INLINE_ROOT_WORKGROUP - 1) / INLINE_ROOT_WORKGROUP, 1, 1 },
+        inline_root: gpu::@inline_root(&payload),
+    )!!;
+    payload.a = 100;
+    gpu::cmd_dispatch(
+        commands:    &commands,
+        root:        (gpu::GpuAddress)0,
+        groups:      { 1, 1, 1 },
+        inline_root: gpu::@inline_root(&payload),
+    )!!;
+    gpu::Barrier host_read = {
+        .before = { .compute = true },
+        .after  = { .host = true },
+    };
+    gpu::cmd_barrier(&commands, &host_read)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
+    gpu::wait_completion(completion)!!;
+    gpu::invalidate_mapped_span(&device, output.span)!!;
+
+    float* output_data = (float*)test_span_mapping(&device, output.span).ptr;
+    for (uint i = 0; i < COUNT; i++) {
+        assert(output_data[i] == 21.0f + (float)i, "output is the inline sum plus the index");
+    }
 }

@@ -60,8 +60,10 @@ fn void capture_trace_root(
     vk::CommandBuffer command_buffer,
     vk::PipelineLayout layout,
     gpu::GpuAddress root,
+    char[] inline_root,
 ) {
     (void)command_buffer;
+    (void)inline_root;
     TraceRaysCapture* capture = (TraceRaysCapture*)raw_capture;
     capture.pushes++;
     capture.matched = capture.matched

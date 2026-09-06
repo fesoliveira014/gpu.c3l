@@ -1314,13 +1314,13 @@ fn void push_graphics_roots(
     };
     uint push_stages = (uint)vk::ShaderStageFlagBits.VERTEX_BIT
         | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
-    vk::cmd_push_constants(
+    push_root_block(
         command_buffer: record.command_buffer,
+        inline_root:    record.inline_root,
         layout:         pipeline.layout,
-        stage_flags:    (vk::ShaderStageFlags)push_stages,
-        offset:         0,
-        size:           GRAPHICS_ROOT_PUSH_SIZE,
-        p_values:       &push,
+        stages:         (vk::ShaderStageFlags)push_stages,
+        header:         &push,
+        header_size:    GRAPHICS_ROOT_PUSH_SIZE,
     );
 }
 

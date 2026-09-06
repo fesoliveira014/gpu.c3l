@@ -34,6 +34,21 @@ struct GraphicsRootPush {
     uint64_t fragment_root_gpu;
 };
 
+layout(push_constant) uniform InlineTint {
+    uint64_t root_gpu;
+    layout(offset = 16) vec4 tint;
+    uint material;
+    uint _pad0;
+    uint _pad1;
+    uint _pad2;
+} pc;
+
+layout(push_constant) uniform InlineOffset {
+    uint64_t vertex_root_gpu;
+    uint64_t fragment_root_gpu;
+    layout(offset = 16) vec4 offset;
+} pc;
+
 struct DrawIndexedIndirectCommand {
     uint index_count;
     uint instance_count;

@@ -12,10 +12,14 @@ shaders index into it with values stored in root data.
 
 ## Root push
 
-Every pipeline kind has a fixed push-constant block. Shaders that read push
-constants declare the whole block, in this order, and nothing else in it.
+Every pipeline layout has one push-constant range of `ROOT_PUSH_CAPACITY`
+(128) bytes. The root-address header occupies the start; an optional inline
+payload starts at `INLINE_ROOT_OFFSET` (16) and holds at most
+`INLINE_ROOT_CAPACITY` (112) bytes. Shaders that read push constants declare
+the header for their pipeline kind first, exactly, and any payload members
+at or after offset 16.
 
-Compute and ray tracing, 8 bytes:
+Compute and ray tracing header, 8 bytes:
 
 ```glsl
 layout(push_constant) uniform Push {
@@ -23,7 +27,7 @@ layout(push_constant) uniform Push {
 } pc;
 ```
 
-Graphics, 16 bytes:
+Graphics header, 16 bytes:
 
 ```glsl
 layout(push_constant) uniform Push {
@@ -47,6 +51,46 @@ gpu::cmd_draw(
 
 Zero is a valid root. The library never dereferences it. A shader that
 receives zero must branch before reading through it.
+
+### Inline payload
+
+A direct command may carry a payload in the same push. `cmd_dispatch`,
+`cmd_dispatch_indirect`, every `cmd_draw*`, and every `cmd_trace_rays*` take
+a trailing `char[] inline_root` (default empty). `@inline_root(&value)`
+borrows a value as bytes for the call; the command copies them immediately.
+The length must be a multiple of 4 and at most `INLINE_ROOT_CAPACITY`, else
+`INVALID_ARGUMENT`. Under `ContractValidation.FULL` a payload longer than the
+bound pipeline's reflected push block reports a `public_contract` diagnostic
+on `inline_root`.
+
+```glsl
+layout(push_constant) uniform Push {
+    uint64_t root_gpu;
+    layout(offset = 16) vec4 tint;
+    uint material;
+} pc;
+```
+
+```c3
+struct TintRoot {
+    Vec4f tint;
+    uint  material;
+}
+
+TintRoot tint = { .tint = { 1.0f, 0.5f, 0.5f, 1.0f }, .material = 3 };
+gpu::cmd_dispatch(
+    commands:    &commands,
+    root:        root_address,
+    groups:      { 64, 1, 1 },
+    inline_root: gpu::@inline_root(&tint),
+)!;
+```
+
+Payload offsets in the block are `INLINE_ROOT_OFFSET` plus the C3 struct
+offsets, so a std430 struct laid out from 0 mirrors the block from 16.
+Generated work updates the header only; payload bytes are unspecified after
+`cmd_dispatch_generated` or `cmd_draw_generated`, and every direct command
+pushes its own payload again.
 
 ## Root records
 
@@ -275,8 +319,9 @@ struct Material {
 }
 ```
 
-Declarations: `const`, `type Name : scalar`, `struct`, `root`, `push`, and
-`extern struct` (GLSL twin of an existing C3 record). Field types: `uint`,
+Declarations: `const`, `type Name : scalar`, `struct`, `root`, `push`,
+`push compute` / `push graphics`, and `extern struct` (GLSL twin of an
+existing C3 record). Field types: `uint`,
 `int`, `float`, `u64`, `vec2`, `vec4`, `GpuAddress`, `TextureIndex`,
 `SamplerIndex`, `AccelerationStructureIndex`, or an earlier struct. No
 matrices, no fixed arrays.
@@ -297,6 +342,14 @@ and names the `_padN` fields to add. Generated C3 carries size and offset
 assertions; generated GLSL emits `root` types as
 `buffer_reference` blocks and `struct` types as plain structs.
 
+`push compute Name { ... }` and `push graphics Name { ... }` declare an
+inline payload. The C3 side is the payload struct, laid out from 0 and
+asserted against `INLINE_ROOT_CAPACITY`. The GLSL side is the whole
+`layout(push_constant)` block named `pc`: the header for the role, then the
+fields from `layout(offset = 16)`. Put a role-qualified `push` in a schema
+of its own, since every shader that includes the generated GLSL receives the
+block. A bare `push` keeps the library header meaning.
+
 Shaders include the library ABI and then the application ABI:
 
 ```glsl
@@ -311,14 +364,16 @@ GLSL names are emitted verbatim. Do not use GLSL keywords as field names.
 Pipeline creation reflects the selected entry point and rejects with
 `SHADER_INVALID` when:
 
-- the push block is present but does not exactly match the compute or
-  graphics contract (size, member count, offsets, 64-bit unsigned scalars);
+- the push block is present but does not start with the exact compute or
+  graphics header (offsets, 64-bit unsigned scalars), has a member between
+  the header and `INLINE_ROOT_OFFSET`, or is larger than
+  `ROOT_PUSH_CAPACITY`;
 - a descriptor set other than set 0 is declared, or set 0 does not match the
   heap convention;
 - the entry point or execution model is missing.
 
 Binding 5 on a device without ray features returns `UNSUPPORTED_FEATURE`.
 
-Only flat unsigned 64-bit address members are accepted in the push block.
-Structs, vectors, arrays, and physical-pointer members are rejected even
-when the byte size matches. Put structured data behind the root address.
+Header members must be flat unsigned 64-bit addresses. Payload members at
+or after `INLINE_ROOT_OFFSET` are not shape-checked; the application owns
+their layout through the schema generator or by hand.

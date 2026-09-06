@@ -497,6 +497,38 @@ fn void end_frame(FrameSlot* slot, gpu::CompletionPoint submitted) {
 The same rule covers root records, indirect arguments, readback buffers,
 sparse backing, and command allocators.
 
+## Push a small root inline
+
+Up to `INLINE_ROOT_CAPACITY` (112) bytes per command can travel in the push
+block instead of a mapped record. No allocation, flush, or ring:
+
+```c3
+struct SpriteRoot {
+    gpu::Vec4f rect;
+    gpu::Vec4f tint;
+    uint       texture;
+    uint       sampler;
+    uint       _pad0;
+    uint       _pad1;
+}
+
+fn void? draw_sprite(gpu::CommandList* commands, SpriteRoot* sprite) {
+    return gpu::cmd_draw(
+        commands:       commands,
+        vertex_root:    (gpu::GpuAddress)0,
+        fragment_root:  (gpu::GpuAddress)0,
+        vertex_count:   6,
+        instance_count: 1,
+        inline_root:    gpu::@inline_root(sprite),
+    );
+}
+```
+
+The shader declares the graphics header and then the payload from offset
+16, or generates both from `push graphics SpriteRoot { ... }`. The bytes
+are copied during the call; the value need not outlive it. Larger or shared
+data stays behind a root address.
+
 ## Draw indirectly
 
 A compute pass writes `DrawIndirectCommand` records into addressable

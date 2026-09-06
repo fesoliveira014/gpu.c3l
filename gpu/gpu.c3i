@@ -1288,6 +1288,12 @@ enum IndexType : int {
 
 const uint DEFAULT_COMMAND_ALLOCATOR_CAPACITY = 8;
 
+// Every pipeline layout pushes this many bytes: the root-address header at 0
+// and an optional inline payload from INLINE_ROOT_OFFSET.
+const uint ROOT_PUSH_CAPACITY   = 128;
+const uint INLINE_ROOT_OFFSET   = 16;
+const uint INLINE_ROOT_CAPACITY = ROOT_PUSH_CAPACITY - INLINE_ROOT_OFFSET;
+
 const uint DEFAULT_COMMAND_REFERENCES_PER_LIST = 64;
 
 const uint MAX_COMMAND_ALLOCATOR_CAPACITY = 4096;

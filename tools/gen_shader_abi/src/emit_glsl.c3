@@ -16,6 +16,7 @@ fn void emit_glsl(Schema* schema, TypeTable* types, DString* out) {
     bool has_int64 = false;
     foreach (&decl : schema.structs) {
         if (decl.kind == DeclKind.ROOT) has_root = true;
+        if (decl.push_role != PushRole.NONE) has_int64 = true;
         foreach (&field : decl.fields) {
             TypeInfo info = types.entries.get(field.type_name)!!;
             if (info.glsl_name == "uint64_t") has_int64 = true;
@@ -47,6 +48,10 @@ fn void emit_glsl(Schema* schema, TypeTable* types, DString* out) {
 
     foreach (&decl : schema.structs) {
         out.append("\n");
+        if (decl.push_role != PushRole.NONE) {
+            emit_push_block(decl, types, out);
+            continue;
+        }
         if (decl.kind == DeclKind.ROOT) {
             out.appendf("layout(buffer_reference, std430, buffer_reference_align = %d) buffer %s {\n", decl.alignment, decl.name);
         } else {
@@ -67,4 +72,25 @@ fn void append_guard(String abi_name, DString* out) {
         out.append_char(c >= 'a' && c <= 'z' ? c - 'a' + 'A' : c);
     }
     out.append("_SHADER_ABI_GLSL");
+}
+
+<* Push block with the root header for the role first; the payload starts at
+   INLINE_ROOT_OFFSET so block offsets are that plus the C3 struct offsets. *>
+fn void emit_push_block(StructDecl* decl, TypeTable* types, DString* out) {
+    out.appendf("layout(push_constant) uniform %s {\n", decl.name);
+    if (decl.push_role == PushRole.COMPUTE) {
+        out.append("    uint64_t root_gpu;\n");
+    } else {
+        out.append("    uint64_t vertex_root_gpu;\n");
+        out.append("    uint64_t fragment_root_gpu;\n");
+    }
+    foreach (i, &field : decl.fields) {
+        TypeInfo info = types.entries.get(field.type_name)!!;
+        if (i == 0) {
+            out.appendf("    layout(offset = %d) %s %s;\n", INLINE_ROOT_OFFSET, info.glsl_name, field.name);
+            continue;
+        }
+        out.appendf("    %s %s;\n", info.glsl_name, field.name);
+    }
+    out.append("} pc;\n");
 }

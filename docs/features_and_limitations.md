@@ -143,4 +143,4 @@ back into the library. Message pointers are valid only during the call.
 | Multithreaded recording does not scale with Vulkan validation on | The validation layer serializes commands | Benchmark with the layer off. |
 | FIFO does not throttle under Xvfb | No real vblank | Do not use Xvfb for pacing measurements. |
 | Generated GLSL field fails to compile | The name is a GLSL keyword | Rename the schema field. |
-| `SHADER_INVALID` from a root push block | The block is not the exact contract | Declare only the flat address fields, in order. |
+| `SHADER_INVALID` from a root push block | The block does not start with the header, or exceeds 128 bytes | Declare the address fields first; payload members from `layout(offset = 16)`. |

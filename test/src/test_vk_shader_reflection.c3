@@ -32,6 +32,10 @@ const char[*] REFLECT_BAD_RAY_QUERY_BINDING_SPIRV =
 const char[*] REFLECT_BAD_RAY_QUERY_TYPE_SPIRV =
     $embed("shaders/bad_ray_query_type.comp.spv");
 const char[*] REFLECT_OVERSIZED_PUSH_SPIRV = $embed("shaders/oversized_push.comp.spv");
+const char[*] REFLECT_INLINE_ROOT_SPIRV = $embed("shaders/root_inline.comp.spv");
+const char[*] REFLECT_TINT_FRAG_SPIRV = $embed("shaders/tint.frag.spv");
+const char[*] REFLECT_PUSH_OVER_CAPACITY_SPIRV = $embed("shaders/push_over_capacity.comp.spv");
+const char[*] REFLECT_PUSH_HEADER_OVERLAP_SPIRV = $embed("shaders/push_header_overlap.comp.spv");
 const char[*] REFLECT_VERTEX_SPIRV      = $embed("shaders/offscreen.vert.spv");
 const char[*] REFLECT_FRAGMENT_SPIRV    = $embed("shaders/offscreen.frag.spv");
 const char[*] REFLECT_NO_PUSH_SPIRV     = $embed("shaders/no_push.comp.spv");
@@ -953,7 +957,7 @@ fn void shader_contract_rejections_report_exact_context() @test {
         returned:      abi_fault,
         operation:     "create_compute_pipeline",
         field:         "ComputePipelineDesc.shader",
-        invariant:     "selected-entry push block size must match the root ABI",
+        invariant:     "selected-entry push member size must match the root ABI",
         resource_kind: gpu::DebugResourceKind.SHADER,
     );
 }
@@ -1024,14 +1028,14 @@ fn void root_mismatch_diagnostics_identify_properties() @test {
         capture:   &capture,
         spirv:     REFLECT_MEMBER_COUNT_SPIRV[..],
         role:      gpu::internal::ShaderRole.COMPUTE,
-        invariant: "selected-entry push member count must match the root ABI",
+        invariant: "selected-entry push member size must match the root ABI",
     );
     assert_root_mismatch_reported(
         device:    &device,
         capture:   &capture,
         spirv:     REFLECT_REVERSED_GRAPHICS_SPIRV[..],
         role:      gpu::internal::ShaderRole.VERTEX,
-        invariant: "selected-entry push member offset must match the root ABI",
+        invariant: "selected-entry push header members must match the root ABI and inline members must start at INLINE_ROOT_OFFSET",
     );
     assert_root_mismatch_reported(
         device:    &device,
@@ -1099,4 +1103,64 @@ fn void shader_diagnostic_callback_preserves_fault_parity() @test {
     fault plain_fault = @catch(create_reflection_compute_pipeline(&plain_device, &rejected));
     destroy_test_device(&plain_device)!!;
     assert(plain_fault == callback_fault, "callback presence does not change shader fault");
+}
+
+fn void header_prefixed_push_blocks_accepted() @test {
+    check_fixture_root_abi(
+        REFLECT_INLINE_ROOT_SPIRV[..],
+        gpu::internal::ShaderRole.COMPUTE,
+        "main",
+    )!!;
+    check_fixture_root_abi(
+        REFLECT_TINT_FRAG_SPIRV[..],
+        gpu::internal::ShaderRole.FRAGMENT,
+        "main",
+    )!!;
+    gpu::Device device = make_reflection_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::ShaderDesc desc = { .spirv = REFLECT_INLINE_ROOT_SPIRV[..], .entry_point = "main" };
+    gpu::PipelineHandle pipeline = create_reflection_compute_pipeline(&device, &desc)!!;
+    gpu::destroy_pipeline(&device, pipeline)!!;
+}
+
+fn void push_block_over_capacity_rejected() @test {
+    ShaderDiagnosticCapture capture;
+    gpu::Device device = make_diagnostic_reflection_test_device(&capture);
+    defer destroy_test_device(&device)!!;
+    gpu::ShaderDesc desc = {
+        .spirv = REFLECT_PUSH_OVER_CAPACITY_SPIRV[..], .entry_point = "main",
+    };
+    uint before = capture.calls;
+    fault push_fault = @catch(create_reflection_compute_pipeline(&device, &desc));
+    assert(push_fault == gpu::SHADER_INVALID, "a push block past ROOT_PUSH_CAPACITY faults SHADER_INVALID");
+    assert_shader_rejection(
+        capture:       &capture,
+        before:        before,
+        returned:      push_fault,
+        operation:     "create_compute_pipeline",
+        field:         "ComputePipelineDesc.shader",
+        invariant:     "selected-entry push block must cover the root header and fit ROOT_PUSH_CAPACITY",
+        resource_kind: gpu::DebugResourceKind.SHADER,
+    );
+}
+
+fn void push_member_inside_header_rejected() @test {
+    ShaderDiagnosticCapture capture;
+    gpu::Device device = make_diagnostic_reflection_test_device(&capture);
+    defer destroy_test_device(&device)!!;
+    gpu::ShaderDesc desc = {
+        .spirv = REFLECT_PUSH_HEADER_OVERLAP_SPIRV[..], .entry_point = "main",
+    };
+    uint before = capture.calls;
+    fault push_fault = @catch(create_reflection_compute_pipeline(&device, &desc));
+    assert(push_fault == gpu::SHADER_INVALID, "an inline member inside the header faults SHADER_INVALID");
+    assert_shader_rejection(
+        capture:       &capture,
+        before:        before,
+        returned:      push_fault,
+        operation:     "create_compute_pipeline",
+        field:         "ComputePipelineDesc.shader",
+        invariant:     "selected-entry push header members must match the root ABI and inline members must start at INLINE_ROOT_OFFSET",
+        resource_kind: gpu::DebugResourceKind.SHADER,
+    );
 }

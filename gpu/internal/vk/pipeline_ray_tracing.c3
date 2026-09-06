@@ -489,6 +489,7 @@ fn gpu::PipelineHandle? create_ray_tracing_pipeline_from_prepared(
             .layout                 = state.ray_tracing_layout,
             .ray_tracing_key        = key,
             .ray_tracing_shader_ids = shader_ids,
+            .push_block_size        = max_push_block_size(modules),
         },
     )) {
         foreach (&identity : prepared) transfer_prepared_shader(identity);
@@ -874,4 +875,12 @@ fn ulong? vk_get_ray_tracing_shader_group_stack_size(
         group_shader: group_shader,
         ops:          &ops,
     );
+}
+
+fn uint max_push_block_size(PipelineShaderModule[] modules) @private {
+    uint size = 0;
+    foreach (&shader : modules) {
+        if (shader.push_block_size > size) size = shader.push_block_size;
+    }
+    return size;
 }

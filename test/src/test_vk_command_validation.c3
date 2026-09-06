@@ -3628,3 +3628,80 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&commands_executable)!!;
 }
+
+fn void inline_root_length_is_validated() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx ctx = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &ctx);
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&cmd)!!;
+    bind_test_compute_pipeline(&cmd, ctx.pipeline);
+    char[gpu::INLINE_ROOT_CAPACITY + 4] bytes;
+    fault unaligned = @catch(gpu::cmd_dispatch(
+        commands:    &cmd,
+        root:        (gpu::GpuAddress)0,
+        groups:      { 1, 1, 1 },
+        inline_root: bytes[:3],
+    ));
+    assert(unaligned == gpu::INVALID_ARGUMENT, "a payload length not a multiple of four faults INVALID_ARGUMENT");
+    fault oversized = @catch(gpu::cmd_dispatch(
+        commands:    &cmd,
+        root:        (gpu::GpuAddress)0,
+        groups:      { 1, 1, 1 },
+        inline_root: bytes[..],
+    ));
+    assert(oversized == gpu::INVALID_ARGUMENT, "a payload past INLINE_ROOT_CAPACITY faults INVALID_ARGUMENT");
+    gpu::cmd_dispatch(
+        commands:    &cmd,
+        root:        (gpu::GpuAddress)0,
+        groups:      { 1, 1, 1 },
+        inline_root: bytes[:gpu::INLINE_ROOT_CAPACITY],
+    )!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&executable)!!;
+}
+
+fn void inline_root_past_push_block_reports_diagnostic() @test {
+    SyncDiagnosticCapture capture = {};
+    reset_sync_diagnostic(
+        capture:        &capture,
+        operation:      "cmd_dispatch",
+        debug_name:     null,
+        rejected_field: "inline_root",
+        invariant:      "inline payload must fit the bound pipeline's push block",
+    );
+    gpu::Device device = make_sync_diagnostic_device(&capture);
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx ctx = make_val_compute_ctx(&device);
+    defer destroy_val_compute_ctx(&device, &ctx);
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&cmd)!!;
+    bind_test_compute_pipeline(&cmd, ctx.pipeline);
+    uint[4] payload;
+    gpu::cmd_dispatch(
+        commands:    &cmd,
+        root:        (gpu::GpuAddress)0,
+        groups:      { 1, 1, 1 },
+        inline_root: gpu::@inline_root(&payload),
+    )!!;
+    assert(capture.calls == 1, "a payload past the reflected push block reports one diagnostic");
+    assert(!capture.has_fault, "the diagnostic carries no fault");
+    assert(capture.public_contract, "the diagnostic is a public-contract diagnostic");
+    assert(capture.operation_matches && capture.rejected_field_matches && capture.invariant_matches,
+        "operation, field, and invariant are exact");
+    gpu::cmd_dispatch(
+        commands: &cmd,
+        root:     (gpu::GpuAddress)0,
+        groups:   { 1, 1, 1 },
+    )!!;
+    assert(capture.calls == 1, "an empty payload reports nothing");
+    gpu::ExecutableCommandList executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&executable)!!;
+}
