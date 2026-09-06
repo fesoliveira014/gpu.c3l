@@ -545,6 +545,26 @@ Every draw in the call sees the same root pair. Index per-draw data with
 `gl_DrawID`. `cmd_draw_indexed_indirect_count` reads the draw count from a
 second span when `DeviceCaps.draw_indirect_count` is true.
 
+When the same pass also writes the index buffer, add `.index_input` to the
+destination and draw indexed from the written span:
+
+```c3
+gpu::Barrier indices_ready = {
+    .before = { .compute },
+    .after  = { .index_input, .indirect },
+};
+gpu::cmd_barrier(commands, &indices_ready)!;
+gpu::cmd_draw_indexed_indirect(
+    commands:      commands,
+    vertex_root:   draw_root,
+    fragment_root: draw_root,
+    args:          args_span,
+    draw_count:    1,
+    index_span:    compacted_indices,
+    index_type:    gpu::IndexType.U32,
+)!;
+```
+
 ## Draw generated work
 
 Generated records carry their own roots and arguments. Reserve storage on

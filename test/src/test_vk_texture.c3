@@ -493,6 +493,21 @@ fn void texture_state_matrix_rejects_reserved_stages_and_access() @test {
         before:        false,
         expected_field: "TextureBarrier.after.stages",
     );
+    sampled.stages = { .index_input };
+    assert_texture_state_rejected(
+        texture_state: sampled,
+        slot:          &slot,
+        flags:         graphics_only,
+        before:        false,
+        expected_field: "TextureBarrier.after.stages",
+    );
+    assert_texture_state_rejected(
+        texture_state: sampled,
+        slot:          &slot,
+        flags:         graphics_only,
+        before:        true,
+        expected_field: "TextureBarrier.before.stages",
+    );
     sampled.stages = (gpu::StageMask)0x400u;
     assert_texture_state_rejected(
         texture_state: sampled,

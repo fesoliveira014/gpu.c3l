@@ -1569,7 +1569,8 @@ const ulong TIMEOUT_INFINITE = ulong::max;
 
 const CompletionPoint COMPLETION_POINT_INVALID = {};
 
-<* Execution scopes. `all` and `present` are exclusive. *>
+<* Execution scopes. `all` and `present` are exclusive. `index_input` is
+   destination-only. `mesh_shader` is reserved and rejected. *>
 bitstruct StageMask : uint {
     bool all             : 0;
     bool host            : 1;
@@ -1583,6 +1584,8 @@ bitstruct StageMask : uint {
     bool indirect        : 9;
     bool acceleration_structure_build : 10;
     bool ray_tracing     : 11;
+    bool index_input     : 12;
+    bool mesh_shader     : 13;
 }
 
 <* Texture layout for explicit transitions. *>
