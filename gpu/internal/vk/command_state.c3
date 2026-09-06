@@ -188,8 +188,6 @@ struct DescriptorHeapCommandBinding {
     bool ray_tracing_set_bound;
 }
 
-const uint STENCIL_DISCARD_TRACK_CAPACITY = 8;
-
 struct CommandRecord @public {
     CommandOps*                      ops;
     VkDeviceState*                   device_state;
@@ -213,8 +211,6 @@ struct CommandRecord @public {
     NativePipelineBinding            native_ray_tracing_pipeline;
     DescriptorHeapCommandBinding     descriptor_heap_binding;
     bool                             ray_tracing_stack_size_set;
-    gpu::TextureHandle[STENCIL_DISCARD_TRACK_CAPACITY] stencil_discarded;
-    uint                             stencil_discarded_count;
     CommandScratch*                  scratch;
     uint                             pending_acceleration_structure_head;
 }

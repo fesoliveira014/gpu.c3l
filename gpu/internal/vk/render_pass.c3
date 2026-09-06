@@ -387,20 +387,22 @@ fn void? validate_render_pass_desc_fields(
 }
 
 <* FULL only: within one command list, a DONT_CARE stencil store followed
-   by a LOAD of the same texture. The load is legal; its contents are
-   undefined. Tracking stops silently past the capacity. *>
+   by a LOAD of the same attachment view. Runs after the pass is recorded, so
+   a rejected begin leaves no history. The set holds up to the list's
+   retained-reference capacity. *>
 fn void note_stencil_load_after_discard(
     VkDeviceState* state,
     CommandRecord* record,
-    gpu::TextureHandle texture,
+    gpu::AttachmentViewHandle view,
     ZString operation,
     gpu::DepthTargetDesc* depth,
 ) @private {
-    uint found = record.stencil_discarded_count;
-    for (uint i = 0; i < record.stencil_discarded_count; i++) {
-        if (record.stencil_discarded[i] == texture) found = i;
+    CommandScratch* scratch = record.scratch;
+    uint found = scratch.stencil_discard_count;
+    for (uint i = 0; i < scratch.stencil_discard_count; i++) {
+        if (scratch.stencil_discards[i] == view) found = i;
     }
-    bool discarded = found < record.stencil_discarded_count;
+    bool discarded = found < scratch.stencil_discard_count;
     if (depth.stencil_load_op == gpu::LoadOp.LOAD && discarded) {
         report_state_diagnostic(
             state:          state,
@@ -412,11 +414,11 @@ fn void note_stencil_load_after_discard(
     }
     bool discards = depth.stencil_store_op == gpu::StoreOp.DONT_CARE;
     if (discards && !discarded
-        && record.stencil_discarded_count < STENCIL_DISCARD_TRACK_CAPACITY) {
-        record.stencil_discarded[record.stencil_discarded_count++] = texture;
+        && scratch.stencil_discard_count < scratch.stencil_discards.len) {
+        scratch.stencil_discards[scratch.stencil_discard_count++] = view;
     } else if (!discards && discarded) {
-        record.stencil_discarded[found] =
-            record.stencil_discarded[--record.stencil_discarded_count];
+        scratch.stencil_discards[found] =
+            scratch.stencil_discards[--scratch.stencil_discard_count];
     }
 }
 
@@ -523,15 +525,6 @@ fn PreparedRenderPass? full_prepare_render_pass(
         if (pass.color_count > 0
             && depth.sample_count != pass.compatibility.sample_count) {
             return gpu::INVALID_ARGUMENT~;
-        }
-        if (pass.has_stencil_aspect) {
-            note_stencil_load_after_discard(
-                state:     state,
-                record:    record,
-                texture:   depth.texture,
-                operation: operation,
-                depth:     desc.depth,
-            );
         }
     }
     validate_active_pipeline_render_compatibility(
@@ -662,6 +655,15 @@ fn void? full_begin_render_pass(
     );
     track_render_pass(commands, &pass)!;
     record_render_pass(commands, &pass);
+    if (pass.has_stencil_aspect) {
+        note_stencil_load_after_discard(
+            state:     commands.device_state,
+            record:    record,
+            view:      pass.depth_handle,
+            operation: "cmd_begin_render_pass",
+            depth:     desc.depth,
+        );
+    }
 }
 
 fn fault report_dynamic_state_rejection(

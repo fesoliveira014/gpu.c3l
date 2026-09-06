@@ -659,6 +659,11 @@ fn void stencil_full_diagnostics_report_without_faulting() @test {
     gpu::cmd_end_render_pass(&passes)!!;
     gpu::CommandList other = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&other)!!;
+    gpu::RenderPassDesc oversized = { .depth = &discard, .width = DP_RT * 2, .height = DP_RT * 2 };
+    assert(@catch(gpu::cmd_begin_render_pass(&other, &oversized)) == gpu::INVALID_ARGUMENT,
+        "a render area past the attachment is rejected");
+    assert(vk::resolve_command(&other)!!.scratch.stencil_discard_count == 0,
+        "a rejected begin records no stencil history");
     gpu::cmd_begin_render_pass(&other, &load_pass)!!;
     gpu::cmd_end_render_pass(&other)!!;
     assert(capture.public_contract == 1, "a discard in one list does not mark a LOAD in another");
