@@ -233,8 +233,7 @@ fn void emit_stencil_state(
         record.command_buffer,
         stencil.test_enable ? vk::TRUE : vk::FALSE,
     );
-    if (!stencil.test_enable) return;
-    if (stencil_faces_equal(&stencil.front, &stencil.back)) {
+    if (!stencil.test_enable || stencil_faces_equal(&stencil.front, &stencil.back)) {
         emit_stencil_face(
             record.command_buffer,
             (vk::StencilFaceFlags)vk::StencilFaceFlagBits.FRONT_AND_BACK,
