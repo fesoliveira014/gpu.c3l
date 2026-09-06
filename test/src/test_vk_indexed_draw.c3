@@ -1,18 +1,45 @@
 module gpu_test;
 
 import gpu;
+import gpu::internal @public;
+import gpu::internal::vk @public;
 import std::core::mem;
+import std::io;
 
 // Headless (lavapipe): U16 and U32 indexed draws with equivalent indices must
-// produce identical pixels, at zero and nonzero index-span offsets.
+// produce identical pixels, at zero and nonzero index-span offsets, and a
+// compute-written index buffer ordered by the index-input stage must match a
+// CPU-written one.
 
 const char[*] U16V_VERT_SPIRV = $embed("shaders/depth.vert.spv");
 const char[*] U16V_FRAG_SPIRV = $embed("shaders/depth.frag.spv");
+const char[*] U16V_WRITE_INDICES_SPIRV = $embed("shaders/write_indices.comp.spv");
 
 const uint U16V_RT = 16;
 const usz U16V_BYTES = U16V_RT * U16V_RT * 4;
 const uint U16V_INDEX_COUNT = 6;
 const uint U16V_OFFSET_ELEMENTS = 6;
+const float[16] U16V_QUAD_VERTS = {
+    -0.8f, -0.8f, 0.5f, 0.0f,
+     0.8f, -0.8f, 0.5f, 0.0f,
+    -0.8f,  0.8f, 0.5f, 0.0f,
+     0.8f,  0.8f, 0.5f, 0.0f,
+};
+const uint[6] U16V_QUAD_INDICES = { 0, 1, 2, 2, 1, 3 };
+
+struct IndexProducer {
+    gpu::PipelineHandle pipeline;
+    gpu::GpuAddress     root;
+}
+
+struct QuadInputs {
+    OwnedSpan verts;
+    OwnedSpan color;
+    OwnedSpan cpu_indices;
+    OwnedSpan gpu_indices;
+    OwnedSpan root;
+    OwnedSpan readback;
+}
 
 fn gpu::Device u16v_device() {
     gpu::RuntimeDesc desc = {
@@ -21,6 +48,31 @@ fn gpu::Device u16v_device() {
         .application_name  = "gpu_u16_verify",
     };
     return create_test_device(&desc)!!;
+}
+
+fn gpu::PipelineHandle u16v_pipeline(gpu::Device* device) {
+    gpu::ShaderDesc vert = { .spirv = U16V_VERT_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc frag = { .spirv = U16V_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::Format[1] color_formats = { gpu::Format.RGBA8_UNORM };
+    gpu::GraphicsPipelineDesc desc = {
+        .vertex_shader   = vert,
+        .fragment_shader = frag,
+        .color_formats   = color_formats[..],
+    };
+    return gpu::create_graphics_pipeline(device, &desc)!!;
+}
+
+fn gpu::PipelineHandle u16v_index_writer(gpu::Device* device) {
+    gpu::ShaderDesc shader = { .spirv = U16V_WRITE_INDICES_SPIRV[..], .entry_point = "main" };
+    gpu::ComputePipelineDesc desc = { .shader = shader };
+    return gpu::create_compute_pipeline(device, &desc)!!;
+}
+
+fn bool u16v_distinct_families(gpu::Device* device) {
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+    if (state.graphics_family != state.compute_family) return true;
+    io::eprintfn("compute-queue index write not applicable: graphics and compute share family %d", state.graphics_family);
+    return false;
 }
 
 fn OwnedSpan u16v_upload(gpu::Device* device, usz size, ZString debug_name) {
@@ -41,6 +93,8 @@ fn void u16v_draw(
     gpu::GpuSpan index_span,
     gpu::IndexType index_type,
     gpu::GpuSpan* rb_span,
+    IndexProducer producer = {},
+    gpu::CompletionWait[] waits = {},
 ) {
     gpu::TextureDesc rt_desc = {
         .access    = { .graphics, .compute, .transfer },
@@ -78,6 +132,15 @@ fn void u16v_draw(
         },
     };
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
+    if (producer.pipeline.is_valid()) {
+        bind_test_compute_pipeline(&cmd, producer.pipeline);
+        gpu::cmd_dispatch(&cmd, producer.root, { 1, 1, 1 })!!;
+        gpu::Barrier indices_ready = {
+            .before = { .compute },
+            .after  = { .index_input },
+        };
+        gpu::cmd_barrier(&cmd, &indices_ready)!!;
+    }
     gpu::ColorTargetDesc[1] colors = {{
         .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
         .clear = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
@@ -129,29 +192,159 @@ fn void u16v_draw(
 
     defer discard_test_executable(&cmd_executable)!!;
     gpu::ExecutableCommandList[1] lists = { cmd_executable };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::SubmitDesc submit = {
+        .command_lists    = lists[..],
+        .completion_waits = waits,
+    };
     submit_test_queue(device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(device, gpu::QueueKind.GRAPHICS)!!;
     gpu::invalidate_mapped_span(device, *rb_span)!!;
+}
+
+fn QuadInputs u16v_quad_inputs(gpu::Device* device, gpu::QueueRoles index_access) {
+    QuadInputs inputs;
+    inputs.verts = u16v_upload(device, (usz)@sizeof(U16V_QUAD_VERTS), "vertices");
+    mem::copy(test_span_mapping(device, inputs.verts.span).ptr, &U16V_QUAD_VERTS, (usz)@sizeof(U16V_QUAD_VERTS));
+    inputs.color = u16v_upload(device, 16, "color");
+    float[4] color = { 0.0f, 1.0f, 0.0f, 1.0f };
+    mem::copy(test_span_mapping(device, inputs.color.span).ptr, &color, 16);
+    inputs.cpu_indices = u16v_upload(device, (usz)@sizeof(U16V_QUAD_INDICES), "indices_cpu");
+    mem::copy(test_span_mapping(device, inputs.cpu_indices.span).ptr, &U16V_QUAD_INDICES, (usz)@sizeof(U16V_QUAD_INDICES));
+    inputs.gpu_indices = allocate_owned_span(
+        device:       device,
+        size:         (usz)@sizeof(U16V_QUAD_INDICES),
+        memory_class: gpu::MemoryClass.GPU_PRIVATE,
+        access:       index_access,
+        debug_name:   "indices_gpu",
+    )!!;
+    inputs.root = u16v_upload(device, IndexWriteRoot::size, "index_root");
+    IndexWriteRoot root = {
+        .indices_gpu = test_span_address(device, inputs.gpu_indices.span),
+        .index_count = U16V_INDEX_COUNT,
+    };
+    mem::copy(test_span_mapping(device, inputs.root.span).ptr, &root, IndexWriteRoot::size);
+    gpu::flush_mapped_span(device, inputs.verts.span)!!;
+    gpu::flush_mapped_span(device, inputs.color.span)!!;
+    gpu::flush_mapped_span(device, inputs.cpu_indices.span)!!;
+    gpu::flush_mapped_span(device, inputs.root.span)!!;
+    inputs.readback = allocate_owned_span(
+        device:       device,
+        size:         U16V_BYTES * 2,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        access:       { .graphics, .compute, .transfer },
+        debug_name:   "indexed_readback",
+    )!!;
+    return inputs;
+}
+
+fn void free_quad_inputs(gpu::Device* device, QuadInputs* inputs) {
+    free_owned_span(device, &inputs.readback)!!;
+    free_owned_span(device, &inputs.root)!!;
+    free_owned_span(device, &inputs.gpu_indices)!!;
+    free_owned_span(device, &inputs.cpu_indices)!!;
+    free_owned_span(device, &inputs.color)!!;
+    free_owned_span(device, &inputs.verts)!!;
+}
+
+fn void assert_quad_draws_match(gpu::Device* device, gpu::GpuSpan expected, gpu::GpuSpan actual) {
+    char* a = (char*)test_span_mapping(device, expected).ptr;
+    char* b = (char*)test_span_mapping(device, actual).ptr;
+    usz center_green = ((U16V_RT / 2) * U16V_RT + U16V_RT / 2) * 4 + 1;
+    assert(b[center_green] != 0, "the compute-written index draw must cover the center pixel");
+    assert(b[1] == 0, "the compute-written index draw must leave the corner clear");
+    for (usz i = 0; i < U16V_BYTES; i++) {
+        assert(a[i] == b[i], "CPU-written and compute-written index draws must match pixel-for-pixel");
+    }
+}
+
+fn void compute_written_indices_draw_through_index_input() @test {
+    gpu::Device device = u16v_device();
+    defer destroy_test_device(&device)!!;
+    gpu::PipelineHandle pipeline = u16v_pipeline(&device);
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    gpu::PipelineHandle writer = u16v_index_writer(&device);
+    defer gpu::destroy_pipeline(&device, writer)!!;
+    QuadInputs inputs = u16v_quad_inputs(&device, { .graphics });
+    defer free_quad_inputs(&device, &inputs);
+
+    gpu::GpuSpan rb_cpu = inputs.readback.span.checked_subspan(0, U16V_BYTES)!!;
+    gpu::GpuSpan rb_gpu = inputs.readback.span.checked_subspan(U16V_BYTES, U16V_BYTES)!!;
+    u16v_draw(
+        device:     &device,
+        pipeline:   pipeline,
+        verts:      test_span_address(&device, inputs.verts.span),
+        color:      test_span_address(&device, inputs.color.span),
+        index_span: inputs.cpu_indices.span,
+        index_type: gpu::IndexType.U32,
+        rb_span:    &rb_cpu,
+    );
+    u16v_draw(
+        device:     &device,
+        pipeline:   pipeline,
+        verts:      test_span_address(&device, inputs.verts.span),
+        color:      test_span_address(&device, inputs.color.span),
+        index_span: inputs.gpu_indices.span,
+        index_type: gpu::IndexType.U32,
+        rb_span:    &rb_gpu,
+        producer:   { .pipeline = writer, .root = test_span_address(&device, inputs.root.span) },
+    );
+    assert_quad_draws_match(&device, rb_cpu, rb_gpu);
+}
+
+fn void compute_queue_indices_wait_on_index_input() @test {
+    gpu::Device device = u16v_device();
+    defer destroy_test_device(&device)!!;
+    if (!u16v_distinct_families(&device)) return;
+    gpu::PipelineHandle pipeline = u16v_pipeline(&device);
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    gpu::PipelineHandle writer = u16v_index_writer(&device);
+    defer gpu::destroy_pipeline(&device, writer)!!;
+    QuadInputs inputs = u16v_quad_inputs(&device, { .graphics, .compute });
+    defer free_quad_inputs(&device, &inputs);
+
+    gpu::Queue compute_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(&device, compute_queue)!!;
+    defer gpu::destroy_command_allocator(&compute_allocator)!!;
+    gpu::CommandList compute = gpu::begin_commands(&compute_allocator)!!;
+    defer discard_test_commands(&compute)!!;
+    bind_test_compute_pipeline(&compute, writer);
+    gpu::cmd_dispatch(&compute, test_span_address(&device, inputs.root.span), { 1, 1, 1 })!!;
+    gpu::ExecutableCommandList compute_executable = gpu::end_commands(&compute)!!;
+    defer discard_test_executable(&compute_executable)!!;
+    gpu::ExecutableCommandList[1] compute_lists = { compute_executable };
+    gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
+    gpu::CompletionPoint written = submit_test_queue(&device, gpu::QueueKind.COMPUTE, &compute_submit)!!;
+
+    gpu::GpuSpan rb_cpu = inputs.readback.span.checked_subspan(0, U16V_BYTES)!!;
+    gpu::GpuSpan rb_gpu = inputs.readback.span.checked_subspan(U16V_BYTES, U16V_BYTES)!!;
+    u16v_draw(
+        device:     &device,
+        pipeline:   pipeline,
+        verts:      test_span_address(&device, inputs.verts.span),
+        color:      test_span_address(&device, inputs.color.span),
+        index_span: inputs.cpu_indices.span,
+        index_type: gpu::IndexType.U32,
+        rb_span:    &rb_cpu,
+    );
+    gpu::CompletionWait[1] waits = {{ .point = written, .before = { .index_input } }};
+    u16v_draw(
+        device:     &device,
+        pipeline:   pipeline,
+        verts:      test_span_address(&device, inputs.verts.span),
+        color:      test_span_address(&device, inputs.color.span),
+        index_span: inputs.gpu_indices.span,
+        index_type: gpu::IndexType.U32,
+        rb_span:    &rb_gpu,
+        waits:      waits[..],
+    );
+    assert_quad_draws_match(&device, rb_cpu, rb_gpu);
 }
 
 fn void u16_and_u32_indexed_draws_match() @test {
     gpu::Device device = u16v_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::ShaderDesc vert_sd = { .spirv = U16V_VERT_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderDesc frag_sd = { .spirv = U16V_FRAG_SPIRV[..], .entry_point = "main" };
-    gpu::ShaderDesc vert = vert_sd;
-    gpu::ShaderDesc frag = frag_sd;
-    gpu::Format[1] pipeline_color_formats = {
-        gpu::Format.RGBA8_UNORM,
-    };
-    gpu::GraphicsPipelineDesc pd = {
-        .vertex_shader   = vert,
-        .fragment_shader = frag,
-        .color_formats   = pipeline_color_formats[..],
-    };
-    gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pd)!!;
+    gpu::PipelineHandle pipeline = u16v_pipeline(&device);
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     OwnedSpan vbuf = u16v_upload(&device, 4 * 16, "vertices");

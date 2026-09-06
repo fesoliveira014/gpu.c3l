@@ -5,7 +5,7 @@ import gpu @public;
 import vk;
 import std::atomic::types;
 
-const uint TIMESTAMP_COMMAND_POOL_CAPACITY = 8;
+const uint TIMESTAMP_COMMAND_POOL_CAPACITY = 16;
 const usz TIMESTAMP_COMMAND_DESTINATION_SIZE = 256;
 const vk::QueryPool TIMESTAMP_COMMAND_NATIVE_POOL =
     (vk::QueryPool)(uptr)0x4970;
@@ -253,6 +253,9 @@ fn void timestamp_stage_mapping_is_one_to_one() @test {
     assert(timestamp_stage_to_vk({ .ray_tracing = true }) ==
         (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2
             .STAGE_2_RAY_TRACING_SHADER_BIT_KHR);
+    assert(timestamp_stage_to_vk({ .index_input = true }) ==
+        (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2.STAGE_2_INDEX_INPUT_BIT);
 }
 
 fn void timestamp_stage_shape_rejects_invalid_masks() @test {
@@ -265,7 +268,7 @@ fn void timestamp_stage_shape_rejects_invalid_masks() @test {
     }));
     assert(timestamp_stage_mask_valid({ .acceleration_structure_build }));
     assert(timestamp_stage_mask_valid({ .ray_tracing }));
-    assert(!timestamp_stage_mask_valid((gpu::StageMask)(1 << 12)));
+    assert(timestamp_stage_mask_valid({ .mesh_shader }));
 }
 
 fn void timestamp_destination_requires_packed_ulong_alignment() @test {
@@ -368,7 +371,7 @@ fn void timestamp_write_emits_every_stage_mapping() @test {
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
     TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
-    gpu::StageMask[8] stages = {
+    gpu::StageMask[9] stages = {
         { .all },
         { .transfer },
         { .compute },
@@ -377,8 +380,9 @@ fn void timestamp_write_emits_every_stage_mapping() @test {
         { .color_output },
         { .depth_output },
         { .indirect },
+        { .index_input },
     };
-    vk::PipelineStageFlags2[8] expected = {
+    vk::PipelineStageFlags2[9] expected = {
         (vk::PipelineStageFlags2)
             vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
         (vk::PipelineStageFlags2)
@@ -395,6 +399,8 @@ fn void timestamp_write_emits_every_stage_mapping() @test {
             vk::PipelineStageFlagBits2.STAGE_2_LATE_FRAGMENT_TESTS_BIT,
         (vk::PipelineStageFlags2)
             vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT,
+        (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2.STAGE_2_INDEX_INPUT_BIT,
     };
 
     foreach (i, stage : stages) {
@@ -500,7 +506,7 @@ fn void timestamp_full_write_rejects_invalid_masks_without_emission() @test {
         { .present },
         { .compute, .transfer },
         { .acceleration_structure_build },
-        (gpu::StageMask)(1 << 12),
+        { .mesh_shader },
     };
 
     foreach (stage : invalid) {
@@ -525,12 +531,11 @@ fn void timestamp_trusted_write_rejects_invalid_masks_without_emission() @test {
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
     TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
-    gpu::StageMask[5] invalid = {
+    gpu::StageMask[4] invalid = {
         {},
         { .host },
         { .present },
         { .compute, .transfer },
-        (gpu::StageMask)(1 << 12),
     };
 
     foreach (stage : invalid) {

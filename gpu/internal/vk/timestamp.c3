@@ -240,6 +240,10 @@ fn vk::PipelineStageFlags2 timestamp_stage_to_vk(
         return (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2
             .STAGE_2_MESH_SHADER_BIT_EXT;
     }
+    if (stage.index_input) {
+        return (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2.STAGE_2_INDEX_INPUT_BIT;
+    }
     unreachable();
 }
 

@@ -1295,7 +1295,9 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
             || desc.readiness.device != device) {
             return gpu::INVALID_HANDLE~;
         }
-        if (desc.readiness_before.indirect) return gpu::INVALID_ARGUMENT~;
+        if (desc.readiness_before.indirect || desc.readiness_before.index_input) {
+            return gpu::INVALID_ARGUMENT~;
+        }
         inputs.readiness_stages = submit_wait_stages_to_vk(
             stages:         desc.readiness_before,
             flags:          target.queue_flags,
