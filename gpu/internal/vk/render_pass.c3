@@ -386,16 +386,22 @@ fn void? validate_render_pass_desc_fields(
     }
 }
 
-<* FULL only: record-order tracking of a DONT_CARE stencil store followed by
-   a LOAD. The load is legal; its contents are undefined. *>
+<* FULL only: within one command list, a DONT_CARE stencil store followed
+   by a LOAD of the same texture. The load is legal; its contents are
+   undefined. Tracking stops silently past the capacity. *>
 fn void note_stencil_load_after_discard(
     VkDeviceState* state,
-    TextureSlot* texture,
+    CommandRecord* record,
+    gpu::TextureHandle texture,
     ZString operation,
     gpu::DepthTargetDesc* depth,
 ) @private {
-    if (depth.stencil_load_op == gpu::LoadOp.LOAD
-        && texture.stencil_discarded.load(AtomicOrdering.RELAXED)) {
+    uint found = record.stencil_discarded_count;
+    for (uint i = 0; i < record.stencil_discarded_count; i++) {
+        if (record.stencil_discarded[i] == texture) found = i;
+    }
+    bool discarded = found < record.stencil_discarded_count;
+    if (depth.stencil_load_op == gpu::LoadOp.LOAD && discarded) {
         report_state_diagnostic(
             state:          state,
             category:       { .public_contract },
@@ -404,10 +410,14 @@ fn void note_stencil_load_after_discard(
             invariant:      "a LOAD after a DONT_CARE stencil store reads undefined contents",
         );
     }
-    texture.stencil_discarded.store(
-        depth.stencil_store_op == gpu::StoreOp.DONT_CARE,
-        AtomicOrdering.RELAXED,
-    );
+    bool discards = depth.stencil_store_op == gpu::StoreOp.DONT_CARE;
+    if (discards && !discarded
+        && record.stencil_discarded_count < STENCIL_DISCARD_TRACK_CAPACITY) {
+        record.stencil_discarded[record.stencil_discarded_count++] = texture;
+    } else if (!discards && discarded) {
+        record.stencil_discarded[found] =
+            record.stencil_discarded[--record.stencil_discarded_count];
+    }
 }
 
 fn PreparedRenderPass? full_prepare_render_pass(
@@ -517,7 +527,8 @@ fn PreparedRenderPass? full_prepare_render_pass(
         if (pass.has_stencil_aspect) {
             note_stencil_load_after_discard(
                 state:     state,
-                texture:   depth_texture,
+                record:    record,
+                texture:   depth.texture,
                 operation: operation,
                 depth:     desc.depth,
             );
@@ -1099,7 +1110,7 @@ fn void note_stencil_without_aspect(
 ) @private {
     if (!stencil.test_enable) return;
     BoundPipeline*? bound = borrow_bound_pipeline(record);
-    if (catch bound) return;
+    if (catch err = bound) return;
     BoundPipeline* pipeline = bound;
     if (gpu::internal::format_has_stencil(pipeline.render.depth_format)) return;
     report_state_diagnostic(

@@ -655,6 +655,13 @@ fn void stencil_full_diagnostics_report_without_faulting() @test {
     gpu::cmd_begin_render_pass(&passes, &load_pass)!!;
     gpu::cmd_end_render_pass(&passes)!!;
     assert(capture.public_contract == 1, "a LOAD after a STORE reports nothing");
+    gpu::cmd_begin_render_pass(&passes, &discard_pass)!!;
+    gpu::cmd_end_render_pass(&passes)!!;
+    gpu::CommandList other = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&other)!!;
+    gpu::cmd_begin_render_pass(&other, &load_pass)!!;
+    gpu::cmd_end_render_pass(&other)!!;
+    assert(capture.public_contract == 1, "a discard in one list does not mark a LOAD in another");
 }
 
 fn void stencil_aspect_fetches_in_fragment_stage() @test {
