@@ -594,12 +594,7 @@ fn bool TextureCompatibility.is_valid(self) {
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null || desc.size == 0) return INVALID_ARGUMENT~;
-    if (!gpu::internal::memory_class_is_known(desc.memory_class)) return INVALID_ARGUMENT~;
-    gpu::internal::validate_queue_access(&operation, desc.access)!;
-    AllocationDesc normalized = *desc;
-    normalized.alignment = gpu::internal::normalized_allocation_alignment(desc.alignment)!;
-    gpu::internal::validate_texture_allocation(&operation, desc, &normalized.alignment)!;
+    AllocationDesc normalized = gpu::internal::validated_allocation_desc(&operation, desc)!;
     GpuAllocation allocation =
         gpu::internal::vk::vk_allocate_memory(operation.state, &normalized)!;
     gpu::internal::retain_device_children(&operation);
@@ -717,13 +712,7 @@ fn MappedGpuSpan? allocate_mapped_memory(Device* device, AllocationDesc* desc) {
         || desc.memory_class == MemoryClass.TEXTURE) {
         return INVALID_ARGUMENT~;
     }
-    GpuAllocation allocation = allocate_memory(device, desc)!;
-    MappedGpuSpan? mapped = gpu::internal::mapped_allocation_views(device, allocation);
-    if (catch err = mapped) {
-        gpu::internal::release_incomplete_allocation(device, allocation);
-        return err~;
-    }
-    return mapped;
+    return gpu::internal::allocate_mapped_allocation(device, desc);
 }
 
 <* Make CPU writes to a live mapped allocation range visible to the GPU.

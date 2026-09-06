@@ -385,6 +385,9 @@ struct VkDeviceState @public {
     uint                 allocation_flush_calls;
     uint                 allocation_invalidate_calls;
     uint                 allocation_visibility_entries;
+    uint                 abandoned_allocation_reports;
+    uint                 abandoned_allocation_index;
+    uint                 abandoned_allocation_generation;
     uint                 texture_support_queries;
     uint                 texture_requirements_calls;
     uint                 texture_create_attempts;
@@ -397,6 +400,7 @@ struct VkDeviceState @public {
     gpu::DebugResourceKind root_diagnostic_resource_kind;
     ZString              root_diagnostic_rejected_field;
     ZString              root_diagnostic_invariant;
+    ZString              abandoned_allocation_debug_name;
     Atomic{bool}         destroy_entered;
     Atomic{bool}         destroy_release;
     Atomic{bool}         check_entered;
@@ -1409,6 +1413,17 @@ fn void? vk_free_allocation(
     state.allocation = {};
     state.allocation_desc = {};
     state.allocation_live = false;
+}
+
+fn void vk_report_abandoned_allocation(
+    VkDeviceState* state,
+    gpu::GpuAllocation allocation,
+    ZString debug_name,
+) {
+    state.abandoned_allocation_reports++;
+    state.abandoned_allocation_index = allocation.index;
+    state.abandoned_allocation_generation = allocation.generation;
+    state.abandoned_allocation_debug_name = debug_name;
 }
 
 fn gpu::AllocationInfo? vk_get_allocation_info(
