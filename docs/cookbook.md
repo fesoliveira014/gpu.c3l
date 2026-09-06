@@ -190,6 +190,13 @@ gpu::cmd_texture_barrier(commands, &to_sampled)!;
 The texture needs both `.storage` and `.sampled` usage. One texture cannot
 be in both layouts at once; split the uses with a transition.
 
+Unified mode (`DeviceDesc.unified_layouts`): the first barrier goes away,
+since the library initializes the image at the next submit. The second
+stays as a hazard barrier; its layouts are ignored and its stages and
+access still order the write before the sample. The same applies to every
+`cmd_texture_barrier` in this cookbook: keep the ones that separate a write
+from a read, delete the ones that only change a layout.
+
 ## Sample a cube map
 
 Create a cube-compatible texture, upload the six faces in one copy, and

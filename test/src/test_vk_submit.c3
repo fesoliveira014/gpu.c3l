@@ -871,6 +871,8 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
     gpu::wait_completion(point, 1_000_000_000)!!;
 }
 
+bool reject_swapchain_submit_unified;
+
 fn vk::Result reject_swapchain_submit(
     vk::Queue queue,
     uint submit_count,
@@ -884,7 +886,9 @@ fn vk::Result reject_swapchain_submit(
     assert(submit.wait_semaphore_info_count == 1,
         "readiness adds one private acquire wait");
     assert(submit.p_wait_semaphore_infos[0].stage_mask
-        == vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        == (reject_swapchain_submit_unified
+            ? vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT
+            : vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT),
         "acquire readiness keeps the requested first destination stage");
     assert(submit.signal_semaphore_info_count == 2,
         "readiness adds one private present signal");
@@ -907,7 +911,9 @@ fn vk::Result accept_swapchain_submit(
     assert(submit.wait_semaphore_info_count == 1,
         "readiness emits one acquire wait");
     assert(submit.p_wait_semaphore_infos[0].stage_mask
-        == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+        == (reject_swapchain_submit_unified
+            ? vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT
+            : vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT),
         "readiness keeps the requested transfer destination stage");
     accepted_swapchain_submit_calls++;
     return vk::Result.SUCCESS;
@@ -916,6 +922,7 @@ fn vk::Result accept_swapchain_submit(
 fn void native_submit_failure_preserves_swapchain_readiness() @test {
     gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
+    reject_swapchain_submit_unified = gpu::get_device_caps(&device)!!.unified_layouts;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::SwapchainCell[gpu::MAX_SWAPCHAINS] cells;
@@ -962,6 +969,7 @@ fn void native_submit_failure_preserves_swapchain_readiness() @test {
 fn void swapchain_submit_path_guards_precede_native_mutation() @test {
     gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
+    reject_swapchain_submit_unified = gpu::get_device_caps(&device)!!.unified_layouts;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::SwapchainCell[gpu::MAX_SWAPCHAINS] cells;
@@ -1008,18 +1016,20 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
     );
     accepted_swapchain_submit_calls = 0;
 
-    gpu::SubmitDesc missing_stage = { .readiness = readiness };
-    assert(@catch(vk::vk_submit_with(
-        state,
-        graphics,
-        &missing_stage,
-        &accept_swapchain_submit,
-    )) == gpu::INVALID_ARGUMENT,
-        "readiness requires a destination stage");
-    assert(accepted_swapchain_submit_calls == 0,
-        "missing readiness stage reaches no native submit");
-    assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
-        "missing readiness stage preserves the one-shot token");
+    if (!reject_swapchain_submit_unified) {
+        gpu::SubmitDesc missing_stage = { .readiness = readiness };
+        assert(@catch(vk::vk_submit_with(
+            state,
+            graphics,
+            &missing_stage,
+            &accept_swapchain_submit,
+        )) == gpu::INVALID_ARGUMENT,
+            "readiness requires a destination stage");
+        assert(accepted_swapchain_submit_calls == 0,
+            "missing readiness stage reaches no native submit");
+        assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
+            "missing readiness stage preserves the one-shot token");
+    }
 
     gpu::SubmitDesc orphan_stage = {
         .readiness_before = { .color_output },
@@ -1034,37 +1044,39 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
     assert(accepted_swapchain_submit_calls == 0,
         "orphan readiness stage reaches no native submit");
 
-    gpu::SubmitDesc host_stage = {
-        .readiness        = readiness,
-        .readiness_before = { .host },
-    };
-    assert(@catch(vk::vk_submit_with(
-        state,
-        graphics,
-        &host_stage,
-        &accept_swapchain_submit,
-    )) == gpu::INVALID_ARGUMENT,
-        "readiness rejects a host destination stage");
-    assert(accepted_swapchain_submit_calls == 0,
-        "invalid readiness stage reaches no native submit");
-    assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
-        "invalid readiness stage preserves the one-shot token");
+    if (!reject_swapchain_submit_unified) {
+        gpu::SubmitDesc host_stage = {
+            .readiness        = readiness,
+            .readiness_before = { .host },
+        };
+        assert(@catch(vk::vk_submit_with(
+            state,
+            graphics,
+            &host_stage,
+            &accept_swapchain_submit,
+        )) == gpu::INVALID_ARGUMENT,
+            "readiness rejects a host destination stage");
+        assert(accepted_swapchain_submit_calls == 0,
+            "invalid readiness stage reaches no native submit");
+        assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
+            "invalid readiness stage preserves the one-shot token");
 
-    gpu::SubmitDesc indirect_stage = {
-        .readiness        = readiness,
-        .readiness_before = { .indirect },
-    };
-    assert(@catch(vk::vk_submit_with(
-        state,
-        graphics,
-        &indirect_stage,
-        &accept_swapchain_submit,
-    )) == gpu::INVALID_ARGUMENT,
-        "readiness rejects an indirect destination stage");
-    assert(accepted_swapchain_submit_calls == 0,
-        "indirect readiness reaches no native submit");
-    assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
-        "indirect readiness preserves the one-shot token");
+        gpu::SubmitDesc indirect_stage = {
+            .readiness        = readiness,
+            .readiness_before = { .indirect },
+        };
+        assert(@catch(vk::vk_submit_with(
+            state,
+            graphics,
+            &indirect_stage,
+            &accept_swapchain_submit,
+        )) == gpu::INVALID_ARGUMENT,
+            "readiness rejects an indirect destination stage");
+        assert(accepted_swapchain_submit_calls == 0,
+            "indirect readiness reaches no native submit");
+        assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
+            "indirect readiness preserves the one-shot token");
+    }
 
     gpu::CompletionWait[1] invalid_waits = {{
         .point  = prior,

@@ -39,6 +39,7 @@ const ZString GENERATED_WORK_USAGE_EXTENSION = "VK_KHR_maintenance5";
 const ZString ACCELERATION_STRUCTURE_EXTENSION =
     "VK_KHR_acceleration_structure";
 const ZString RAY_QUERY_EXTENSION = "VK_KHR_ray_query";
+const ZString UNIFIED_IMAGE_LAYOUTS_EXTENSION = "VK_KHR_unified_image_layouts";
 const ZString RAY_TRACING_PIPELINE_EXTENSION =
     "VK_KHR_ray_tracing_pipeline";
 const ZString RAY_TRACING_MAINTENANCE1_EXTENSION =
@@ -139,6 +140,12 @@ struct VkDeviceState @public {
     bool                       acceleration_structures_enabled;
     bool                       ray_queries_enabled;
     bool                       ray_tracing_pipelines_enabled;
+    bool                       unified_layouts;
+    bool                       unified_layouts_extension;
+    // Leaf lock: nothing else is taken while it is held.
+    Mutex                      pending_init_mutex;
+    gpu::TextureHandle[]       pending_init_textures;
+    uint                       pending_init_count;
     uint                       acceleration_structure_heap_capacity;
     VkAccelerationStructureDispatch* acceleration_structure_operations;
     VkRayTracingPipelineDispatch*    ray_tracing_pipeline_operations;
@@ -190,6 +197,8 @@ struct CapsInputs {
     bool                      acceleration_structures_enabled;
     bool                      ray_queries_enabled;
     bool                      ray_tracing_pipelines_enabled;
+    bool                      unified_layouts;
+    bool                      unified_layouts_extension;
     uint                      acceleration_structure_heap_capacity;
     RayTracingCandidateSupport ray_tracing_support;
 }
@@ -761,6 +770,7 @@ fn gpu::Device? create_vk_device_with_probe(
         enable_ray_queries:          normalized.enable_ray_queries,
         enable_ray_tracing_pipelines:
             normalized.enable_ray_tracing_pipelines,
+        unified_layouts:             normalized.unified_layouts,
         shader_heap_support:         &adapter_state.shader_heap,
         probe:                       probe,
         creation_ops:                creation_ops,
@@ -801,6 +811,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     bool enable_sparse_textures = false,
     bool enable_ray_queries = false,
     bool enable_ray_tracing_pipelines = false,
+    bool unified_layouts = false,
     ShaderHeapSupport* shader_heap_support = null,
     DeviceCreationProbe* probe = null,
     DeviceCreationOps* creation_ops = null,
@@ -818,6 +829,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.validation_policy = config.validation;
     state.command_ops = select_command_ops(state.validation_policy);
     state.resource_mutex.init()!;
+    state.pending_init_mutex.init()!;
     state.pipeline_creation_mutex.init()!;
     state.texture_view_cache_mutex.init()!;
     state.command_mutex.init()!;
@@ -841,6 +853,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         enable_ray_queries || enable_ray_tracing_pipelines;
     state.ray_queries_enabled = enable_ray_queries;
     state.ray_tracing_pipelines_enabled = enable_ray_tracing_pipelines;
+    state.unified_layouts = unified_layouts;
     state.acceleration_structure_heap_capacity =
         state.acceleration_structures_enabled
         ? config.acceleration_structure_heap_capacity
@@ -936,9 +949,17 @@ fn gpu::Device? create_vk_device_from_runtime(
         vk::physical_device_ray_query_features_khr();
     vk::PhysicalDeviceRayTracingPipelineFeaturesKHR ray_pipeline_features =
         vk::physical_device_ray_tracing_pipeline_features_khr();
+    vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR unified_layouts_features =
+        vk::physical_device_unified_image_layouts_features_khr();
+    bool unified_layouts_extension = state.unified_layouts
+        && device_supports_extension(state.physical_device, UNIFIED_IMAGE_LAYOUTS_EXTENSION);
     if (generated_work_usage_extension) {
         maintenance5_features = maintenance5_features.set_next(&generated_work_features);
         features13 = features13.set_next(&maintenance5_features);
+    }
+    if (unified_layouts_extension) {
+        unified_layouts_features = unified_layouts_features.set_next(features13.p_next);
+        features13 = features13.set_next(&unified_layouts_features);
     }
     if (state.acceleration_structures_enabled) {
         acceleration_structure_features =
@@ -972,6 +993,8 @@ fn gpu::Device? create_vk_device_from_runtime(
     vk::PhysicalDeviceFeatures2 features2 =
         vk::physical_device_features2().set_next(&features11);
     vk::get_physical_device_features2(state.physical_device, &features2);
+    state.unified_layouts_extension = unified_layouts_extension
+        && unified_layouts_features.unified_image_layouts != 0;
     SparseTextureFeaturePlan sparse_texture_plan =
         resolve_sparse_texture_feature_plan(
             enable_sparse_textures,
@@ -1268,6 +1291,8 @@ fn gpu::Device? create_vk_device_from_runtime(
         .ray_queries_enabled   = state.ray_queries_enabled,
         .ray_tracing_pipelines_enabled =
             state.ray_tracing_pipelines_enabled,
+        .unified_layouts       = state.unified_layouts,
+        .unified_layouts_extension = state.unified_layouts_extension,
         .acceleration_structure_heap_capacity =
             config.acceleration_structure_heap_capacity,
         .ray_tracing_support     = state.ray_tracing_support,
@@ -1307,6 +1332,13 @@ fn gpu::Device? create_vk_device_from_runtime(
         )!;
     state.caps.queues = queue_selection.selected;
     create_queue_completions(state, &queue_selection)!;
+    if (state.unified_layouts) {
+        state.pending_init_textures = mem::new_array(
+            gpu::TextureHandle,
+            state.textures.slots.len,
+        );
+        create_internal_command_allocators(state)!;
+    }
 
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.BEFORE_PUBLICATION)!;
     return gpu::internal::register_device(
@@ -1393,6 +1425,7 @@ fn void destroy_state(VkDeviceState* state) @private {
     if (state == null) return;
     if (state.device != null) {
         destroy_submitted_commands(state);
+        destroy_internal_command_allocators(state);
         // Report before cleanup clears the diagnostic tables.
         if (report_teardown_leaks(state)) (void)report_resource_leaks(state);
         destroy_command_table(state);
@@ -1461,6 +1494,11 @@ fn void destroy_state(VkDeviceState* state) @private {
     }
     state.instance = (vk::Instance)null;
     if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
+    if (state.pending_init_mutex.is_initialized())   (void)state.pending_init_mutex.destroy();
+    if (state.pending_init_textures.ptr != null) {
+        mem::free(state.pending_init_textures.ptr);
+        state.pending_init_textures = {};
+    }
     if (state.pipeline_creation_mutex.is_initialized()) (void)state.pipeline_creation_mutex.destroy();
     if (state.texture_view_cache_mutex.is_initialized()) (void)state.texture_view_cache_mutex.destroy();
     if (state.command_mutex.is_initialized())        (void)state.command_mutex.destroy();
@@ -1910,6 +1948,13 @@ fn void? create_logical_device_with_queue_infos(
         );
         features13 = features13.set_next(&presentation_features);
     }
+    vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR unified_layouts_features =
+        vk::physical_device_unified_image_layouts_features_khr()
+            .set_unified_image_layouts(vk::TRUE);
+    if (state.unified_layouts_extension) {
+        unified_layouts_features = unified_layouts_features.set_next(features13.p_next);
+        features13 = features13.set_next(&unified_layouts_features);
+    }
     vk::PhysicalDeviceVulkan12Features features12 = vk::physical_device_vulkan12features()
         .set_buffer_device_address(vk::TRUE)
         .set_timeline_semaphore(vk::TRUE)
@@ -1946,7 +1991,7 @@ fn void? create_logical_device_with_queue_infos(
     features2.features.shader_storage_image_write_without_format = vk::TRUE;
 
     state.memory_budget_enabled = device_supports_extension(state.physical_device, "VK_EXT_memory_budget");
-    ZString[12] extensions;
+    ZString[13] extensions;
     uint extension_count = 0;
     extensions[extension_count++] = DYNAMIC_STATE_3_EXTENSION;
     if (state.memory_budget_enabled) extensions[extension_count++] = "VK_EXT_memory_budget";
@@ -1968,6 +2013,9 @@ fn void? create_logical_device_with_queue_infos(
             )) {
             extensions[extension_count++] = RAY_TRACING_MAINTENANCE1_EXTENSION;
         }
+    }
+    if (state.unified_layouts_extension) {
+        extensions[extension_count++] = UNIFIED_IMAGE_LAYOUTS_EXTENSION;
     }
     if (state.presentation.enabled) {
         if (!device_supports_extension(
@@ -2092,6 +2140,8 @@ fn gpu::DeviceCaps build_caps(
             inputs.ray_tracing_pipelines_enabled,
             &inputs.ray_tracing_support,
         ),
+        .unified_layouts            = inputs.unified_layouts,
+        .unified_layouts_optimal    = inputs.unified_layouts_extension,
         .texture_heap_capacity      = inputs.texture_capacity,
         .sampler_heap_capacity      = inputs.sampler_capacity,
         .max_color_attachments      = props.limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS

@@ -489,12 +489,74 @@ fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
     }
 }
 
-fn gpu::TextureState swapchain_prior_state(TextureSlot* slot) {
+fn gpu::TextureState swapchain_prior_state(TextureSlot* slot, bool unified) {
+    if (unified) return { .layout = gpu::TextureLayout.GENERAL };
     return {
         .layout = slot.presented.load(AtomicOrdering.RELAXED)
             ? gpu::TextureLayout.PRESENT
             : gpu::TextureLayout.UNDEFINED,
     };
+}
+
+<* Unified mode: queue a published texture for its UNDEFINED -> GENERAL
+   transition at the next submit. The list is sized to the texture table and
+   holds each live texture at most once; a full list only follows a failed
+   submit that restored stale handles, and the dropped texture then stays
+   uninitialized. *>
+fn void note_pending_texture_init(
+    VkDeviceState* state,
+    gpu::TextureHandle handle,
+) {
+    if (!state.unified_layouts) return;
+    state.pending_init_mutex.lock()!!;
+    defer state.pending_init_mutex.unlock();
+    if (state.pending_init_count < state.pending_init_textures.len) {
+        state.pending_init_textures[state.pending_init_count++] = handle;
+    }
+}
+
+fn void forget_pending_texture_init(
+    VkDeviceState* state,
+    gpu::TextureHandle handle,
+) {
+    if (!state.unified_layouts) return;
+    state.pending_init_mutex.lock()!!;
+    defer state.pending_init_mutex.unlock();
+    for (uint i = 0; i < state.pending_init_count; i++) {
+        if (state.pending_init_textures[i] != handle) continue;
+        state.pending_init_textures[i] =
+            state.pending_init_textures[--state.pending_init_count];
+        return;
+    }
+}
+
+fn uint take_pending_texture_inits(
+    VkDeviceState* state,
+    gpu::TextureHandle[] out,
+) {
+    state.pending_init_mutex.lock()!!;
+    defer state.pending_init_mutex.unlock();
+    uint count = state.pending_init_count;
+    if (count > out.len) count = (uint)out.len;
+    out[:count] = state.pending_init_textures[:count];
+    uint remaining = state.pending_init_count - count;
+    for (uint i = 0; i < remaining; i++) {
+        state.pending_init_textures[i] = state.pending_init_textures[count + i];
+    }
+    state.pending_init_count = remaining;
+    return count;
+}
+
+fn void restore_pending_texture_inits(
+    VkDeviceState* state,
+    gpu::TextureHandle[] handles,
+) {
+    state.pending_init_mutex.lock()!!;
+    defer state.pending_init_mutex.unlock();
+    foreach (handle : handles) {
+        if (state.pending_init_count == state.pending_init_textures.len) return;
+        state.pending_init_textures[state.pending_init_count++] = handle;
+    }
 }
 
 fn void mark_texture_presented(TextureSlot* slot) {
@@ -906,6 +968,7 @@ fn gpu::TextureHandle? vk_create_texture(
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
         if (try handle = state.textures.alloc(slot)) {
+            note_pending_texture_init(state, handle);
             return handle;
         }
     }
@@ -1215,6 +1278,7 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
     }
 
     gpu::TextureHandle handle = state.textures.alloc(slot)!;
+    note_pending_texture_init(state, handle);
     owns_image = false;
     owns_view = false;
     retained_placement = false;
@@ -1418,6 +1482,7 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
         } else {
             texture = published;
         }
+        note_pending_texture_init(state, texture);
         state.allocations.get(allocation)!!.live_placements = 1;
     }
     owns_view = false;
@@ -1486,6 +1551,7 @@ fn void? vk_destroy_texture(
     gpu::GpuAllocation placement = slot.placement;
     destroy_cached_views(state, slot);
     state.textures.free(handle)!;
+    forget_pending_texture_init(state, handle);
     if (default_view != null) {
         vk::destroy_image_view(state.device, default_view, null);
     }

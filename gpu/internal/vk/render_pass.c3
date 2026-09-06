@@ -248,6 +248,7 @@ fn PreparedRenderPass? lower_render_pass(
         attachment.image_layout = texture_layout_to_vk(
             gpu::TextureLayout.COLOR_ATTACHMENT,
             view.format,
+            state.unified_layouts,
         );
         attachment.load_op = load_op_to_vk(target.load_op);
         attachment.store_op = store_op_to_vk(target.store_op);
@@ -268,6 +269,7 @@ fn PreparedRenderPass? lower_render_pass(
             attachment.resolve_image_layout = texture_layout_to_vk(
                 gpu::TextureLayout.COLOR_ATTACHMENT,
                 resolve.format,
+                state.unified_layouts,
             );
         }
     }
@@ -288,6 +290,7 @@ fn PreparedRenderPass? lower_render_pass(
         pass.depth_attachment.image_layout = texture_layout_to_vk(
             gpu::TextureLayout.DEPTH_ATTACHMENT,
             depth.format,
+            state.unified_layouts,
         );
         pass.depth_attachment.load_op = load_op_to_vk(desc.depth.load_op);
         pass.depth_attachment.store_op = store_op_to_vk(desc.depth.store_op);

@@ -1852,6 +1852,7 @@ fn gpu::Device? create_vk_device(
             }
             : {},
         .ray_queries = { .enabled = normalized.enable_ray_queries },
+        .unified_layouts = normalized.unified_layouts,
         .ray_tracing_pipelines = normalized.enable_ray_tracing_pipelines
             ? (gpu::RayTracingPipelineCaps){
                 .enabled = true,

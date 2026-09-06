@@ -1158,7 +1158,8 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
         "transfer destination lowers to transfer-write access");
     assert(capture.native.old_layout == vk::ImageLayout.UNDEFINED,
         "undefined source lowers to the undefined layout");
-    assert(capture.native.new_layout == vk::ImageLayout.TRANSFER_DST_OPTIMAL,
+    assert(capture.native.new_layout == (gpu::get_device_caps(&device)!!.unified_layouts
+            ? vk::ImageLayout.GENERAL : vk::ImageLayout.TRANSFER_DST_OPTIMAL),
         "transfer destination lowers to its optimal layout");
     assert(capture.native.src_queue_family_index == vk::QUEUE_FAMILY_IGNORED
         && capture.native.dst_queue_family_index == vk::QUEUE_FAMILY_IGNORED,
@@ -1222,8 +1223,8 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     assert(capture.native.dst_access_mask
             == vk::AccessFlagBits2.ACCESS_2_SHADER_SAMPLED_READ_BIT,
         "sampled state lowers to sampled-read access");
-    assert(capture.native.new_layout
-            == vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL,
+    assert(capture.native.new_layout == (gpu::get_device_caps(&device)!!.unified_layouts
+            ? vk::ImageLayout.GENERAL : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL),
         "sampled state lowers to the shader-read layout");
 
     gpu::TextureBarrier storage = {
@@ -1266,8 +1267,8 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     assert(capture.native.src_access_mask
             == vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
         "color attachment source preserves its write access");
-    assert(capture.native.old_layout
-            == vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+    assert(capture.native.old_layout == (gpu::get_device_caps(&device)!!.unified_layouts
+            ? vk::ImageLayout.GENERAL : vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL),
         "color attachment source preserves its native layout");
     assert(capture.native.dst_stage_mask
             == vk::PipelineStageFlagBits2.STAGE_2_NONE,
@@ -1275,7 +1276,8 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     assert(capture.native.dst_access_mask
             == vk::AccessFlagBits2.ACCESS_2_NONE,
         "present destination lowers to no destination access");
-    assert(capture.native.new_layout == vk::ImageLayout.PRESENT_SRC_KHR,
+    assert(capture.native.new_layout == (gpu::get_device_caps(&device)!!.unified_layouts
+            ? vk::ImageLayout.GENERAL : vk::ImageLayout.PRESENT_SRC_KHR),
         "present destination lowers to the native presentation layout");
 
     gpu::TextureBarrier to_color = {
@@ -1296,7 +1298,8 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     assert(capture.native.src_access_mask
             == vk::AccessFlagBits2.ACCESS_2_NONE,
         "present source has no source access");
-    assert(capture.native.old_layout == vk::ImageLayout.PRESENT_SRC_KHR,
+    assert(capture.native.old_layout == (gpu::get_device_caps(&device)!!.unified_layouts
+            ? vk::ImageLayout.GENERAL : vk::ImageLayout.PRESENT_SRC_KHR),
         "present source lowers to the native presentation layout");
     assert(capture.native.dst_stage_mask
             == vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -1304,8 +1307,8 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     assert(capture.native.dst_access_mask
             == vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
         "color attachment destination preserves its write access");
-    assert(capture.native.new_layout
-            == vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+    assert(capture.native.new_layout == (gpu::get_device_caps(&device)!!.unified_layouts
+            ? vk::ImageLayout.GENERAL : vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL),
         "color attachment destination preserves its native layout");
     slot.swapchain_owned = false;
 }
@@ -1366,8 +1369,9 @@ fn void assert_present_barrier_emission_for_contract(
     assert(capture.native.dst_access_mask
             == vk::AccessFlagBits2.ACCESS_2_TRANSFER_READ_BIT,
         "transfer destination preserves its native access");
-    assert(capture.native.old_layout == vk::ImageLayout.PRESENT_SRC_KHR
-        && capture.native.new_layout == vk::ImageLayout.TRANSFER_SRC_OPTIMAL,
+    bool unified = gpu::get_device_caps(&device)!!.unified_layouts;
+    assert(capture.native.old_layout == (unified ? vk::ImageLayout.GENERAL : vk::ImageLayout.PRESENT_SRC_KHR)
+        && capture.native.new_layout == (unified ? vk::ImageLayout.GENERAL : vk::ImageLayout.TRANSFER_SRC_OPTIMAL),
         "presentation transition preserves the exact native layouts");
     assert(capture.native.src_queue_family_index == vk::QUEUE_FAMILY_IGNORED
         && capture.native.dst_queue_family_index == vk::QUEUE_FAMILY_IGNORED,
@@ -1399,8 +1403,8 @@ fn void assert_present_barrier_emission_for_contract(
     assert(capture.native.dst_access_mask
             == vk::AccessFlagBits2.ACCESS_2_NONE,
         "present destination uses no destination access");
-    assert(capture.native.old_layout == vk::ImageLayout.TRANSFER_SRC_OPTIMAL
-        && capture.native.new_layout == vk::ImageLayout.PRESENT_SRC_KHR,
+    assert(capture.native.old_layout == (unified ? vk::ImageLayout.GENERAL : vk::ImageLayout.TRANSFER_SRC_OPTIMAL)
+        && capture.native.new_layout == (unified ? vk::ImageLayout.GENERAL : vk::ImageLayout.PRESENT_SRC_KHR),
         "ordinary-to-presentation preserves the exact native layouts");
     assert(capture.native.src_queue_family_index == vk::QUEUE_FAMILY_IGNORED
         && capture.native.dst_queue_family_index == vk::QUEUE_FAMILY_IGNORED,
@@ -1419,6 +1423,7 @@ fn void present_barrier_emission_matches_both_contract_policies() @test {
 fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
+    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
     gpu::TextureDesc desc = {
         .access     = { .graphics },
         .width      = 8,
@@ -1475,6 +1480,7 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
 fn void texture_barrier_rejects_unsupported_texture_states() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
+    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
 
     gpu::TextureDesc desc = {
         .access    = { .graphics },
@@ -2147,6 +2153,7 @@ fn void texture_barrier_state_diagnostics_name_nested_side_fields() @test {
     };
     gpu::Device device = make_texture_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
+    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
     gpu::TextureDesc desc = {
         .access     = { .graphics },
         .width      = 8,

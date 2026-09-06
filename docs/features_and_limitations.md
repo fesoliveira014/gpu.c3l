@@ -57,7 +57,10 @@ indirect-count draws, generated work, line polygon mode, sparse textures,
 anisotropy, timestamps, and workload limits. Ray queries and ray-tracing
 pipelines are requested in `DeviceDesc` and also need a nonzero
 `RuntimeDesc.acceleration_structure_heap_capacity`. A request the adapter
-cannot satisfy fails atomically.
+cannot satisfy fails atomically. `DeviceDesc.unified_layouts` keeps every
+texture in one layout and is satisfiable everywhere;
+`DeviceCaps.unified_layouts_optimal` says whether the driver makes that
+layout free.
 
 Indirect acceleration-structure builds are reported separately by
 `AccelerationStructureCaps.indirect_build`. The recording path is covered
@@ -99,7 +102,8 @@ by CPU tests but has not run on hardware that reports the capability.
   They are not storage images, attachments, or sparse textures, and the
   library never encodes, decodes, or generates mips.
 - Sparse textures are single-layer, single-sample color 2D or 3D images.
-- A texture is either sampled or storage within one layout interval.
+- A texture is either sampled or storage within one layout interval, except
+  under `DeviceDesc.unified_layouts`.
 - `GraphicsState` has no default. Set a complete state before drawing.
 - The ABI schema has no matrix or fixed-array type.
 - One BLAS holds only triangles or only AABBs.

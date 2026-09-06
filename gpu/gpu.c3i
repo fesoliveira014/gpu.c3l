@@ -430,6 +430,10 @@ struct DeviceCaps {
     AccelerationStructureCaps acceleration_structures;
     RayQueryCaps ray_queries;
     RayTracingPipelineCaps ray_tracing_pipelines;
+    // Unified layouts mode is active.
+    bool unified_layouts;
+    // VK_KHR_unified_image_layouts is enabled, so the one layout costs nothing.
+    bool unified_layouts_optimal;
     // Configured semantic heap capacity, not the hardware maximum.
     uint texture_heap_capacity;
     // Configured semantic heap capacity, not the hardware maximum.
@@ -607,6 +611,9 @@ struct DeviceDesc {
     bool         enable_sparse_textures;
     bool         enable_ray_queries;
     bool         enable_ray_tracing_pipelines;
+    // Keep every texture in one layout. TextureBarrier layouts lower to that
+    // layout and swapchain transitions are internal.
+    bool         unified_layouts;
 }
 
 <* Result of a read-only semantic support query. unmet_requirement is a
@@ -1588,6 +1595,8 @@ enum TextureLayout : int {
     COLOR_ATTACHMENT,
     DEPTH_ATTACHMENT,
     PRESENT,
+    // Any use; valid only on a device with unified layouts.
+    GENERAL,
 }
 
 <* Read/write intent for a texture state. The zero value means no access and is

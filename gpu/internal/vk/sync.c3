@@ -85,6 +85,7 @@ fn bool texture_layout_known(gpu::TextureLayout layout) @private {
         case gpu::TextureLayout.COLOR_ATTACHMENT:
         case gpu::TextureLayout.DEPTH_ATTACHMENT:
         case gpu::TextureLayout.PRESENT:
+        case gpu::TextureLayout.GENERAL:
             return true;
         default:
             return false;
@@ -133,16 +134,28 @@ fn vk::AccessFlags2 texture_access_to_vk(
             if (access.write) {
                 mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
             }
+        case gpu::TextureLayout.GENERAL:
+            if (access.read) {
+                mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT;
+            }
+            if (access.write) {
+                mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_MEMORY_WRITE_BIT;
+            }
         default:
             return vk::AccessFlagBits2.ACCESS_2_NONE;
     }
     return (vk::AccessFlags2)mask;
 }
 
+<* Unified mode keeps every layout but UNDEFINED in GENERAL. *>
 fn vk::ImageLayout texture_layout_to_vk(
     gpu::TextureLayout layout,
     gpu::Format format,
+    bool unified = false,
 ) {
+    if (unified && layout != gpu::TextureLayout.UNDEFINED) {
+        return vk::ImageLayout.GENERAL;
+    }
     switch (layout) {
         case gpu::TextureLayout.UNDEFINED:
             return vk::ImageLayout.UNDEFINED;
@@ -162,6 +175,8 @@ fn vk::ImageLayout texture_layout_to_vk(
             return vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
         case gpu::TextureLayout.PRESENT:
             return vk::ImageLayout.PRESENT_SRC_KHR;
+        case gpu::TextureLayout.GENERAL:
+            return vk::ImageLayout.GENERAL;
         default:
             return {};
     }
@@ -172,10 +187,12 @@ fn TextureStateScope texture_state_to_vk(
     gpu::Format format,
     TextureStateSide side,
     gpu::StageMask paired_stages,
+    bool unified = false,
 ) {
     vk::ImageLayout layout = texture_layout_to_vk(
         state.layout,
         format,
+        unified,
     );
     switch (state.layout) {
         case gpu::TextureLayout.UNDEFINED:
@@ -215,6 +232,12 @@ fn TextureStateScope texture_state_to_vk(
                 .layout = layout,
             };
         case gpu::TextureLayout.DEPTH_ATTACHMENT:
+            return {
+                .stages = barrier_before_stages_to_vk(state.stages),
+                .access = texture_access_to_vk(state.layout, state.access),
+                .layout = layout,
+            };
+        case gpu::TextureLayout.GENERAL:
             return {
                 .stages = barrier_before_stages_to_vk(state.stages),
                 .access = texture_access_to_vk(state.layout, state.access),
@@ -272,12 +295,15 @@ fn bool texture_shader_stages_supported(
     return true;
 }
 
+<* Unified mode keeps the generic and queue rules and skips the per-layout
+   usage and access rules. *>
 fn TextureBarrierRejection texture_state_rejection(
     gpu::TextureState texture_state,
     TextureSlot* slot,
     vk::QueueFlags flags,
     bool ray_tracing_pipelines,
     bool before,
+    bool unified = false,
 ) @private {
     TextureStateSide side = before
         ? TextureStateSide.BEFORE
@@ -321,6 +347,33 @@ fn TextureBarrierRejection texture_state_rejection(
     bool concrete_access = access != 0;
     bool all = texture_state.stages.all;
     bool depth_stencil = texture_format_is_depth_stencil(slot.format);
+
+    if (texture_state.layout == gpu::TextureLayout.GENERAL && !unified) {
+        return {
+            .field     = texture_state_field(side, TextureStateMember.LAYOUT),
+            .invariant = "GENERAL requires a device with unified layouts",
+        };
+    }
+    if (unified && texture_state.layout != gpu::TextureLayout.UNDEFINED) {
+        bool queue_supported = all
+            || ((!texture_state.stages.transfer || transfer)
+                && (!shader_stages || (shader_queue
+                    && texture_shader_stages_supported(
+                        texture_state.stages,
+                        flags,
+                        ray_tracing_pipelines,
+                    )))
+                && (!(texture_state.stages.color_output
+                        || texture_state.stages.depth_output)
+                    || graphics));
+        if (!queue_supported) {
+            return {
+                .field     = texture_state_field(side, TextureStateMember.STAGES),
+                .invariant = "stages must be supported by the recording queue",
+            };
+        }
+        return {};
+    }
 
     switch (texture_state.layout) {
         case gpu::TextureLayout.UNDEFINED:
@@ -598,6 +651,7 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         flags:         completion.queue_flags,
         ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
         before:        true,
+        unified:       state.unified_layouts,
     );
     if (rejection.field != null) {
         return report_texture_barrier_rejection(
@@ -612,6 +666,7 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         format:        slot.format,
         side:          TextureStateSide.BEFORE,
         paired_stages: barrier.after.stages,
+        unified:       state.unified_layouts,
     );
 
     rejection = texture_state_rejection(
@@ -620,6 +675,7 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         flags:         completion.queue_flags,
         ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
         before:        false,
+        unified:       state.unified_layouts,
     );
     if (rejection.field != null) {
         return report_texture_barrier_rejection(
@@ -634,6 +690,7 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         format:        slot.format,
         side:          TextureStateSide.AFTER,
         paired_stages: barrier.before.stages,
+        unified:       state.unified_layouts,
     );
 
     vk::ImageMemoryBarrier2 native = vk::image_memory_barrier2()
@@ -833,12 +890,14 @@ fn LoweredTextureBarrier? lower_texture_barrier_trusted(
         format:        slot.format,
         side:          TextureStateSide.BEFORE,
         paired_stages: barrier.after.stages,
+        unified:       state.unified_layouts,
     );
     TextureStateScope after = texture_state_to_vk(
         state:         barrier.after,
         format:        slot.format,
         side:          TextureStateSide.AFTER,
         paired_stages: barrier.before.stages,
+        unified:       state.unified_layouts,
     );
     vk::ImageMemoryBarrier2 native = vk::image_memory_barrier2()
         .set_src_stage_mask(before.stages)

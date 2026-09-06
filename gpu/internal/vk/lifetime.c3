@@ -140,9 +140,7 @@ fn void publish_pending_commands_locked(
         }
         completion.submitted_tail = record;
         completion.submitted_count++;
-        CommandAllocatorSlot* slot = state.command_allocators.get(
-            record.allocator,
-        )!!;
+        CommandAllocatorSlot* slot = record_allocator_slot(state, record);
         // The live executable forces destroy to release its claim before this retirement-held pin proceeds.
         pin_command_allocator_slot(slot);
         slot.mutex.lock()!!;
@@ -186,9 +184,7 @@ fn CommandRecord* release_pending_command_locked(
     CommandRecord* record,
 ) {
     CommandRecord* next = record.next_submitted;
-    CommandAllocatorSlot* slot = state.command_allocators.get(
-        record.allocator,
-    )!!;
+    CommandAllocatorSlot* slot = record_allocator_slot(state, record);
     // The in-flight buffer forces destroy to release its claim before this retirement-held pin proceeds.
     pin_command_allocator_slot(slot);
     slot.mutex.lock()!!;
