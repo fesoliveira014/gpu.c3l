@@ -1035,7 +1035,12 @@ fn void? vk_begin_commands_with_ops(
         real_pool_ops = command_pool_ops_real(state);
         pool_ops = &real_pool_ops;
     }
-    ensure_command_buffer_locked(state, slot, buffer_index, pool_ops)!;
+    ensure_command_buffer_locked(
+        state:        state,
+        slot:         slot,
+        buffer_index: buffer_index,
+        ops:          pool_ops,
+    )!;
     vk::CommandBuffer command_buffer = slot.command_buffers[buffer_index];
     CommandRecord backend_record = {
         .command_buffer   = command_buffer,

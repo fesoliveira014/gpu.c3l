@@ -5,6 +5,7 @@ import gpu @public;
 import gpu::internal::vk @public;
 import vk;
 import std::thread;
+import std::io;
 import std::atomic;
 import std::core::mem;
 import std::core::mem::allocators;
@@ -63,6 +64,14 @@ struct ScratchWorkerArgs {
     gpu::CommandAllocator* allocator;
     gpu::PipelineHandle    pipeline;
     Atomic{bool}*          start;
+    bool                   failed;
+}
+
+struct RetrySubmitArgs {
+    gpu::CommandAllocator* allocator;
+    gpu::Queue             queue;
+    uint                   iterations;
+    uint                   completed;
     bool                   failed;
 }
 
@@ -432,14 +441,6 @@ fn int reuse_recording_pool_worker(void* raw_args) {
     return 0;
 }
 
-struct RetrySubmitArgs {
-    gpu::CommandAllocator* allocator;
-    gpu::Queue             queue;
-    uint                   iterations;
-    uint                   completed;
-    bool                   failed;
-}
-
 fn void? run_retry_submits(RetrySubmitArgs* args) {
     for (uint i = 0; i < args.iterations; i++) {
         gpu::CommandList commands;
@@ -462,7 +463,10 @@ fn void? run_retry_submits(RetrySubmitArgs* args) {
 fn int retry_submit_worker(void* raw_args) {
     RetrySubmitArgs* args = (RetrySubmitArgs*)raw_args;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
-        if (catch run_retry_submits(args)) args.failed = true;
+        if (catch err = run_retry_submits(args)) {
+            args.failed = true;
+            io::eprintfn("retry submit worker failed: %s", err);
+        }
     };
     return args.failed ? 1 : 0;
 }

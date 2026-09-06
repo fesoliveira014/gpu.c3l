@@ -17,7 +17,7 @@ stateDiagram-v2
 ```c3
 gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
 gpu::CommandAllocatorDesc desc = {
-    .command_buffer_capacity          = 8,    // 0 selects 8
+    .command_buffer_capacity          = 8,    // 0 selects 32
     .max_resource_references_per_list = 64,   // 0 selects 64; FULL validation only
     .debug_name                       = "frame_allocator",
     .max_acceleration_structure_geometries_per_build = 0,  // >0 enables AS builds
