@@ -700,12 +700,12 @@ fn MappedGpuSpan? mapped_gpu_span(Device* device, GpuSpan span) {
 }
 
 <* Allocate a mapped class and borrow its complete span, mapping, and address.
-   A class without a host mapping faults before any allocation; a later fault
-   frees the allocation. Free with `free_allocation` on `span.allocation()`.
+   A class without a host mapping faults before any allocation. Free with
+   `free_allocation` on `span.allocation()`.
 
    @param device : "Live device that will own the allocation."
    @param desc : "Borrowed allocation description with a mapped memory class."
-   @return "Consistent borrowed views of the new allocation, or a recoverable invalid-argument, access, allocation, or device fault." *>
+   @return "Consistent borrowed views of the new allocation, or a recoverable invalid-argument, access, allocation, or device fault. A failed view frees the allocation and returns the view fault; if that cleanup free also fails, the allocation is reported as abandoned and the cleanup fault is returned instead." *>
 fn MappedGpuSpan? allocate_mapped_memory(Device* device, AllocationDesc* desc) {
     if (desc == null) return INVALID_ARGUMENT~;
     if (desc.memory_class == MemoryClass.GPU_PRIVATE

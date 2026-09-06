@@ -149,9 +149,10 @@ fn void mapped_allocation_reports_abandoned_allocation_when_rollback_free_fails(
 
     state.mapping_unavailable = true;
     state.allocation_block_free = true;
-    assert(@catch(gpu::allocate_mapped_memory(&device, &desc)) == gpu::BACKEND_ERROR,
-        "the original mapping fault is still returned when the rollback free also fails");
+    assert(@catch(gpu::allocate_mapped_memory(&device, &desc)) == gpu::RESOURCE_IN_USE,
+        "a rollback free that also fails returns the cleanup fault, not the mapping fault");
     assert(state.allocation_live, "a failed rollback free leaves the allocation live");
+    assert(state.allocation_free_calls == 1, "no second free is attempted after the rollback free fails");
     assert(state.abandoned_allocation_reports == 1
         && state.abandoned_allocation_index == 0
         && state.abandoned_allocation_generation == 1,
