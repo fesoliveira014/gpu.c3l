@@ -13,6 +13,9 @@ const uint PRESENT_WAIT_CAPTURE_CAPACITY =
 const ulong ACQUIRE_FINITE_TIMEOUT_NS = 2_000_000;
 const ulong ACQUIRE_FIXTURE_OWNER = 101;
 
+uint unified_submit_buffer_count;
+vk::PipelineStageFlags2 unified_submit_wait_stage;
+
 struct AcquisitionStateSnapshot {
     bool                                              acquire_pending;
     bool                                              readiness_consumed;
@@ -2159,9 +2162,6 @@ fn void swapchain_info_query_rejects_invalid_handle() @test {
     assert(query_fault == gpu::INVALID_HANDLE, "query on a bogus swapchain faults INVALID_HANDLE");
 }
 
-uint unified_submit_buffer_count;
-vk::PipelineStageFlags2 unified_submit_wait_stage;
-
 fn vk::Result capture_unified_submit(
     vk::Queue queue,
     uint submit_count,
@@ -2245,5 +2245,25 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
         gpu::internal::begin_device_operation(&device)!!;
     release_submitted_executables(&operation, lists[..]);
     gpu::internal::end_device_operation(&operation);
+
+    gpu::AcquiredImage second = gpu::internal::vk::vk_acquire_next_image(
+        state,
+        fixture.swapchain,
+        0,
+    )!!;
+    vk::SemaphoreSubmitInfo signal = vk::semaphore_submit_info()
+        .set_semaphore(fixture.live_slot.pending_acquire_semaphore)
+        .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
+    vk::SubmitInfo2 release = vk::submit_info2().set_signal_semaphore_infos((&signal)[:1]);
+    assert(vk::queue_submit2(state.queue_completions[queue.id].queue, 1, &release, (vk::Fence)null)
+        == vk::Result.SUCCESS, "the fixture signals the acquisition");
+    gpu::CommandList again = gpu::begin_commands(&allocator)!!;
+    gpu::cmd_begin_render_pass(&again, &pass)!!;
+    gpu::cmd_end_render_pass(&again)!!;
+    gpu::ExecutableCommandList[1] again_lists = { gpu::end_commands(&again)!! };
+    gpu::SubmitDesc omitted = { .command_lists = again_lists[..], .readiness = second.readiness };
+    gpu::CompletionPoint public_point = gpu::submit(queue, &omitted)!!;
+    gpu::wait_completion(public_point)!!;
+    gpu::internal::vk::commit_present_result(fixture.live_slot, &second, vk::Result.SUCCESS);
     gpu::internal::vk::vk_destroy_swapchain(state, fixture.swapchain)!!;
 }

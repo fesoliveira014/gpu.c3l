@@ -194,6 +194,13 @@ fn TextureStateScope texture_state_to_vk(
         format,
         unified,
     );
+    if (unified && state.layout != gpu::TextureLayout.UNDEFINED) {
+        return {
+            .stages = barrier_before_stages_to_vk(state.stages),
+            .access = texture_access_to_vk(gpu::TextureLayout.GENERAL, state.access),
+            .layout = layout,
+        };
+    }
     switch (state.layout) {
         case gpu::TextureLayout.UNDEFINED:
             return {

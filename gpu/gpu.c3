@@ -2792,8 +2792,9 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
             return INVALID_HANDLE~;
         }
         if (!queue.roles.graphics) return INVALID_ARGUMENT~;
-        if (!gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)
-            || desc.readiness_before.indirect) {
+        if (!operation.data.caps.unified_layouts
+            && (!gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)
+                || desc.readiness_before.indirect)) {
             return INVALID_ARGUMENT~;
         }
     } else if ((uint)desc.readiness_before != 0) {

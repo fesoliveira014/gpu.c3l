@@ -91,7 +91,6 @@ struct QueueSubmitScratch {
         command_buffer_infos;
     vk::SemaphoreSubmitInfo[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS + 2]
         wait_infos;
-    gpu::TextureHandle[] pending_inits;
 }
 
 struct SubmitInputs {
@@ -980,16 +979,12 @@ fn void? create_internal_command_allocators(VkDeviceState* state) {
             mem::free(slot);
             return err~;
         }
-        if (catch slot.mutex.init()) {
+        if (catch err = slot.mutex.init()) {
             destroy_command_allocator_slot(state, slot);
             mem::free(slot);
             return gpu::BACKEND_ERROR~;
         }
         completion.internal_allocator = slot;
-        completion.submit_scratch.pending_inits = mem::new_array(
-            gpu::TextureHandle,
-            state.textures.slots.len,
-        );
     }
 }
 
@@ -1021,9 +1016,6 @@ fn void destroy_queue_completions(VkDeviceState* state) @private {
             (void)completion.retirement_mutex.destroy();
         }
         if (completion.submit_scratch != null) {
-            if (completion.submit_scratch.pending_inits.ptr != null) {
-                mem::free(completion.submit_scratch.pending_inits.ptr);
-            }
             mem::free(completion.submit_scratch);
             completion.submit_scratch = null;
         }
@@ -1328,30 +1320,38 @@ fn void rollback_submit_claim(
         }
     }
     foreach (record : records) {
-        if (record.internal) discard_internal_commands(state, record);
+        if (!record.internal) continue;
+        record.init_textures = {};
+        discard_internal_commands(state, record);
     }
 }
 
 <* Unified mode: prepend the initialization and acquire transitions and
-   append the present transition as library-recorded lists. Failure leaves the
-   pending textures queued for the next submit. *>
+   append the present transition as library-recorded lists. `pending` holds
+   retained textures; the prologue record takes ownership of the array on
+   success and every created list is discarded on failure. *>
 fn CommandRecord*[]? record_unified_batch(
     VkDeviceState* state,
     QueueCompletionState* completion,
     gpu::Queue queue,
     CommandRecord*[] records,
     SwapchainSlot* swapchain,
+    gpu::TextureHandle[] pending,
 ) @private {
     QueueSubmitScratch* scratch = completion.submit_scratch;
-    gpu::TextureHandle[] pending = scratch.pending_inits;
-    uint pending_count = take_pending_texture_inits(state, pending);
-    defer catch restore_pending_texture_inits(state, pending[:pending_count]);
+    CommandRecord*[2] created;
+    usz created_count = 0;
+    defer catch {
+        for (usz i = 0; i < created_count; i++) {
+            created[i].init_textures = {};
+            discard_internal_commands(state, created[i]);
+        }
+    }
     usz count = 0;
-    if (pending_count > 0 || swapchain != null) {
+    if (pending.len > 0 || swapchain != null) {
         CommandRecord* prologue = begin_internal_commands(state, completion, queue)!;
-        bool prologue_open = true;
-        defer catch if (prologue_open) discard_internal_commands(state, prologue);
-        record_texture_init_barriers(state, prologue, pending[:pending_count]);
+        created[created_count++] = prologue;
+        record_texture_init_barriers(state, prologue, pending);
         if (swapchain != null) {
             record_swapchain_transition(
                 state:   state,
@@ -1361,14 +1361,12 @@ fn CommandRecord*[]? record_unified_batch(
             );
         }
         end_internal_commands(state, prologue)!;
-        prologue_open = false;
         scratch.batch[count++] = prologue;
     }
     foreach (record : records) scratch.batch[count++] = record;
     if (swapchain != null) {
         CommandRecord* epilogue = begin_internal_commands(state, completion, queue)!;
-        bool epilogue_open = true;
-        defer catch if (epilogue_open) discard_internal_commands(state, epilogue);
+        created[created_count++] = epilogue;
         record_swapchain_transition(
             state:   state,
             record:  epilogue,
@@ -1376,9 +1374,9 @@ fn CommandRecord*[]? record_unified_batch(
             acquire: false,
         );
         end_internal_commands(state, epilogue)!;
-        epilogue_open = false;
         scratch.batch[count++] = epilogue;
     }
+    if (pending.len > 0) created[0].init_textures = pending;
     return scratch.batch[:count];
 }
 
@@ -1515,6 +1513,13 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     )!;
     QueueSubmitScratch* scratch = completion.submit_scratch;
     if (scratch == null) unreachable();
+    gpu::TextureHandle[] pending = state.unified_layouts
+        ? retain_pending_texture_inits(state)
+        : (gpu::TextureHandle[]){};
+    bool pending_owned = pending.len > 0;
+    defer catch {
+        if (pending_owned) release_pending_texture_inits(state, pending, true);
+    }
     completion.submission_mutex.lock()!!;
     defer completion.submission_mutex.unlock();
 
@@ -1539,6 +1544,7 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
             queue:      queue,
             records:    records,
             swapchain:  inputs.swapchain,
+            pending:    pending,
         )!;
         claimed = records.len > 0;
     }
@@ -1678,6 +1684,7 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     $endif
     submitted = point;
     claimed = false;
+    pending_owned = false;
     return submitted;
 }
 

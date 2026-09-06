@@ -204,6 +204,10 @@ fn CommandRecord* release_pending_command_locked(
     unlock_command_allocator(slot);
     gpu::internal::CommandListHandle identity = record.identity;
     gpu::Device owner = record.device;
+    if (record.init_textures.len > 0) {
+        release_pending_texture_inits(state, record.init_textures, false);
+        record.init_textures = {};
+    }
     record.submitted_completion = {};
     record.next_submitted = null;
     completion.submitted_count--;

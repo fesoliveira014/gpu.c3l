@@ -530,33 +530,57 @@ fn void forget_pending_texture_init(
     }
 }
 
-fn uint take_pending_texture_inits(
-    VkDeviceState* state,
-    gpu::TextureHandle[] out,
-) {
+<* Unified mode: move the pending textures into a new heap array, retaining a
+   command reference on each live one so destruction waits for the
+   initialization to retire; stale handles are dropped. Takes resource_mutex,
+   so callers must not hold a queue lock. The array belongs to the caller
+   until a prologue record takes it. *>
+fn gpu::TextureHandle[] retain_pending_texture_inits(VkDeviceState* state) {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
     state.pending_init_mutex.lock()!!;
     defer state.pending_init_mutex.unlock();
-    uint count = state.pending_init_count;
-    if (count > out.len) count = (uint)out.len;
-    out[:count] = state.pending_init_textures[:count];
-    uint remaining = state.pending_init_count - count;
-    for (uint i = 0; i < remaining; i++) {
-        state.pending_init_textures[i] = state.pending_init_textures[count + i];
+    uint total = state.pending_init_count;
+    if (total == 0) return {};
+    gpu::TextureHandle[] out = mem::new_array(gpu::TextureHandle, total);
+    uint count = 0;
+    for (uint i = 0; i < total; i++) {
+        TextureSlot*? slot = state.textures.get(state.pending_init_textures[i]);
+        if (catch err = slot) continue;
+        (void)slot.tracked_command_references.add(1, AtomicOrdering.RELAXED);
+        out[count++] = state.pending_init_textures[i];
     }
-    state.pending_init_count = remaining;
-    return count;
+    state.pending_init_count = 0;
+    if (count == 0) {
+        mem::free(out.ptr);
+        return {};
+    }
+    return out[:count];
 }
 
-fn void restore_pending_texture_inits(
+<* Drop the references taken by `retain_pending_texture_inits`; `restore`
+   returns the textures to the pending list for the next submit. Frees the
+   array. *>
+fn void release_pending_texture_inits(
     VkDeviceState* state,
     gpu::TextureHandle[] handles,
+    bool restore,
 ) {
-    state.pending_init_mutex.lock()!!;
-    defer state.pending_init_mutex.unlock();
+    if (handles.len == 0) return;
     foreach (handle : handles) {
-        if (state.pending_init_count == state.pending_init_textures.len) return;
-        state.pending_init_textures[state.pending_init_count++] = handle;
+        TextureSlot*? slot = state.textures.get(handle);
+        if (catch err = slot) continue;
+        (void)slot.tracked_command_references.sub(1, AtomicOrdering.RELAXED);
     }
+    if (restore) {
+        state.pending_init_mutex.lock()!!;
+        defer state.pending_init_mutex.unlock();
+        foreach (handle : handles) {
+            if (state.pending_init_count == state.pending_init_textures.len) break;
+            state.pending_init_textures[state.pending_init_count++] = handle;
+        }
+    }
+    mem::free(handles.ptr);
 }
 
 fn void mark_texture_presented(TextureSlot* slot) {

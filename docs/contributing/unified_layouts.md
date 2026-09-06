@@ -44,11 +44,19 @@ is as fast as the optimal ones. lavapipe exposes neither the extension nor
 a cost. A hardware comparison of a cookbook scene in both modes belongs
 here before the default changes.
 
+## Outstanding
+
+- Pre-recorded acquire and present command buffers per swapchain image
+  (issue #598 asks for no per-frame recording). The current mode records two
+  one-barrier lists per readiness submit from the queue's library allocator.
+- The cookbook recipes are still written for explicit mode with a unified
+  note; a unified-mode pass over every recipe is pending.
+
 ## Alternatives kept in reserve
 
 - Pre-recorded per-image acquire and present command buffers from a private
-  pool: records nothing per frame. Rejected for now; the per-submit lists
-  are one barrier each and reuse the allocator lifetime.
+  pool: records nothing per frame. Deferred (see Outstanding); the per-submit
+  lists are one barrier each and reuse the allocator lifetime.
 - `vkTransitionImageLayoutEXT` (`VK_EXT_host_image_copy`) at texture
   creation, skipping the pending queue. An optimization once the baseline
   is measured.

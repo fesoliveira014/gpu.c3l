@@ -1148,7 +1148,12 @@ fn void? end_internal_commands(
     )!;
     defer unlock_command_allocator(slot);
     CommandRecordingOps ops = command_recording_ops_real();
-    end_commands_locked(state, slot, record, &ops)!;
+    end_commands_locked(
+        state:  state,
+        slot:   slot,
+        record: record,
+        ops:    &ops,
+    )!;
     state.command_mutex.lock()!!;
     defer state.command_mutex.unlock();
     record.state = gpu::internal::CommandState.SUBMITTING;
@@ -1169,7 +1174,12 @@ fn void discard_internal_commands(
         state.command_mutex.lock()!!;
         defer state.command_mutex.unlock();
         bool executable = record.state != gpu::internal::CommandState.RECORDING;
-        discard_commands_locked(state, slot, record, executable);
+        discard_commands_locked(
+        state:      state,
+        slot:       slot,
+        record:     record,
+        executable: executable,
+    );
     }
     gpu::internal::release_command_record_ownership(owner);
 }
@@ -1287,7 +1297,12 @@ fn void? vk_end_commands_with_ops(
         record.allocator,
     )!;
     defer unlock_command_allocator(slot);
-    return end_commands_locked(state, slot, record, ops);
+    return end_commands_locked(
+        state:  state,
+        slot:   slot,
+        record: record,
+        ops:    ops,
+    );
 }
 
 fn void? end_commands_locked(
@@ -1377,7 +1392,12 @@ fn void? vk_discard_commands(
     if (!state_matches || record.allocator != allocator_handle) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    discard_commands_locked(state, slot, record, executable);
+    discard_commands_locked(
+        state:      state,
+        slot:       slot,
+        record:     record,
+        executable: executable,
+    );
 }
 
 fn void discard_commands_locked(

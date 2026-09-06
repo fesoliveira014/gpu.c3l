@@ -100,10 +100,10 @@ fn void unified_barrier_lowers_to_general() @test {
         && capture.native.new_layout == vk::ImageLayout.GENERAL,
         "both sides lower to GENERAL");
     assert(capture.native.src_stage_mask == (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT
-        && capture.native.src_access_mask == (vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_SHADER_SAMPLED_READ_BIT
+        && capture.native.src_access_mask == (vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT
         && capture.native.dst_stage_mask == (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT
-        && capture.native.dst_access_mask == (vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-        "stage and access masks still come from the texture states");
+        && capture.native.dst_access_mask == (vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_MEMORY_WRITE_BIT,
+        "stages come from the texture states and access from the read/write intent");
 
     gpu::TextureBarrier discard = gpu::texture_transition(
         texture: texture,
@@ -123,6 +123,10 @@ fn void unified_barrier_lowers_to_general() @test {
     )!!;
     vk::texture_barrier_with_injected_ops(vk::resolve_command(&cmd)!!, &sampled_write, &ops)!!;
     assert(capture.calls == 3, "layout-specific access rules are lifted in the mode");
+    assert(capture.native.dst_access_mask
+            == ((vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT
+                | (vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_MEMORY_WRITE_BIT),
+        "access follows the stated intent, not the ignored layout label");
     gpu::TextureBarrier wrong_queue = gpu::texture_transition(
         texture: texture,
         before:  gpu::storage_at({ .compute }, { .write }),
@@ -137,6 +141,7 @@ fn void unified_storage_write_then_sampled_read() @test {
     VulkanValidationCapture validation;
     gpu::Device device = make_unified_device(&validation);
     defer destroy_test_device(&device)!!;
+    validation.errors = 0;
     gpu::TextureHandle texture = make_unified_heap_texture(&device, "unified_heap_target");
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!!;
@@ -226,6 +231,7 @@ fn void unified_textures_initialize_at_submit() @test {
     VulkanValidationCapture validation;
     gpu::Device device = make_unified_device(&validation);
     defer destroy_test_device(&device)!!;
+    validation.errors = 0;
     gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
 
     gpu::TextureHandle dropped = make_unified_heap_texture(&device, "dropped_before_submit");
@@ -245,9 +251,8 @@ fn void unified_textures_initialize_at_submit() @test {
     gpu::CompletionPoint first_done = gpu::submit(graphics, &first_submit)!!;
 
     gpu::TextureHandle texture = make_unified_heap_texture(&device, "unified_late_texture");
-    defer gpu::destroy_texture(&device, texture)!!;
+    defer if (texture.is_valid()) gpu::destroy_texture(&device, texture)!!;
     gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!!;
-    defer gpu::destroy_texture_view(&device, view)!!;
     gpu::ShaderDesc write_shader = { .spirv = HEAP_WRITE_SPIRV[..], .entry_point = "main" };
     gpu::ComputePipelineDesc write_desc = { .shader = write_shader };
     gpu::PipelineHandle write_pipe = gpu::create_compute_pipeline(&device, &write_desc)!!;
@@ -283,7 +288,51 @@ fn void unified_textures_initialize_at_submit() @test {
     gpu::SubmitDesc second_submit = { .command_lists = second_lists[..], .completion_waits = waits[..] };
     gpu::CompletionPoint second_done = gpu::submit(compute, &second_submit)!!;
     assert(state.pending_init_count == 0, "the submit drained the pending list");
+    gpu::destroy_texture_view(&device, view)!!;
+    assert(@catch(gpu::destroy_texture(&device, texture)) == gpu::RESOURCE_IN_USE,
+        "the pending initialization retains the texture until it retires");
     gpu::wait_completion(second_done)!!;
     gpu::wait_completion(first_done)!!;
+    gpu::destroy_texture(&device, texture)!!;
+    texture = {};
     assert(validation.errors == 0, "a texture created between submits is initialized by its first submit");
+}
+
+fn vk::Result fail_native_submit(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) {
+    (void)queue;
+    (void)submit_count;
+    (void)submits;
+    (void)fence;
+    return vk::Result.ERROR_OUT_OF_HOST_MEMORY;
+}
+
+fn void unified_failed_submit_keeps_textures_pending() @test {
+    gpu::Device device = make_unified_device();
+    defer destroy_test_device(&device)!!;
+    gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+    gpu::TextureHandle texture = make_unified_heap_texture(&device, "unified_retry_texture");
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)!! };
+    defer discard_test_executable(&lists[0])!!;
+    gpu::SubmitDesc desc = { .command_lists = lists[..] };
+    assert(@catch(gpu::internal::vk::vk_submit_with(state, queue, &desc, &fail_native_submit))
+        == gpu::OUT_OF_HOST_MEMORY, "the native fault propagates");
+    assert(state.pending_init_count == 1, "a failed submit returns the texture to the pending list");
+    gpu::internal::vk::CommandAllocatorSlot* internal =
+        state.queue_completions[queue.id].internal_allocator;
+    assert(internal.live_executables == 0 && internal.live_recordings == 0,
+        "the failed submit discards its internal lists");
+    gpu::CompletionPoint point = gpu::submit(queue, &desc)!!;
+    assert(state.pending_init_count == 0, "the retry drains the pending list");
+    gpu::wait_completion(point)!!;
 }
