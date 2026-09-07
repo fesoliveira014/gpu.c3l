@@ -14,6 +14,7 @@ const uint MAX_SUBMIT_BATCH_SIZE = 1_024;
 const uint SUBMIT_BATCH_ITERATIONS = 5;
 const uint[5] SUBMIT_BATCH_SIZES = { 1, 8, 32, 128, 1_024 };
 const uint ALLOCATOR_LIFECYCLE_ITERATIONS = 10_000;
+const uint ALLOCATOR_CREATION_ITERATIONS = 1_000;
 const uint[3] ALLOCATOR_LIFECYCLE_WORKER_COUNTS = { 1, 2, 4 };
 const uint ALLOCATOR_LIFECYCLE_MAX_WORKERS =
     ALLOCATOR_LIFECYCLE_WORKER_COUNTS[
@@ -195,6 +196,17 @@ fn void? measure_allocator_lifecycle_scaling(
     }
 }
 
+fn double measure_allocator_creation(gpu::Device* device, gpu::Queue queue) {
+    std::time::Clock start = std::time::clock::now();
+    for (uint i = 0; i < ALLOCATOR_CREATION_ITERATIONS; i++) {
+        gpu::CommandAllocator allocator =
+            gpu::create_command_allocator(device, queue)!!;
+        gpu::destroy_command_allocator(&allocator)!!;
+    }
+    long elapsed_ns = (long)start.to_now();
+    return (double)elapsed_ns / (double)ALLOCATOR_CREATION_ITERATIONS;
+}
+
 fn gpu::ExecutableCommandList record_empty(gpu::CommandAllocator* allocator) {
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     return gpu::end_commands(&commands)!!;
@@ -362,5 +374,18 @@ fn int main() {
         );
     }
     measure_allocator_lifecycle_scaling(&device, queue)!!;
+
+    (void)measure_allocator_creation(&device, queue);
+    double[LIFECYCLE_REPETITIONS] creation_results;
+    for (uint i = 0; i < LIFECYCLE_REPETITIONS; i++) {
+        creation_results[i] = measure_allocator_creation(&device, queue);
+    }
+    io::printfn(
+        "allocator create+destroy: capacity=%d iterations=%d repetitions=%d median=%.1f ns/cycle",
+        gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY,
+        ALLOCATOR_CREATION_ITERATIONS,
+        LIFECYCLE_REPETITIONS,
+        lifecycle_median(creation_results),
+    );
     return 0;
 }

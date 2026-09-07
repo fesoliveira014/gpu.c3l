@@ -17,7 +17,7 @@ stateDiagram-v2
 ```c3
 gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
 gpu::CommandAllocatorDesc desc = {
-    .command_buffer_capacity          = 8,    // 0 selects 8
+    .command_buffer_capacity          = 8,    // 0 selects 32
     .max_resource_references_per_list = 64,   // 0 selects 64; FULL validation only
     .debug_name                       = "frame_allocator",
     .max_acceleration_structure_geometries_per_build = 0,  // >0 enables AS builds
@@ -46,8 +46,9 @@ gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
 defer (void)gpu::discard_executable_commands(&executable);
 ```
 
-`begin_commands` returns `DEVICE_BUSY` when no unit is free; wait on an
-older completion point and retry. `end_commands` consumes the recording
+`begin_commands` retires the queue's completed work when no unit is free
+and returns `DEVICE_BUSY` only if none retired; wait on an older
+completion point and retry. `end_commands` consumes the recording
 token. `submit` consumes the executable token. The deferred discards are
 no-ops after a successful consume and free the unit on an early fault.
 

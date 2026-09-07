@@ -117,7 +117,7 @@ by CPU tests but has not run on hardware that reports the capability.
 | swapchains | — | 8 |
 | color attachments | — | min(8, device limit) |
 | command allocators per device | — | 256 |
-| command units per allocator | 8 | 4,096 |
+| command units per allocator | 32 | 4,096 |
 | retained references per list | 64 | 4,096 |
 | generated-work reservations per allocator | — | 64 × command units |
 

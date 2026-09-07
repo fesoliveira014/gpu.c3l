@@ -201,8 +201,11 @@ command units. `begin_commands` takes a unit and returns a one-shot
 `CompletionPoint`. A rejected submit leaves the lists executable.
 
 The unit returns to the allocator when its completion point retires. An
-allocator with `DEFAULT_COMMAND_ALLOCATOR_CAPACITY` (8) units can therefore
-have 8 lists in flight.
+allocator with `DEFAULT_COMMAND_ALLOCATOR_CAPACITY` (32) units can therefore
+have 32 lists in flight. When no unit is free, `begin_commands` retires the
+queue's completed work once before reporting `DEVICE_BUSY`, so an
+application that never polls still reuses units after their work completes.
+Native command buffers are allocated on a unit's first use.
 
 Direct, indirect, and generated work share this lifecycle. Generated work
 (GPU-written roots plus arguments) is capability-gated and needs a

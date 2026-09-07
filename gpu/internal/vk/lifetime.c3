@@ -372,6 +372,27 @@ fn void? retire_observed_completion_and_drain_with_query(
     )!;
 }
 
+<* Observe the queue's timeline and retire everything it has completed. *>
+fn void? retire_queue_latest_with_query(
+    VkDeviceState* state,
+    uint queue_id,
+    SemaphoreCounterQueryFn query_fn,
+) {
+    QueueCompletionState* completion = queue_completion_state(state, queue_id)!;
+    ulong current;
+    check_backend_result(
+        state:     state,
+        operation: "begin_commands",
+        result:    query_fn(state.device, completion.timeline, &current),
+    )!;
+    retire_observed_completion_and_drain_with_query(
+        state:              state,
+        observed_queue_id:  queue_id,
+        observed_completed: current,
+        query_fn:           query_fn,
+    )!;
+}
+
 fn void? drain_completed_submitted_commands_with_query(
     VkDeviceState* state,
     SemaphoreCounterQueryFn query_fn,
