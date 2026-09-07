@@ -10,11 +10,13 @@ memory.
 | Module | Contents |
 |---|---|
 | `module gpu;` | Public API. Non-callables in `gpu/gpu.c3i`; callables, with docstrings and bodies, in `gpu/gpu.c3`. |
+| `module gpu::util;` | Optional public helpers composing `gpu`. Each utility keeps types, functions, and private helpers together in one `gpu/util/<name>.c3` file, without a `.c3i` companion. |
 | `module gpu::surface::<platform>;` | Native handle typedefs in `surface.c3i`; `create_surface` in `surface.c3`. |
 | `module gpu::internal @private;` | Backend-independent implementation, one file per area in `gpu/internal/*.c3`. |
 | `module gpu::internal::vk @private;` | Vulkan backend, mirroring those areas in `gpu/internal/vk/*.c3`. Translation helpers go in `helpers.c3`. |
 
-Samples use their own module names. Only shipped helpers go in `module gpu;`.
+Samples use their own module names. Shipped convenience helpers go in
+`module gpu::util;` and remain independent of private backend modules.
 
 ## 3. Naming
 

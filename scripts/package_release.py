@@ -170,10 +170,11 @@ def collect_release_files(root: Path, target: str) -> dict[str, Path]:
             relative = source.relative_to(root).as_posix()
             files[f"gpu.c3l/{relative}"] = source
 
-    for source in sorted((root / "docs/api").rglob("*")):
-        if source.is_file():
-            relative = source.relative_to(root).as_posix()
-            files[f"gpu.c3l/{relative}"] = source
+    for directory in ("docs/api", "docs/util"):
+        for source in sorted((root / directory).rglob("*")):
+            if source.is_file():
+                relative = source.relative_to(root).as_posix()
+                files[f"gpu.c3l/{relative}"] = source
 
     for component in COMPONENTS:
         component_root = root / component["path"]

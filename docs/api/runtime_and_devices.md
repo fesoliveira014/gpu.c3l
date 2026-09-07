@@ -3,6 +3,11 @@
 Everything an application does starts with a `Runtime`, picks an `Adapter`,
 creates a `Device`, and fetches `Queue` values from it.
 
+For grouped setup, [`gpu::util::DeviceContext`](../util/device_context.md)
+owns these objects, a command allocator, and optional presentation objects.
+Its fields work with every ordinary API below. The utility selects a supported
+adapter by class or an application callback; manual selection remains available.
+
 ```mermaid
 flowchart LR
     RD[RuntimeDesc] -->|create_runtime| R[Runtime]

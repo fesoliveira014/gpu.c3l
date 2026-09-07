@@ -1,0 +1,13 @@
+{
+  "langrev": "1",
+  "dependency-search-paths": [ "../../..", "../../lib" ],
+  "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
+  "output": "build",
+  "wincrt": "static",
+  "targets": {
+    "device_context": {
+      "type": "executable",
+      "sources": [ "src/main.c3" ]
+    }
+  }
+}

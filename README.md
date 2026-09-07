@@ -22,6 +22,7 @@ management, or a compatibility descriptor path.
 - dynamic rendering, indirect and generated work, acceleration structures,
   ray queries, sparse textures, timestamp queries, and swapchains;
 - caller-owned command allocators with explicit completion-based reuse;
+- optional `gpu::util` device context for setup and grouped ownership;
 - optional full contract validation and structured diagnostics; and
 - a schema generator for matching C3 and GLSL shader ABI declarations.
 
@@ -48,6 +49,8 @@ it for a platform or workload.
   then build an SDL3 triangle.
 - [Documentation](docs/index.md) — concepts, recipes, and API reference.
 - [Public API](docs/api/index.md) — domain-oriented symbol reference.
+- [Device context](docs/util/device_context.md) — headless or windowed setup
+  with explicit application-controlled work and shutdown.
 - [Sample applications](https://github.com/fesoliveira014/gpu.c3l-samples) —
   maintained end-to-end examples.
 

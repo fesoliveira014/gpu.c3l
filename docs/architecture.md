@@ -18,6 +18,7 @@ completed command storage does not transfer ownership of application resources.
 | Module | Purpose |
 |---|---|
 | `gpu` | The complete public API. |
+| `gpu::util` | Optional setup and ownership helpers over `gpu`. |
 | `gpu::surface::wayland`, `gpu::surface::x11`, `gpu::surface::win32` | One `create_surface` per platform. |
 | `gpu::internal`, `gpu::internal::vk` | Private. No `vk::` or `vma::` type appears in a public signature. |
 
@@ -69,6 +70,10 @@ value.
 
 ## Lifetime rules
 
+Individual GPU objects follow these rules. The grouped
+[device context lifecycle](util/device_context.md#shutdown) adds best-effort
+cleanup with its own failure contract.
+
 - **Creation is transactional.** A create call returns a complete object or a
   fault with nothing left behind.
 - **Destruction never waits.** A destroy call returns `RESOURCE_IN_USE` while
@@ -84,6 +89,18 @@ value.
   shader index.
 
 ## Runtime, adapters, devices
+
+[`DeviceContext`](util/device_context.md) groups a runtime, device, command
+allocator, and optional surface and swapchain in one owning struct. Adapter and
+queue fields borrow their owners. Copies do not create independent ownership.
+The utility is part of the same bundle and creates objects only when called.
+
+Its lifecycle uses best-effort cleanup: creation returns the original fault
+after rollback attempts; destruction reports every release failure, continues,
+and clears the context. It has no recovery state. Before teardown, the application
+must discard unsubmitted commands, wait for GPU work and presentations, and
+release extra resources. Existing threading and queue synchronization rules apply;
+teardown excludes every concurrent use of the context's fields.
 
 ```mermaid
 sequenceDiagram

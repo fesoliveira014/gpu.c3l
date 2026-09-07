@@ -1,7 +1,7 @@
 # Documentation
 
-Consumer guide to `gpu.c3l`. Docstrings in `gpu/gpu.c3` and `gpu/gpu.c3i`
-are the authority for exact signatures.
+Consumer guide to `gpu.c3l`. Docstrings in `gpu/gpu.c3`, `gpu/gpu.c3i`,
+and `gpu/util/device_context.c3` are the authority for exact signatures.
 
 ## Learn
 
@@ -27,6 +27,10 @@ explains the shared conventions and fault set. Domain pages:
 - [Commands and rendering](api/commands_and_rendering.md)
 - [Synchronization and submission](api/synchronization_and_submission.md)
 - [Presentation and diagnostics](api/presentation_and_diagnostics.md)
+
+[Utilities](util/index.md) compose the same API for optional convenience.
+[Device context](util/device_context.md) groups setup and ownership of a runtime,
+device, command allocator, and optional surface and swapchain.
 
 ## Troubleshoot
 

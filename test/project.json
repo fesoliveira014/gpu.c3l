@@ -14,7 +14,7 @@
   "wincrt": "static",
   "sources": [
     "../gpu/gpu.c3i", "../gpu/gpu.c3", "../gpu/surface/**",
-    "../gpu/internal/**",
+    "../gpu/internal/**", "../gpu/util/**",
     "src/test_lifetime_helpers.c3", "src/bench_lifetime.c3"
   ],
   "output": "build",
@@ -69,6 +69,7 @@
     "vk_core": {
       "type": "test",
       "sources": [
+        "src/test_vk_device_context.c3",
         "src/test_vk_device_desc.c3",
         "src/test_vk_dispatch.c3",
         "src/test_vk_features.c3",
@@ -199,6 +200,10 @@
         "src/tint_abi.c3",
         "src/test_vk_unified_layouts.c3"
       ]
+    },
+    "vk_device_context": {
+      "type": "test",
+      "sources": [ "src/test_vk_device_context.c3" ]
     },
     // Explicit capable-device acceptance target. It enables Vulkan validation,
     // exercises direct KHR ray tracing, and fails UNSUPPORTED_FEATURE instead
