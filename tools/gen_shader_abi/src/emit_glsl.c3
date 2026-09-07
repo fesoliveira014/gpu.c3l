@@ -54,7 +54,11 @@ fn void emit_glsl(Schema* schema, TypeTable* types, DString* out) {
         }
         foreach (&field : decl.fields) {
             TypeInfo info = types.entries.get(field.type_name)!!;
-            out.appendf("    %s %s;\n", info.glsl_name, field.name);
+            if (field.array_len > 0) {
+                out.appendf("    %s %s[%d];\n", info.glsl_name, field.name, field.array_len);
+            } else {
+                out.appendf("    %s %s;\n", info.glsl_name, field.name);
+            }
         }
         out.append("};\n");
     }

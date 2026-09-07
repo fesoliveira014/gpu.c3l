@@ -90,9 +90,13 @@ Layout rules:
 | `u64`, `GpuAddress` | 8 | 8 |
 | `vec2` | 8 | 8 |
 | `vec4` | 16 | 16 |
+| `mat4` | 64 | 16 |
+| `T[N]` | N × stride | alignment of `T` |
 
-Avoid `vec3`. Represent a matrix as `vec4` columns. Pad explicitly where C3
-packing and std430 differ. Do not hand-write both sides; use the
+Avoid `vec3`; `mat4` is the only matrix type and is column-major (`Mat4f`
+element `[c]` is column `c`). An array's stride is the element size rounded
+up to the element alignment. Pad explicitly where C3 packing and std430
+differ. Do not hand-write both sides; use the
 [generator](#schema-generator).
 
 ## Data behind the root
@@ -277,9 +281,10 @@ struct Material {
 
 Declarations: `const`, `type Name : scalar`, `struct`, `root`, `push`, and
 `extern struct` (GLSL twin of an existing C3 record). Field types: `uint`,
-`int`, `float`, `u64`, `vec2`, `vec4`, `GpuAddress`, `TextureIndex`,
-`SamplerIndex`, `AccelerationStructureIndex`, or an earlier struct. No
-matrices, no fixed arrays.
+`int`, `float`, `u64`, `vec2`, `vec4`, `mat4`, `GpuAddress`, `TextureIndex`,
+`SamplerIndex`, `AccelerationStructureIndex`, an earlier struct, or a fixed
+array `T[N]` of any of those (`uint[8] ids;`). `push` members stay scalar,
+vector, or semantic.
 
 Build and run the generator:
 

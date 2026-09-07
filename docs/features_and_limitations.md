@@ -101,7 +101,7 @@ by CPU tests but has not run on hardware that reports the capability.
 - Sparse textures are single-layer, single-sample color 2D or 3D images.
 - A texture is either sampled or storage within one layout interval.
 - `GraphicsState` has no default. Set a complete state before drawing.
-- The ABI schema has no matrix or fixed-array type.
+- The ABI schema's only matrix type is `mat4`; arrays are fixed-length.
 - One BLAS holds only triangles or only AABBs.
 
 ## Capacities

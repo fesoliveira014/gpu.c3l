@@ -16,9 +16,13 @@ alias Vec4f = float[<4>];
 
 // Same shared-ABI rules as Vec2f.
 alias Vec4u = uint[<4>];
+
+// Column-major: element [c] is column c, matching std430 `mat4`.
+alias Mat4f = float[<4>][4];
 $assert Vec2f::size == 8;
 $assert Vec4f::size == 16;
 $assert Vec4u::size == 16;
+$assert Mat4f::size == 64;
 
 // Device handles are compact registry tokens. Device-owned resources also
 // carry an exact owner identity so coincident local slots cannot alias.

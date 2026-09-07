@@ -25,6 +25,15 @@ layout(buffer_reference, std430, buffer_reference_align = 8) buffer BuildRoot {
     uint _pad1;
 };
 
+layout(buffer_reference, std430, buffer_reference_align = 16) buffer MatrixRoot {
+    uint64_t output_gpu;
+    uint count;
+    uint _pad0;
+    mat4 transform;
+    vec4 planes[4];
+    uint ids[8];
+};
+
 struct RootPush {
     uint64_t root_gpu;
 };
