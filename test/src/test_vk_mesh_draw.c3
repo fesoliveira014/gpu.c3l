@@ -410,15 +410,46 @@ fn void mesh_and_vertex_pipelines_alternate_in_one_pass() @test {
         vertex_count:   3,
         instance_count: 1,
     )!!;
+    char[112] payload;
+    gpu::cmd_draw(
+        commands:       &cmd,
+        vertex_root:    tri_root,
+        fragment_root:  color_root,
+        vertex_count:   3,
+        instance_count: 1,
+        inline_root:    payload[..],
+    )!!;
     gpu::cmd_bind_pipeline(&cmd, mesh_pipeline)!!;
     assert(record.descriptor_heap_binding.graphics_layout == device_state.mesh_layout,
         "binding a mesh pipeline rebinds the heap with the mesh layout");
     gpu::cmd_set_graphics_state(&cmd, &state)!!;
+    char[116] oversized;
+    assert(@catch(gpu::cmd_draw_mesh_tasks(
+        commands:      &cmd,
+        mesh_root:     tri_root,
+        fragment_root: color_root,
+        groups:        { 1, 1, 1 },
+        inline_root:   oversized[..],
+    )) == gpu::INVALID_ARGUMENT, "a mesh payload past the 128-byte block faults");
     gpu::cmd_draw_mesh_tasks(
         commands:      &cmd,
         mesh_root:     tri_root,
         fragment_root: color_root,
         groups:        { 1, 1, 1 },
+    )!!;
+    assert(record.inline_root.len == 0, "a mesh draw without a payload clears the borrowed payload");
+    gpu::cmd_draw_mesh_tasks(
+        commands:      &cmd,
+        mesh_root:     tri_root,
+        fragment_root: color_root,
+        groups:        { 1, 0, 1 },
+    )!!;
+    gpu::cmd_draw_mesh_tasks(
+        commands:      &cmd,
+        mesh_root:     tri_root,
+        fragment_root: color_root,
+        groups:        { 1, 1, 1 },
+        inline_root:   payload[..],
     )!!;
     gpu::cmd_bind_pipeline(&cmd, vertex_pipeline)!!;
     assert(record.descriptor_heap_binding.graphics_layout == device_state.graphics_layout,

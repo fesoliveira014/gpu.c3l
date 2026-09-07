@@ -2805,6 +2805,7 @@ fn bool mesh_groups_within_caps(
         ? caps.max_task_work_group_total_count
         : caps.max_mesh_work_group_total_count;
     if (groups.x > limit.x || groups.y > limit.y || groups.z > limit.z) return false;
+    if (groups.x == 0 || groups.y == 0 || groups.z == 0) return true;
     ulong plane = (ulong)groups.x * groups.y;
     return plane <= total && plane * groups.z <= total;
 }

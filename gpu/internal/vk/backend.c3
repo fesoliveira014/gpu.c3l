@@ -5,6 +5,28 @@ import vma;
 
 alias InstanceProcLoader = fn vk::PFN_vkVoidFunction(vk::Instance, char*);
 alias DeviceProcLoader = fn vk::PFN_vkVoidFunction(vk::Device, char*);
+alias CmdDrawMeshTasksNativeFn = fn void (
+    vk::CommandBuffer command_buffer,
+    uint group_count_x,
+    uint group_count_y,
+    uint group_count_z,
+);
+alias CmdDrawMeshTasksIndirectNativeFn = fn void (
+    vk::CommandBuffer command_buffer,
+    vk::Buffer buffer,
+    vk::DeviceSize offset,
+    uint draw_count,
+    uint stride,
+);
+alias CmdDrawMeshTasksIndirectCountNativeFn = fn void (
+    vk::CommandBuffer command_buffer,
+    vk::Buffer buffer,
+    vk::DeviceSize offset,
+    vk::Buffer count_buffer,
+    vk::DeviceSize count_buffer_offset,
+    uint max_draw_count,
+    uint stride,
+);
 
 struct VkInstanceDispatchPlan {
     bool debug;
@@ -92,29 +114,6 @@ struct VkRayTracingPipelineDispatch {
     vk::PFN_vkCmdTraceRaysIndirectKHR              cmd_trace_rays_indirect;
     vk::PFN_vkCmdTraceRaysIndirect2KHR             cmd_trace_rays_indirect2;
 }
-
-alias CmdDrawMeshTasksNativeFn = fn void (
-    vk::CommandBuffer command_buffer,
-    uint group_count_x,
-    uint group_count_y,
-    uint group_count_z,
-);
-alias CmdDrawMeshTasksIndirectNativeFn = fn void (
-    vk::CommandBuffer command_buffer,
-    vk::Buffer buffer,
-    vk::DeviceSize offset,
-    uint draw_count,
-    uint stride,
-);
-alias CmdDrawMeshTasksIndirectCountNativeFn = fn void (
-    vk::CommandBuffer command_buffer,
-    vk::Buffer buffer,
-    vk::DeviceSize offset,
-    vk::Buffer count_buffer,
-    vk::DeviceSize count_buffer_offset,
-    uint max_draw_count,
-    uint stride,
-);
 
 struct VkMeshShaderDispatch {
     CmdDrawMeshTasksNativeFn              cmd_draw_mesh_tasks;

@@ -643,7 +643,12 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
         check_backend_result(
             state:     state,
             operation: "create_device",
-            result:    vk::create_pipeline_layout(state.device, &mesh_layout_info, null, &state.mesh_layout),
+            result:    vk::create_pipeline_layout(
+                device:            state.device,
+                p_create_info:     &mesh_layout_info,
+                p_allocator:       null,
+                p_pipeline_layout: &state.mesh_layout,
+            ),
         )!;
         set_object_name(
             state:         state,

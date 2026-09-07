@@ -97,7 +97,7 @@ gpu::cmd_dispatch_generated(&commands, records_span, count_span, max_count)!;
 ```
 
 `root_address` is pushed unchanged; zero is allowed. Every direct dispatch,
-draw, and trace also takes a trailing `char[] inline_root` (default empty),
+draw, mesh draw, and trace also takes a trailing `char[] inline_root` (default empty),
 pushed after the root header; see
 [shader ABI](../shader_abi.md#inline-payload). Group counts must fit
 `DeviceCaps.max_compute_work_group_count`. Indirect argument memory is a

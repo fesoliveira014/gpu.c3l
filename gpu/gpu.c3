@@ -2524,9 +2524,11 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    @param mesh_root : "Root GPU address for the task or mesh stage, passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
    @param groups : "Task work groups when the pipeline has a task shader, else mesh work groups."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, pipeline, support, limit, or device fault." *>
-fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, Vec3u groups) {
+fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, Vec3u groups, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_mesh_tasks")!;
     return record.ops.draw_mesh_tasks(
         record:        record,
         mesh_root:     mesh_root,
@@ -2548,9 +2550,11 @@ fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAdd
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
    @param args : "Non-owning array of DrawMeshTasksIndirectCommand records retained by the command."
    @param draw_count : "Number of records to execute."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, support, pipeline, state, or device fault." *>
-fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
+fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_mesh_tasks_indirect")!;
     return record.ops.draw_mesh_tasks_indirect(
         record:        record,
         mesh_root:     mesh_root,
@@ -2574,9 +2578,11 @@ fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_roo
    @param args : "Non-owning array of DrawMeshTasksIndirectCommand records retained by the command."
    @param count_span : "Non-owning span containing the GPU-written draw count."
    @param max_draw_count : "Maximum records the GPU count may select."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, support, pipeline, state, or device fault." *>
-fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count) {
+fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_mesh_tasks_indirect_count")!;
     return record.ops.draw_mesh_tasks_indirect_count(
         record:         record,
         mesh_root:      mesh_root,
