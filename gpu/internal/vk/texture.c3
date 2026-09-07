@@ -52,14 +52,15 @@ struct TexturePlacementNativeOps {
 }
 
 struct DedicatedTextureNativeOps {
-    void*                        user_data;
-    TextureCreateImageFn         create_image;
-    TextureAllocateImageMemoryFn allocate_memory;
-    TextureBindImageMemoryFn     bind_memory;
-    TextureCreateViewFn          create_view;
-    TextureDestroyImageFn        destroy_image;
-    TextureDestroyViewFn         destroy_view;
-    TextureFreeMemoryFn          free_memory;
+    void*                           user_data;
+    TextureCreateImageFn            create_image;
+    TextureAllocateImageMemoryFn    allocate_memory;
+    TextureBindImageMemoryFn        bind_memory;
+    TextureCreateViewFn             create_view;
+    TextureDestroyImageFn           destroy_image;
+    TextureDestroyViewFn            destroy_view;
+    TextureFreeMemoryFn             free_memory;
+    AllocationGetMemoryPropertiesFn get_memory_properties;
 }
 
 struct TextureImageDestroyOps {
@@ -1051,13 +1052,14 @@ fn void texture_free_memory_real(
 
 fn DedicatedTextureNativeOps dedicated_texture_native_ops_real() {
     return {
-        .create_image    = &texture_create_image_real,
-        .allocate_memory = &texture_allocate_image_memory_real,
-        .bind_memory     = &texture_bind_image_memory_real,
-        .create_view     = &texture_create_view_real,
-        .destroy_image   = &texture_destroy_image_real,
-        .destroy_view    = &texture_destroy_view_real,
-        .free_memory     = &texture_free_memory_real,
+        .create_image          = &texture_create_image_real,
+        .allocate_memory       = &texture_allocate_image_memory_real,
+        .bind_memory           = &texture_bind_image_memory_real,
+        .create_view           = &texture_create_view_real,
+        .destroy_image         = &texture_destroy_image_real,
+        .destroy_view          = &texture_destroy_view_real,
+        .free_memory           = &texture_free_memory_real,
+        .get_memory_properties = &allocation_get_properties_real,
     };
 }
 
@@ -1357,6 +1359,14 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
         texture_slot.image,
     ))!;
 
+    vk::MemoryPropertyFlags memory_properties;
+    ops.get_memory_properties(
+        ops.user_data,
+        state.allocator,
+        native_allocation,
+        &memory_properties,
+    );
+
     if (texture_needs_default_view(desc.usage)) {
         vk::ImageViewCreateInfo view_info = default_texture_view_create_info(
             desc:         desc,
@@ -1386,6 +1396,8 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
         .alignment         = allocation_desc.alignment,
         .memory_class      = gpu::MemoryClass.TEXTURE,
         .debug_name        = debug_name,
+        .device_local      = ((uint)memory_properties
+            & (uint)vk::MemoryPropertyFlagBits.DEVICE_LOCAL_BIT) != 0,
     };
     copy_debug_name(&texture_slot.debug_name[0], desc.debug_name);
     if (allocation_desc.debug_name != null) {

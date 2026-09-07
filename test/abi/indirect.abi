@@ -10,3 +10,9 @@ root BuildRoot {
     uint       dispatch_x;
     uint       count_value;
 }
+
+root IndexWriteRoot {
+    GpuAddress indices_gpu;
+    uint       index_count;
+    uint       _pad0;
+}

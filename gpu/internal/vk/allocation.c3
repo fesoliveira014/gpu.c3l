@@ -51,6 +51,7 @@ struct AllocationSlot {
     usz                 alignment;
     gpu::MemoryClass    memory_class;
     bool                coherent;
+    bool                device_local;
     Atomic{uint}       tracked_command_references;
     uint                live_placements;
     char[DEBUG_NAME_CAP] debug_name;
@@ -310,6 +311,12 @@ fn vma::AllocationCreateInfo? memory_class_to_vma(
                 .flags          = { .mapped, .host_access_random },
                 .required_flags = host_visible,
             };
+        case gpu::MemoryClass.CPU_WRITE_GPU_LOCAL:
+            return {
+                .usage          = vma::MemoryUsage.AUTO_PREFER_DEVICE,
+                .flags          = { .mapped, .host_access_sequential_write },
+                .required_flags = host_visible,
+            };
         default:
             return gpu::INVALID_ARGUMENT~;
     }
@@ -384,6 +391,13 @@ fn gpu::GpuAllocation? allocate_texture_memory_for_state_with_ops(
     if ((selected_memory_type & memory_type_bits) == 0) {
         return gpu::BACKEND_ERROR~;
     }
+    vk::MemoryPropertyFlags memory_properties;
+    ops.get_memory_properties(
+        ops.user_data,
+        state.allocator,
+        allocation,
+        &memory_properties,
+    );
 
     char[DEBUG_NAME_CAP] debug_name;
     copy_debug_name(&debug_name[0], desc.debug_name);
@@ -400,6 +414,8 @@ fn gpu::GpuAllocation? allocate_texture_memory_for_state_with_ops(
         .alignment        = desc.alignment,
         .debug_name       = debug_name,
         .memory_class     = gpu::MemoryClass.TEXTURE,
+        .device_local     = ((uint)memory_properties
+            & (uint)vk::MemoryPropertyFlagBits.DEVICE_LOCAL_BIT) != 0,
     };
 
     state.resource_mutex.lock()!!;
@@ -531,6 +547,8 @@ fn gpu::GpuAllocation? allocate_memory_for_state_with_ops(
             && native_info.mapped_data != null
             && ((uint)memory_properties
                 & (uint)vk::MemoryPropertyFlagBits.HOST_COHERENT_BIT) != 0,
+        .device_local    = ((uint)memory_properties
+            & (uint)vk::MemoryPropertyFlagBits.DEVICE_LOCAL_BIT) != 0,
         .debug_name      = debug_name,
         .live_placements = 0,
     };
@@ -555,6 +573,7 @@ fn gpu::AllocationInfo? allocation_info_for_state(
         .access       = slot.access,
         .mapped       = !slot.texture_memory && slot.backing.cpu_base != null,
         .coherent     = !slot.texture_memory && slot.coherent,
+        .device_local = slot.device_local,
         .addressable  = !slot.texture_memory
             && (ulong)slot.backing.gpu_base != 0,
     };

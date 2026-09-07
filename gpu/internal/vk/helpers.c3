@@ -318,6 +318,9 @@ fn vk::PipelineStageFlags2 barrier_before_stages_to_vk(
             mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMMAND_PREPROCESS_BIT_NV;
         }
     }
+    if (stages.index_input) {
+        mask |= (ulong)vk::PipelineStageFlagBits2.STAGE_2_INDEX_INPUT_BIT;
+    }
     if (stages.acceleration_structure_build) {
         mask |= (ulong)vk::PipelineStageFlagBits2
             .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
@@ -416,6 +419,9 @@ fn vk::AccessFlags2 barrier_after_access_to_vk(
             mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_COMMAND_PREPROCESS_READ_BIT_NV;
         }
     }
+    if (stages.index_input) {
+        mask |= (ulong)vk::AccessFlagBits2.ACCESS_2_INDEX_READ_BIT;
+    }
     if (stages.acceleration_structure_build) {
         mask |= (ulong)vk::AccessFlagBits2
                 .ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR
@@ -462,7 +468,9 @@ fn bool barrier_stage_mask_valid(gpu::StageMask stages) @private {
 
 fn ZString barrier_masks_rejected_field(gpu::Barrier* barrier) {
     if (barrier == null) return "Barrier";
-    if (!barrier_stage_mask_valid(barrier.before)) return "Barrier.before";
+    if (!barrier_stage_mask_valid(barrier.before) || barrier.before.index_input) {
+        return "Barrier.before";
+    }
     if (!barrier_stage_mask_valid(barrier.after)) return "Barrier.after";
     return null;
 }
@@ -492,7 +500,8 @@ fn bool barrier_stage_mask_supported(
     if ((stages.vertex_shader
             || stages.fragment_shader
             || stages.color_output
-            || stages.depth_output)
+            || stages.depth_output
+            || stages.index_input)
         && !graphics) {
         return false;
     }

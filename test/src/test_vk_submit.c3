@@ -1066,9 +1066,25 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
     assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
         "indirect readiness preserves the one-shot token");
 
+    gpu::SubmitDesc index_input_stage = {
+        .readiness        = readiness,
+        .readiness_before = { .index_input },
+    };
+    assert(@catch(vk::vk_submit_with(
+        state:     state,
+        queue:     graphics,
+        desc:      &index_input_stage,
+        submit_fn: &accept_swapchain_submit,
+    )) == gpu::INVALID_ARGUMENT,
+        "readiness rejects an index input destination stage");
+    assert(accepted_swapchain_submit_calls == 0,
+        "index input readiness reaches no native submit");
+    assert(!state.presentation.swapchains.get(handle)!!.readiness_consumed,
+        "index input readiness preserves the one-shot token");
+
     gpu::CompletionWait[1] invalid_waits = {{
         .point  = prior,
-        .before = (gpu::StageMask)(1u << 12),
+        .before = { .mesh_shader },
     }};
     gpu::SubmitDesc invalid_scope = {
         .completion_waits = invalid_waits[..],
@@ -1582,9 +1598,9 @@ fn void invalid_completion_wait_stage_preserves_token() @test {
     assert(lists[0].is_valid(),
         "invalid wait stages preserve the executable token");
 
-    waits[0].before = (gpu::StageMask)(1u << 12);
+    waits[0].before = { .mesh_shader };
     assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_ARGUMENT,
-        "unknown completion stage bits are rejected");
+        "reserved completion stage bits are rejected");
     assert(lists[0].is_valid(),
         "unknown completion stages preserve the executable token");
 

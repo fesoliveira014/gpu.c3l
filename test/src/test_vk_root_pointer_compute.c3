@@ -94,7 +94,7 @@ fn void root_pointer_compute_readback() @test {
     OwnedSpan root_owned = allocate_owned_span(
         device:       &device,
         size:         ComputeRoot::size,
-        memory_class: gpu::MemoryClass.CPU_WRITE,
+        memory_class: gpu::MemoryClass.CPU_WRITE_GPU_LOCAL,
         access:       { .compute },
         debug_name:   "compute_root",
     )!!;

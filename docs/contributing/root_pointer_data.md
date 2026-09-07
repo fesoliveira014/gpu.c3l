@@ -11,7 +11,7 @@ run below exists.
 
 ## Current paths
 
-Record: write a record into `CPU_WRITE` memory, flush, pass its
+Record: write a record into `CPU_WRITE_GPU_LOCAL` memory, flush, pass its
 `GpuAddress` as the root of `cmd_dispatch` or the two roots of `cmd_draw`.
 The shader reads the record through a `buffer_reference` block.
 

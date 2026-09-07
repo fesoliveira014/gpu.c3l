@@ -26,6 +26,9 @@ fn void runtimes_enumerate_vulkan_adapters_independently() @test {
     assert(first_info.queues.available.graphics, "graphics queue availability is semantic");
     assert(first_info.limits.max_texture_dimension_3d > 0,
         "adapter limits publish the core three-dimensional image ceiling");
+    assert(first_info.memory.device_local_host_visible_bytes <= first_info.memory.device_local_bytes
+        && first_info.memory.device_local_host_visible_bytes <= first_info.memory.host_visible_bytes,
+        "the device-local host-visible window is bounded by both totals");
     assert(diagnostics.backend_name == "Vulkan", "backend identity stays in diagnostics");
     assert(diagnostics.backend_version.major >= 1, "the native API version is diagnostic data");
     assert(diagnostics.driver_name.len > 0, "driver identity is available for logging");
