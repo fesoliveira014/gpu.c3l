@@ -1026,12 +1026,13 @@ fn void? vk_begin_commands_with_ops(
     )!;
     defer unlock_command_allocator(slot);
     CommandRecord* record = begin_commands_locked(
-        state:  state,
-        slot:   slot,
-        handle: allocator.handle,
-        queue:  allocator.queue,
-        device: allocator.device,
-        ops:    ops,
+        state:    state,
+        slot:     slot,
+        handle:   allocator.handle,
+        queue:    allocator.queue,
+        device:   allocator.device,
+        ops:      ops,
+        pool_ops: pool_ops,
     )!;
     gpu::internal::publish_command_list(record, out_commands);
 }
@@ -1043,6 +1044,7 @@ fn CommandRecord*? begin_commands_locked(
     gpu::Queue queue,
     gpu::Device device,
     CommandRecordingOps* ops,
+    CommandPoolOps* pool_ops = null,
 ) @private {
     RecordingThreadIdentity current_identity =
         current_recording_thread_identity();
