@@ -277,7 +277,7 @@ gpu::ColorTargetDesc[1] colors = {{
     .store_op = gpu::StoreOp.STORE,
     .clear    = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
 }};
-gpu::RenderPassDesc pass = { .colors = colors[..], .width = WIDTH, .height = HEIGHT };
+gpu::RenderPassDesc pass = { .colors = colors[..] };
 gpu::GraphicsState state = gpu::render_geometry_state(WIDTH, HEIGHT)!;
 gpu::ColorTargetState[1] color_targets = { gpu::color_blend_disabled() };
 state.color.targets = color_targets[..];

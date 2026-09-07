@@ -2987,9 +2987,45 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     gpu::cmd_begin_render_pass(&cmd, &mip_depth_pass)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
+    gpu::RenderPassDesc derived_color = { .colors = large_color[..] };
+    gpu::cmd_begin_render_pass(&cmd, &derived_color)!!;
+    gpu::cmd_end_render_pass(&cmd)!!;
+    gpu::RenderPassDesc derived_mixed = { .colors = mixed_colors[..] };
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &derived_mixed))
+        == gpu::INVALID_ARGUMENT,
+        "a derived area must still fit every attachment");
+    gpu::RenderPassDesc half_zero = { .colors = large_color[..], .width = 16 };
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &half_zero))
+        == gpu::INVALID_ARGUMENT,
+        "one zero extent field with a nonzero one faults INVALID_ARGUMENT");
+    gpu::RenderPassDesc derived_depth = { .depth = &mip_depth_target };
+    gpu::cmd_begin_render_pass(&cmd, &derived_depth)!!;
+    gpu::cmd_end_render_pass(&cmd)!!;
+
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
     defer discard_test_executable(&cmd_executable)!!;
+}
+
+fn void trusted_zero_extent_pass_without_attachments_faults() @test {
+    gpu::RuntimeDesc desc = {
+        .contract_validation      = gpu::ContractValidation.TRUSTED,
+        .enable_vulkan_validation = true,
+        .application_name  = "gpu_trusted_render_area_test",
+    };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&cmd)!!;
+    gpu::RenderPassDesc empty = {};
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &empty)) == gpu::INVALID_ARGUMENT,
+        "a zero extent with no attachment faults under TRUSTED");
+    gpu::RenderPassDesc half_zero = { .width = 16 };
+    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &half_zero)) == gpu::INVALID_ARGUMENT,
+        "a mixed extent faults under TRUSTED");
 }
 
 fn void render_pass_color_count_limits_validate_before_lookup() @test {

@@ -122,8 +122,6 @@ gpu::DepthTargetDesc depth = {
 gpu::RenderPassDesc pass = {
     .colors = colors[..],
     .depth  = &depth,          // null for no depth
-    .width  = width,
-    .height = height,
 };
 
 gpu::cmd_begin_render_pass(&commands, &pass)!;
@@ -132,6 +130,11 @@ gpu::cmd_set_graphics_state(&commands, &state)!;
 // draws ...
 gpu::cmd_end_render_pass(&commands)!;
 ```
+
+A zero `width` and `height` select the first color attachment's extent, or
+the depth attachment's when there is no color target. Explicit values must
+fit every attachment. `render_geometry_state` still takes explicit
+dimensions.
 
 The required order inside a pass: bind a compatible pipeline, set a
 complete `GraphicsState`, draw. Pass begin does not bind, set, or

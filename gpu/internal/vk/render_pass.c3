@@ -216,7 +216,8 @@ fn PreparedRenderPass? lower_render_pass(
 ) {
     if (desc == null
         || desc.colors.len > gpu::MAX_COLOR_ATTACHMENTS
-        || (desc.colors.len > 0 && desc.colors.ptr == null)) {
+        || (desc.colors.len > 0 && desc.colors.ptr == null)
+        || (desc.width == 0) != (desc.height == 0)) {
         return gpu::INVALID_ARGUMENT~;
     }
     CommandRecord* record = commands;
@@ -296,6 +297,14 @@ fn PreparedRenderPass? lower_render_pass(
             .stencil = 0,
         };
     }
+    if (desc.width == 0 && desc.height == 0) {
+        AttachmentViewSlot* first = pass.color_count > 0
+            ? pass.color_slots[0]
+            : pass.depth_view;
+        if (first == null) return gpu::INVALID_ARGUMENT~;
+        pass.width = first.width;
+        pass.height = first.height;
+    }
     return pass;
 }
 
@@ -348,8 +357,8 @@ fn PreparedRenderPass? full_prepare_render_pass(
                 backend_text:        null,
             )~;
         }
-        if (desc.width > view.width || desc.height > view.height) {
-            ZString rejected_field = desc.width > view.width
+        if (pass.width > view.width || pass.height > view.height) {
+            ZString rejected_field = pass.width > view.width
                 ? "RenderPassDesc.width"
                 : "RenderPassDesc.height";
             return report_contract_failure(
@@ -387,8 +396,8 @@ fn PreparedRenderPass? full_prepare_render_pass(
                 || !resolve_texture.usage.color_attach
                 || resolve.sample_count != gpu::SampleCount.ONE
                 || resolve.format != view.format
-                || desc.width > resolve.width
-                || desc.height > resolve.height) {
+                || pass.width > resolve.width
+                || pass.height > resolve.height) {
                 return gpu::INVALID_ARGUMENT~;
             }
         }
@@ -405,8 +414,8 @@ fn PreparedRenderPass? full_prepare_render_pass(
             operation:   operation,
         )!;
         if (!depth_texture.usage.depth_attach
-            || desc.width > depth.width
-            || desc.height > depth.height) {
+            || pass.width > depth.width
+            || pass.height > depth.height) {
             return gpu::INVALID_ARGUMENT~;
         }
         if (pass.color_count > 0
