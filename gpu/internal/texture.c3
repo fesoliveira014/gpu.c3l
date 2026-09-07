@@ -27,6 +27,8 @@ fn FormatBlock format_block(Format format) @private {
         case Format.R32_FLOAT:
         case Format.D32_FLOAT:
             return { 1, 1, 4 };
+        case Format.S8_UINT:
+            return { 1, 1, 1 };
         case Format.RGBA16_FLOAT:
         case Format.RG32_FLOAT:
             return { 1, 1, 8 };
@@ -45,6 +47,48 @@ fn FormatBlock format_block(Format format) @private {
             return { 4, 4, 16 };
         default:
             return { 0, 0, 0 };
+    }
+}
+
+fn bool format_has_depth(Format format) @private {
+    return format == Format.D32_FLOAT
+        || format == Format.D24_UNORM_S8_UINT
+        || format == Format.D32_FLOAT_S8_UINT;
+}
+
+fn bool format_has_stencil(Format format) @private {
+    return format == Format.D24_UNORM_S8_UINT
+        || format == Format.D32_FLOAT_S8_UINT
+        || format == Format.S8_UINT;
+}
+
+fn bool format_is_depth_stencil(Format format) @private {
+    return format_has_depth(format) || format_has_stencil(format);
+}
+
+fn bool format_is_combined_depth_stencil(Format format) @private {
+    return format_has_depth(format) && format_has_stencil(format);
+}
+
+<* Footprint of one aspect as the copy commands consume it: 4 bytes for the
+   depth aspect of a combined format, 1 for stencil, else the format block. *>
+fn FormatBlock format_aspect_block(Format format, TextureAspect aspect) @private {
+    if (!format_is_combined_depth_stencil(format)) return format_block(format);
+    switch (aspect) {
+        case TextureAspect.DEPTH:   return { 1, 1, 4 };
+        case TextureAspect.STENCIL: return { 1, 1, 1 };
+        default:                    return { 0, 0, 0 };
+    }
+}
+
+fn bool texture_aspect_valid(TextureAspect aspect) @private {
+    switch (aspect) {
+        case TextureAspect.AUTO:
+        case TextureAspect.DEPTH:
+        case TextureAspect.STENCIL:
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -121,6 +165,9 @@ fn bool texture_format_in_backend_profile(Format format) @private {
         case Format.BC6H_UFLOAT:
         case Format.BC7_UNORM:
         case Format.BC7_SRGB:
+        case Format.D24_UNORM_S8_UINT:
+        case Format.D32_FLOAT_S8_UINT:
+        case Format.S8_UINT:
             return true;
         default:
             return false;
@@ -172,8 +219,14 @@ fn bool texture_desc_valid(TextureDesc* desc) @private {
         return false;
     }
 
-    bool is_depth = desc.format == Format.D32_FLOAT;
-    if (is_depth && (desc.usage.color_attach || desc.usage.storage)) return false;
+    bool is_depth = format_is_depth_stencil(desc.format);
+    if (is_depth
+        && (desc.usage.color_attach
+            || desc.usage.storage
+            || desc.cube_compatible
+            || texture_desc_is_3d(desc))) {
+        return false;
+    }
     if (!is_depth && desc.usage.depth_attach) return false;
 
     if (desc.cube_compatible

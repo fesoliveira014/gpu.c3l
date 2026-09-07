@@ -544,6 +544,14 @@ fn GpuSpan? GpuSpan.checked_subspan(self, usz offset, usz size) {
     return self.unchecked_subspan(offset, size);
 }
 
+<* Owning identity of the allocation this span was carved from. Not validated
+   for liveness.
+
+   @return "The allocation token whose range contains this span." *>
+fn GpuAllocation GpuSpan.allocation(self) {
+    return { .owner = self.owner, .index = self.index, .generation = self.generation };
+}
+
 <* Derive a non-empty exact-sized mapped range within this immediate parent.
    The returned views inherit the owning allocation's lifetime and perform no
    synchronization. The derived byte pointer has no alignment guarantee beyond
@@ -586,12 +594,7 @@ fn bool TextureCompatibility.is_valid(self) {
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null || desc.size == 0) return INVALID_ARGUMENT~;
-    if (!gpu::internal::memory_class_is_known(desc.memory_class)) return INVALID_ARGUMENT~;
-    gpu::internal::validate_queue_access(&operation, desc.access)!;
-    AllocationDesc normalized = *desc;
-    normalized.alignment = gpu::internal::normalized_allocation_alignment(desc.alignment)!;
-    gpu::internal::validate_texture_allocation(&operation, desc, &normalized.alignment)!;
+    AllocationDesc normalized = gpu::internal::validated_allocation_desc(&operation, desc)!;
     GpuAllocation allocation =
         gpu::internal::vk::vk_allocate_memory(operation.state, &normalized)!;
     gpu::internal::retain_device_children(&operation);
@@ -696,8 +699,25 @@ fn MappedGpuSpan? mapped_gpu_span(Device* device, GpuSpan span) {
     };
 }
 
+<* Allocate a mapped class and borrow its complete span, mapping, and address.
+   A class without a host mapping faults before any allocation. Free with
+   `free_allocation` on `span.allocation()`.
+
+   @param device : "Live device that will own the allocation."
+   @param desc : "Borrowed allocation description with a mapped memory class."
+   @return "Consistent borrowed views of the new allocation, or a recoverable invalid-argument, access, allocation, or device fault. A failed view frees the allocation and returns the view fault; a rollback that cannot free the allocation is unrecoverable and panics after reporting the allocation as abandoned." *>
+fn MappedGpuSpan? allocate_mapped_memory(Device* device, AllocationDesc* desc) {
+    if (desc == null) return INVALID_ARGUMENT~;
+    if (desc.memory_class == MemoryClass.GPU_PRIVATE
+        || desc.memory_class == MemoryClass.TEXTURE) {
+        return INVALID_ARGUMENT~;
+    }
+    return gpu::internal::allocate_mapped_allocation(device, desc);
+}
+
 <* Make CPU writes to a live mapped allocation range visible to the GPU.
-   Coherent ranges are no-ops; this call does not submit or wait.
+   Required unless `AllocationInfo.coherent` is true; coherent ranges are
+   no-ops. This call does not submit or wait.
 
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose CPU writes become visible."
@@ -714,7 +734,8 @@ fn void? flush_mapped_span(Device* device, GpuSpan span) {
 }
 
 <* After the relevant GPU completion point, make its writes visible to CPU
-   reads. This call does not wait; coherent ranges are no-ops.
+   reads. Required unless `AllocationInfo.coherent` is true; coherent ranges
+   are no-ops. This call does not wait.
 
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose GPU writes become visible."
@@ -773,10 +794,29 @@ fn uint texture_mip_dimension(uint size, uint mip) {
    @param mip : "Zero-based mip level below the description's mip count."
    @return "The byte footprint, or INVALID_ARGUMENT for a null or undefined-format description or a missing mip." *>
 fn usz? texture_mip_bytes(TextureDesc* desc, uint mip) {
+    return texture_mip_aspect_bytes(desc, mip, TextureAspect.AUTO);
+}
+
+<* Tightly packed bytes of one aspect of one array layer of a mip. The depth
+   aspect of a combined format is 4 bytes per texel and stencil is 1; `AUTO`
+   faults for a combined format.
+
+   @param desc : "Borrowed texture description."
+   @param mip : "Zero-based mip level below the description's mip count."
+   @param aspect : "Aspect to size; AUTO for single-aspect formats."
+   @return "The byte footprint, or INVALID_ARGUMENT for a null description, a missing mip, or an aspect the format cannot select." *>
+fn usz? texture_mip_aspect_bytes(TextureDesc* desc, uint mip, TextureAspect aspect) {
     if (desc == null || mip >= gpu::internal::texture_mip_levels(desc)) {
         return INVALID_ARGUMENT~;
     }
-    gpu::internal::FormatBlock block = gpu::internal::format_block(desc.format);
+    if (!gpu::internal::texture_aspect_valid(aspect)) return INVALID_ARGUMENT~;
+    if (aspect == TextureAspect.DEPTH && !gpu::internal::format_has_depth(desc.format)) {
+        return INVALID_ARGUMENT~;
+    }
+    if (aspect == TextureAspect.STENCIL && !gpu::internal::format_has_stencil(desc.format)) {
+        return INVALID_ARGUMENT~;
+    }
+    gpu::internal::FormatBlock block = gpu::internal::format_aspect_block(desc.format, aspect);
     if (block.bytes == 0) return INVALID_ARGUMENT~;
     usz row_blocks = ((usz)texture_mip_dimension(desc.width, mip) + block.width - 1)
         / block.width;
@@ -2206,6 +2246,25 @@ fn void? destroy_attachment_view(Device* device, AttachmentViewHandle view) {
     gpu::internal::release_device_children(&operation);
 }
 
+<* A stencil face that keeps on fail and depth-fail with full masks. Covers
+   writing an id (`ALWAYS` / `REPLACE`) and masking by id (`EQUAL` / `KEEP`).
+
+   @param compare : "Stencil comparison."
+   @param pass : "Operation when stencil and depth pass."
+   @param reference : "Reference value for the comparison and REPLACE."
+   @return "A caller-owned face state." *>
+fn StencilFaceState stencil_face(CompareOp compare, StencilOp pass, uint reference) {
+    return {
+        .compare      = compare,
+        .fail         = StencilOp.KEEP,
+        .pass         = pass,
+        .depth_fail   = StencilOp.KEEP,
+        .compare_mask = STENCIL_MASK_ALL,
+        .write_mask   = STENCIL_MASK_ALL,
+        .reference    = reference,
+    };
+}
+
 <* Construct full-area viewport/scissor with zero raster/depth state.
    The returned color packet is empty and must be supplied separately for a
    color pipeline. Dimensions must be in [1, int::max].
@@ -2235,11 +2294,12 @@ fn GraphicsState? render_geometry_state(uint width, uint height) {
 
 <* Begin a render pass without changing command-buffer graphics state.
    Preconditions: attachments, layouts, queue access, dimensions, and pass phase are valid.
-   Always checked: token phase, host-safe descriptor shape, identities, and safe lowering.
+   Always checked: token phase, host-safe descriptor shape, a render area zero in
+   exactly one dimension, identities, and safe lowering.
    FULL diagnostics: attachment, usage, queue, compatibility, and render-area misuse.
 
    @param commands : "Live recording token outside a render pass."
-   @param desc : "Borrowed attachment and render-area description copied into the command stream."
+   @param desc : "Borrowed attachment and render-area description copied into the command stream; a zero extent selects the first attachment's extent."
    @return "Success, or a recoverable command, validation, ownership, compatibility, or device fault." *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2891,9 +2951,10 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
             return INVALID_HANDLE~;
         }
         if (!queue.roles.graphics) return INVALID_ARGUMENT~;
-        if (!gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)
-            || desc.readiness_before.indirect
-            || desc.readiness_before.index_input) {
+        if (!operation.data.caps.unified_layouts
+            && (!gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)
+                || desc.readiness_before.indirect
+                || desc.readiness_before.index_input)) {
             return INVALID_ARGUMENT~;
         }
     } else if ((uint)desc.readiness_before != 0) {

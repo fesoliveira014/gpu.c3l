@@ -110,7 +110,7 @@ fn void offscreen_clear_works() @test {
         .store_op = gpu::StoreOp.STORE,
         .clear = { .rgba = { 64.0f / 255.0f, 128.0f / 255.0f, 192.0f / 255.0f, 1.0f } },
     }};
-    gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
+    gpu::RenderPassDesc pass = { .colors = colors[..] };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 

@@ -45,6 +45,36 @@ fn vk::CompareOp compare_op_to_vk(gpu::CompareOp op) @private {
     }
 }
 
+fn vk::StencilOp stencil_op_to_vk(gpu::StencilOp op) @private {
+    switch (op) {
+        case gpu::StencilOp.KEEP:            return vk::StencilOp.KEEP;
+        case gpu::StencilOp.ZERO:            return vk::StencilOp.ZERO;
+        case gpu::StencilOp.REPLACE:         return vk::StencilOp.REPLACE;
+        case gpu::StencilOp.INCREMENT_CLAMP: return vk::StencilOp.INCREMENT_AND_CLAMP;
+        case gpu::StencilOp.DECREMENT_CLAMP: return vk::StencilOp.DECREMENT_AND_CLAMP;
+        case gpu::StencilOp.INVERT:          return vk::StencilOp.INVERT;
+        case gpu::StencilOp.INCREMENT_WRAP:  return vk::StencilOp.INCREMENT_AND_WRAP;
+        case gpu::StencilOp.DECREMENT_WRAP:  return vk::StencilOp.DECREMENT_AND_WRAP;
+        default:                             return vk::StencilOp.KEEP;
+    }
+}
+
+fn bool stencil_op_valid(gpu::StencilOp op) {
+    switch (op) {
+        case gpu::StencilOp.KEEP:
+        case gpu::StencilOp.ZERO:
+        case gpu::StencilOp.REPLACE:
+        case gpu::StencilOp.INCREMENT_CLAMP:
+        case gpu::StencilOp.DECREMENT_CLAMP:
+        case gpu::StencilOp.INVERT:
+        case gpu::StencilOp.INCREMENT_WRAP:
+        case gpu::StencilOp.DECREMENT_WRAP:
+            return true;
+        default:
+            return false;
+    }
+}
+
 fn vk::CullModeFlagBits cull_mode_to_vk(gpu::CullMode mode) @private {
     switch (mode) {
         case gpu::CullMode.NONE:  return vk::CullModeFlagBits.NONE;
@@ -220,7 +250,7 @@ fn void? validate_graphics_pipeline_desc(
         return gpu::INVALID_ARGUMENT~;
     }
     if (desc.depth_format != gpu::Format.UNDEFINED
-        && desc.depth_format != gpu::Format.D32_FLOAT) {
+        && !gpu::internal::format_is_depth_stencil(desc.depth_format)) {
         return gpu::INVALID_ARGUMENT~;
     }
     if (desc.color_formats.len == 0
@@ -230,7 +260,7 @@ fn void? validate_graphics_pipeline_desc(
     gpu::TextureUsage color_usage = { .color_attach };
     foreach (format : desc.color_formats) {
         if (format == gpu::Format.UNDEFINED
-            || format == gpu::Format.D32_FLOAT
+            || gpu::internal::format_is_depth_stencil(format)
             || format_to_vk(format) == vk::Format.UNDEFINED) {
             return gpu::INVALID_ARGUMENT~;
         }
@@ -326,8 +356,13 @@ fn vk::Pipeline? create_raster_pipeline_native(
         vk::PipelineRenderingCreateInfo rendering_info = vk::pipeline_rendering_create_info();
         rendering_info.color_attachment_count = (uint)color_formats.len;
         rendering_info.p_color_attachment_formats = color_formats.ptr;
-        if (key.depth_format != gpu::Format.UNDEFINED) {
+        if (gpu::internal::format_has_depth(key.depth_format)) {
             rendering_info.depth_attachment_format = format_to_vk(
+                key.depth_format,
+            );
+        }
+        if (gpu::internal::format_has_stencil(key.depth_format)) {
+            rendering_info.stencil_attachment_format = format_to_vk(
                 key.depth_format,
             );
         }
@@ -377,7 +412,7 @@ fn vk::Pipeline? create_raster_pipeline_native(
             blend_state.p_attachments = blend_attachments.ptr;
         }
 
-        vk::DynamicState[13] dynamic_states;
+        vk::DynamicState[18] dynamic_states;
         uint dynamic_count = 0;
         dynamic_states[dynamic_count++] = vk::DynamicState.VIEWPORT;
         dynamic_states[dynamic_count++] = vk::DynamicState.SCISSOR;
@@ -394,6 +429,11 @@ fn vk::Pipeline? create_raster_pipeline_native(
         dynamic_states[dynamic_count++] = vk::DynamicState.COLOR_BLEND_ENABLE_EXT;
         dynamic_states[dynamic_count++] = vk::DynamicState.COLOR_BLEND_EQUATION_EXT;
         dynamic_states[dynamic_count++] = vk::DynamicState.COLOR_WRITE_MASK_EXT;
+        dynamic_states[dynamic_count++] = vk::DynamicState.STENCIL_TEST_ENABLE;
+        dynamic_states[dynamic_count++] = vk::DynamicState.STENCIL_OP;
+        dynamic_states[dynamic_count++] = vk::DynamicState.STENCIL_COMPARE_MASK;
+        dynamic_states[dynamic_count++] = vk::DynamicState.STENCIL_WRITE_MASK;
+        dynamic_states[dynamic_count++] = vk::DynamicState.STENCIL_REFERENCE;
         vk::PipelineDynamicStateCreateInfo dynamic_state = vk::pipeline_dynamic_state_create_info();
         dynamic_state.dynamic_state_count = dynamic_count;
         dynamic_state.p_dynamic_states = &dynamic_states[0];

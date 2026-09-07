@@ -145,6 +145,24 @@ fn fault report_contract_failure(
     return public_fault;
 }
 
+<* One WARNING in the given category that carries no fault. *>
+fn void report_state_diagnostic(
+    VkDeviceState* state,
+    gpu::DebugMessageCategory category,
+    ZString operation,
+    ZString rejected_field,
+    ZString invariant,
+) {
+    gpu::DebugMessage message = {
+        .severity       = gpu::DebugMessageSeverity.WARNING,
+        .category       = category,
+        .operation      = operation,
+        .rejected_field = rejected_field,
+        .invariant      = invariant,
+    };
+    gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+}
+
 fn bool report_resource_lifetime(
     VkDeviceState* state,
     gpu::DebugResourceKind resource_kind,
@@ -153,12 +171,14 @@ fn bool report_resource_lifetime(
     uint generation,
     ZString debug_name,
     ZString backend_text,
+    ZString operation = "destroy_device",
+    ZString invariant = "resource remains live at device destruction",
 ) @private {
     if (state.debug_callback == null) return false;
     gpu::DebugMessage message = {
         .severity  = gpu::DebugMessageSeverity.WARNING,
         .category  = { .resource_lifetime },
-        .operation = "destroy_device",
+        .operation = operation,
         .resource  = {
             .kind                = resource_kind,
             .has_public_identity = has_public_identity,
@@ -166,11 +186,38 @@ fn bool report_resource_lifetime(
             .generation          = generation,
             .debug_name          = debug_name,
         },
-        .invariant    = "resource remains live at device destruction",
+        .invariant    = invariant,
         .backend_text = backend_text,
     };
     gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
     return true;
+}
+
+<* Report that rolling back a failed mapped allocation could not free it. The
+   allocation is abandoned; the caller treats this as unrecoverable. *>
+fn void vk_report_abandoned_allocation(
+    VkDeviceState* state,
+    gpu::GpuAllocation allocation,
+    ZString debug_name,
+) {
+    if (!report_resource_lifetime(
+        state:               state,
+        resource_kind:       gpu::DebugResourceKind.ALLOCATION,
+        has_public_identity: true,
+        index:               allocation.index,
+        generation:          allocation.generation,
+        debug_name:          debug_name,
+        backend_text:        "abandoned allocation: rollback free faulted",
+        operation:           "allocate_mapped_memory",
+        invariant:           "allocation rollback failed after a mapped-view fault",
+    )) {
+        io::eprintfn(
+            "gpu: failed to roll back allocation '%s' (index %d, generation %d) after a mapped-view fault",
+            debug_name != null ? debug_name : (ZString)"(unnamed)",
+            allocation.index,
+            allocation.generation,
+        );
+    }
 }
 
 <* Best-effort object naming: silently a no-op when the debug-utils entry

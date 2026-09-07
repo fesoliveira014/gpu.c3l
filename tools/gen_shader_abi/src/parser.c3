@@ -138,14 +138,21 @@ fn void? Parser.parse_struct_body(&self, Schema* schema, TypeTable* types, DeclK
     defer catch decl.fields.free();
     while (self.peek().kind != TokenKind.RBRACE) {
         Token type_name = self.expect_name("field type")!;
+        uint array_len = 0;
         if (self.peek().kind == TokenKind.LBRACKET) {
-            diagnostic(self.peek().loc, "fixed-size array fields are not supported");
-            return PARSE_ERROR~;
+            self.advance();
+            Token count = self.expect(TokenKind.NUMBER, "array length")!;
+            array_len = parse_array_len(count)!;
+            self.expect(TokenKind.RBRACKET, "']'")!;
+            if (self.peek().kind == TokenKind.LBRACKET) {
+                diagnostic(self.peek().loc, "nested arrays are not supported");
+                return PARSE_ERROR~;
+            }
         }
         Token field_name = self.expect_name("field name")!;
         validate_glsl_name(field_name.text, field_name.loc)!;
         if (self.peek().kind == TokenKind.LBRACKET) {
-            diagnostic(self.peek().loc, "fixed-size array fields are not supported");
+            diagnostic(self.peek().loc, "declare arrays as 'type[N] name', not 'type name[N]'");
             return PARSE_ERROR~;
         }
         self.expect(TokenKind.SEMICOLON, "';'")!;
@@ -154,6 +161,7 @@ fn void? Parser.parse_struct_body(&self, Schema* schema, TypeTable* types, DeclK
             .name = field_name.text,
             .loc = field_name.loc,
             .type_loc = type_name.loc,
+            .array_len = array_len,
         });
     }
     self.advance();
@@ -216,4 +224,17 @@ fn void? validate_const_literal(String type_name, String value, bool negative, L
         default:
             unreachable();
     }
+}
+
+fn uint? parse_array_len(Token count) {
+    ulong? value = count.text.to_ulong();
+    if (catch err = value) {
+        diagnostic(count.loc, "array length must be a positive integer, got '%s' (%s)", count.text, err);
+        return PARSE_ERROR~;
+    }
+    if (value == 0 || value > uint::max) {
+        diagnostic(count.loc, "array length must be at least 1 and fit in 32 bits, got '%s'", count.text);
+        return PARSE_ERROR~;
+    }
+    return (uint)value;
 }

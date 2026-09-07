@@ -52,14 +52,15 @@ struct TexturePlacementNativeOps {
 }
 
 struct DedicatedTextureNativeOps {
-    void*                        user_data;
-    TextureCreateImageFn         create_image;
-    TextureAllocateImageMemoryFn allocate_memory;
-    TextureBindImageMemoryFn     bind_memory;
-    TextureCreateViewFn          create_view;
-    TextureDestroyImageFn        destroy_image;
-    TextureDestroyViewFn         destroy_view;
-    TextureFreeMemoryFn          free_memory;
+    void*                           user_data;
+    TextureCreateImageFn            create_image;
+    TextureAllocateImageMemoryFn    allocate_memory;
+    TextureBindImageMemoryFn        bind_memory;
+    TextureCreateViewFn             create_view;
+    TextureDestroyImageFn           destroy_image;
+    TextureDestroyViewFn            destroy_view;
+    TextureFreeMemoryFn             free_memory;
+    AllocationGetMemoryPropertiesFn get_memory_properties;
 }
 
 struct TextureImageDestroyOps {
@@ -74,13 +75,14 @@ const uint TEXTURE_FREE_NONE = 0;
 const sz INITIAL_CACHED_VIEW_CAPACITY = 8;
 
 struct CachedView {
-    vk::ImageView     view;
-    uint              base_mip;
-    uint              mip_count;
-    uint              base_layer;
-    uint              layer_count;
-    vk::ImageViewType view_type;
-    bool              used;
+    vk::ImageView       view;
+    uint                base_mip;
+    uint                mip_count;
+    uint                base_layer;
+    uint                layer_count;
+    vk::ImageViewType   view_type;
+    vk::ImageAspectFlags aspect;
+    bool                used;
 }
 
 struct CachedViewCreation {
@@ -253,6 +255,9 @@ fn vk::Format format_to_vk(gpu::Format format) {
         case gpu::Format.RG32_FLOAT:        return vk::Format.R32G32_SFLOAT;
         case gpu::Format.RGBA32_FLOAT:      return vk::Format.R32G32B32A32_SFLOAT;
         case gpu::Format.D32_FLOAT:         return vk::Format.D32_SFLOAT;
+        case gpu::Format.D24_UNORM_S8_UINT: return vk::Format.D24_UNORM_S8_UINT;
+        case gpu::Format.D32_FLOAT_S8_UINT: return vk::Format.D32_SFLOAT_S8_UINT;
+        case gpu::Format.S8_UINT:           return vk::Format.S8_UINT;
         case gpu::Format.BC1_RGBA_UNORM:    return vk::Format.BC1_RGBA_UNORM_BLOCK;
         case gpu::Format.BC1_RGBA_SRGB:     return vk::Format.BC1_RGBA_SRGB_BLOCK;
         case gpu::Format.BC3_UNORM:         return vk::Format.BC3_UNORM_BLOCK;
@@ -342,7 +347,7 @@ fn gpu::TextureFormatSupport? vk_get_texture_format_support(
 
     gpu::TextureUsage attachment_usage;
     bool attachment_supported;
-    if (format == gpu::Format.D32_FLOAT) {
+    if (gpu::internal::format_is_depth_stencil(format)) {
         attachment_usage = { .depth_attach };
         attachment_supported = support.features.depth_attach;
     } else {
@@ -480,21 +485,133 @@ fn MipExtent texture_mip_extent(TextureSlot* slot, uint mip) {
     };
 }
 
+<* Every aspect of the format: attachment views, barrier ranges, default views. *>
 fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
-    switch (format) {
-        case gpu::Format.D32_FLOAT:
+    uint mask;
+    if (gpu::internal::format_has_depth(format)) {
+        mask |= (uint)vk::ImageAspectFlagBits.DEPTH_BIT;
+    }
+    if (gpu::internal::format_has_stencil(format)) {
+        mask |= (uint)vk::ImageAspectFlagBits.STENCIL_BIT;
+    }
+    if (mask == 0) mask = (uint)vk::ImageAspectFlagBits.COLOR_BIT;
+    return (vk::ImageAspectFlags)mask;
+}
+
+<* One aspect selected by a sampled view or a copy. *>
+fn vk::ImageAspectFlags? resolve_aspect(
+    gpu::Format format,
+    gpu::TextureAspect aspect,
+) @private {
+    bool depth = gpu::internal::format_has_depth(format);
+    bool stencil = gpu::internal::format_has_stencil(format);
+    switch (aspect) {
+        case gpu::TextureAspect.AUTO:
+            if (depth && stencil) return gpu::INVALID_ARGUMENT~;
+            return format_aspect(format);
+        case gpu::TextureAspect.DEPTH:
+            if (!depth) return gpu::INVALID_ARGUMENT~;
             return (vk::ImageAspectFlags)vk::ImageAspectFlagBits.DEPTH_BIT;
+        case gpu::TextureAspect.STENCIL:
+            if (!stencil) return gpu::INVALID_ARGUMENT~;
+            return (vk::ImageAspectFlags)vk::ImageAspectFlagBits.STENCIL_BIT;
         default:
-            return (vk::ImageAspectFlags)vk::ImageAspectFlagBits.COLOR_BIT;
+            return gpu::INVALID_ARGUMENT~;
     }
 }
 
-fn gpu::TextureState swapchain_prior_state(TextureSlot* slot) {
+fn gpu::TextureState swapchain_prior_state(TextureSlot* slot, bool unified) {
+    if (unified) return { .layout = gpu::TextureLayout.GENERAL };
     return {
         .layout = slot.presented.load(AtomicOrdering.RELAXED)
             ? gpu::TextureLayout.PRESENT
             : gpu::TextureLayout.UNDEFINED,
     };
+}
+
+<* Unified mode: queue a published texture for its UNDEFINED -> GENERAL
+   transition at the next submit. The list is sized to the texture table and
+   holds each live texture at most once; a full list only follows a failed
+   submit that restored stale handles, and the dropped texture then stays
+   uninitialized. *>
+fn void note_pending_texture_init(
+    VkDeviceState* state,
+    gpu::TextureHandle handle,
+) {
+    if (!state.unified_layouts) return;
+    state.pending_init_mutex.lock()!!;
+    defer state.pending_init_mutex.unlock();
+    if (state.pending_init_count < state.pending_init_textures.len) {
+        state.pending_init_textures[state.pending_init_count++] = handle;
+    }
+}
+
+fn void forget_pending_texture_init(
+    VkDeviceState* state,
+    gpu::TextureHandle handle,
+) {
+    if (!state.unified_layouts) return;
+    state.pending_init_mutex.lock()!!;
+    defer state.pending_init_mutex.unlock();
+    for (uint i = 0; i < state.pending_init_count; i++) {
+        if (state.pending_init_textures[i] != handle) continue;
+        state.pending_init_textures[i] =
+            state.pending_init_textures[--state.pending_init_count];
+        return;
+    }
+}
+
+<* Unified mode: move the pending textures into a new heap array, retaining a
+   command reference on each live one so destruction waits for the
+   initialization to retire; stale handles are dropped. Takes resource_mutex,
+   so callers must not hold a queue lock. The array belongs to the caller
+   until a prologue record takes it. *>
+fn gpu::TextureHandle[] retain_pending_texture_inits(VkDeviceState* state) {
+    state.resource_mutex.lock()!!;
+    defer state.resource_mutex.unlock();
+    state.pending_init_mutex.lock()!!;
+    defer state.pending_init_mutex.unlock();
+    uint total = state.pending_init_count;
+    if (total == 0) return {};
+    gpu::TextureHandle[] out = mem::new_array(gpu::TextureHandle, total);
+    uint count = 0;
+    for (uint i = 0; i < total; i++) {
+        TextureSlot*? slot = state.textures.get(state.pending_init_textures[i]);
+        if (catch err = slot) continue;
+        (void)slot.tracked_command_references.add(1, AtomicOrdering.RELAXED);
+        out[count++] = state.pending_init_textures[i];
+    }
+    state.pending_init_count = 0;
+    if (count == 0) {
+        mem::free(out.ptr);
+        return {};
+    }
+    return out[:count];
+}
+
+<* Drop the references taken by `retain_pending_texture_inits`; `restore`
+   returns the textures to the pending list for the next submit. Frees the
+   array. *>
+fn void release_pending_texture_inits(
+    VkDeviceState* state,
+    gpu::TextureHandle[] handles,
+    bool restore,
+) {
+    if (handles.len == 0) return;
+    foreach (handle : handles) {
+        TextureSlot*? slot = state.textures.get(handle);
+        if (catch err = slot) continue;
+        (void)slot.tracked_command_references.sub(1, AtomicOrdering.RELAXED);
+    }
+    if (restore) {
+        state.pending_init_mutex.lock()!!;
+        defer state.pending_init_mutex.unlock();
+        foreach (handle : handles) {
+            if (state.pending_init_count == state.pending_init_textures.len) break;
+            state.pending_init_textures[state.pending_init_count++] = handle;
+        }
+    }
+    mem::free(handles.ptr);
 }
 
 fn void mark_texture_presented(TextureSlot* slot) {
@@ -548,7 +665,12 @@ fn vk::ImageView? resolve_texture_view_tracked(
     CachedViewCreation* creation,
 ) @private {
     *creation = {};
-    if (view == null) return slot.default_view;
+    bool combined = gpu::internal::format_is_combined_depth_stencil(slot.format);
+    if (view == null) {
+        if (combined) return gpu::INVALID_ARGUMENT~;
+        return slot.default_view;
+    }
+    vk::ImageAspectFlags aspect = resolve_aspect(slot.format, view.aspect)!;
     if (view.base_mip >= slot.mip_levels || view.base_layer >= slot.array_layers) return gpu::INVALID_ARGUMENT~;
 
     uint mip_count   = view.mip_count == 0 ? slot.mip_levels - view.base_mip : view.mip_count;
@@ -571,13 +693,14 @@ fn vk::ImageView? resolve_texture_view_tracked(
                 : vk::ImageViewType.TYPE_2D;
     bool full_range = view.base_mip == 0 && mip_count == slot.mip_levels
         && view.base_layer == 0 && layer_count == slot.array_layers;
-    if (full_range && !view.cube) return slot.default_view;
+    if (full_range && !view.cube && !combined) return slot.default_view;
 
     foreach (&cached : slot.views) {
         if (cached.used
             && cached.base_mip == view.base_mip && cached.mip_count == mip_count
             && cached.base_layer == view.base_layer && cached.layer_count == layer_count
-            && cached.view_type == view_type) {
+            && cached.view_type == view_type
+            && cached.aspect == aspect) {
             return cached.view;
         }
     }
@@ -595,7 +718,7 @@ fn vk::ImageView? resolve_texture_view_tracked(
         .set_view_type(view_type)
         .set_format(format_to_vk(slot.format))
         .set_subresource_range({
-            .aspect_mask      = format_aspect(slot.format),
+            .aspect_mask      = aspect,
             .base_mip_level   = view.base_mip,
             .level_count      = mip_count,
             .base_array_layer = view.base_layer,
@@ -639,6 +762,7 @@ fn vk::ImageView? resolve_texture_view_tracked(
         .base_layer  = view.base_layer,
         .layer_count = layer_count,
         .view_type   = view_type,
+        .aspect      = aspect,
         .used        = true,
     };
     return image_view;
@@ -906,6 +1030,7 @@ fn gpu::TextureHandle? vk_create_texture(
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
         if (try handle = state.textures.alloc(slot)) {
+            note_pending_texture_init(state, handle);
             return handle;
         }
     }
@@ -1051,13 +1176,14 @@ fn void texture_free_memory_real(
 
 fn DedicatedTextureNativeOps dedicated_texture_native_ops_real() {
     return {
-        .create_image    = &texture_create_image_real,
-        .allocate_memory = &texture_allocate_image_memory_real,
-        .bind_memory     = &texture_bind_image_memory_real,
-        .create_view     = &texture_create_view_real,
-        .destroy_image   = &texture_destroy_image_real,
-        .destroy_view    = &texture_destroy_view_real,
-        .free_memory     = &texture_free_memory_real,
+        .create_image          = &texture_create_image_real,
+        .allocate_memory       = &texture_allocate_image_memory_real,
+        .bind_memory           = &texture_bind_image_memory_real,
+        .create_view           = &texture_create_view_real,
+        .destroy_image         = &texture_destroy_image_real,
+        .destroy_view          = &texture_destroy_view_real,
+        .free_memory           = &texture_free_memory_real,
+        .get_memory_properties = &allocation_get_properties_real,
     };
 }
 
@@ -1215,6 +1341,7 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
     }
 
     gpu::TextureHandle handle = state.textures.alloc(slot)!;
+    note_pending_texture_init(state, handle);
     owns_image = false;
     owns_view = false;
     retained_placement = false;
@@ -1357,6 +1484,14 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
         texture_slot.image,
     ))!;
 
+    vk::MemoryPropertyFlags memory_properties;
+    ops.get_memory_properties(
+        ops.user_data,
+        state.allocator,
+        native_allocation,
+        &memory_properties,
+    );
+
     if (texture_needs_default_view(desc.usage)) {
         vk::ImageViewCreateInfo view_info = default_texture_view_create_info(
             desc:         desc,
@@ -1386,6 +1521,8 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
         .alignment         = allocation_desc.alignment,
         .memory_class      = gpu::MemoryClass.TEXTURE,
         .debug_name        = debug_name,
+        .device_local      = ((uint)memory_properties
+            & (uint)vk::MemoryPropertyFlagBits.DEVICE_LOCAL_BIT) != 0,
     };
     copy_debug_name(&texture_slot.debug_name[0], desc.debug_name);
     if (allocation_desc.debug_name != null) {
@@ -1418,6 +1555,7 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
         } else {
             texture = published;
         }
+        note_pending_texture_init(state, texture);
         state.allocations.get(allocation)!!.live_placements = 1;
     }
     owns_view = false;
@@ -1486,6 +1624,7 @@ fn void? vk_destroy_texture(
     gpu::GpuAllocation placement = slot.placement;
     destroy_cached_views(state, slot);
     state.textures.free(handle)!;
+    forget_pending_texture_init(state, handle);
     if (default_view != null) {
         vk::destroy_image_view(state.device, default_view, null);
     }

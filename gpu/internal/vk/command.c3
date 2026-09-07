@@ -129,9 +129,20 @@ struct CommandRecordingOps @private {
     EndCommandBufferFn   end;
 }
 
+
+<* One stencil subresource whose last recorded store in this list was
+   DONT_CARE. *>
+struct StencilDiscardKey {
+    gpu::TextureHandle texture;
+    uint               mip_level;
+    uint               array_layer;
+}
+
 struct CommandScratch {
     CommandResourceReference[] references;
     uint                       reference_count;
+    StencilDiscardKey[] stencil_discards;
+    uint                stencil_discard_count;
     uint[]                     generated_preprocess_indices;
     uint                       generated_preprocess_count;
     vk::AccelerationStructureGeometryKHR[]
@@ -149,6 +160,7 @@ struct CommandAllocatorSlot {
     vk::CommandBuffer[]          command_buffers;
     CommandScratch[]             scratch;
     CommandResourceReference[]   reference_storage;
+    StencilDiscardKey[]          stencil_discard_storage;
     uint[]                       preprocess_index_storage;
     vk::AccelerationStructureGeometryKHR[]
         acceleration_structure_geometry_storage;
@@ -307,6 +319,9 @@ fn void destroy_command_allocator_slot_with_ops(
     if (slot.reference_storage.ptr != null) {
         alloc::free(state.host_allocator, slot.reference_storage.ptr);
     }
+    if (slot.stencil_discard_storage.ptr != null) {
+        alloc::free(state.host_allocator, slot.stencil_discard_storage.ptr);
+    }
     if (slot.preprocess_index_storage.ptr != null) {
         alloc::free(state.host_allocator, slot.preprocess_index_storage.ptr);
     }
@@ -392,6 +407,13 @@ fn void? initialize_command_allocator_slot_with_ops(
             return gpu::OUT_OF_HOST_MEMORY~;
         }
         slot.reference_storage = reference_storage;
+        StencilDiscardKey[]? stencil_storage = alloc::new_array_try(
+            state.host_allocator,
+            StencilDiscardKey,
+            (usz)capacity * (usz)reference_capacity,
+        );
+        if (catch err = stencil_storage) return gpu::OUT_OF_HOST_MEMORY~;
+        slot.stencil_discard_storage = stencil_storage;
     }
     uint acceleration_structure_geometry_capacity =
         desc.max_acceleration_structure_geometries_per_build;
@@ -429,6 +451,9 @@ fn void? initialize_command_allocator_slot_with_ops(
             slot.scratch[i].references = slot.reference_storage[
                 start:reference_capacity
             ];
+            slot.scratch[i].stencil_discards = slot.stencil_discard_storage[
+                start:reference_capacity
+            ];
         }
         if (acceleration_structure_geometry_capacity > 0) {
             usz start = (usz)i
@@ -459,17 +484,6 @@ fn void? initialize_command_allocator_slot_with_ops(
         state.device,
         native_queue_family(completion.native_id),
     )!;
-    vk::CommandBufferAllocateInfo allocate_info =
-        vk::command_buffer_allocate_info()
-            .set_command_pool(slot.pool)
-            .set_level(vk::CommandBufferLevel.PRIMARY)
-            .set_command_buffer_count(capacity);
-    check_device_result(state, ops.allocate(
-        ops.user_data,
-        state.device,
-        &allocate_info,
-        slot.command_buffers.ptr,
-    ))!;
 }
 
 fn void? initialize_command_allocator_slot(
@@ -939,6 +953,7 @@ fn void return_allocator_buffer_locked(
 ) {
     CommandScratch* scratch = &slot.scratch[buffer_index];
     scratch.reference_count = 0;
+    scratch.stencil_discard_count = 0;
     scratch.generated_preprocess_count = 0;
     scratch.acceleration_structure_geometry_count = 0;
     scratch.in_use = false;
@@ -979,18 +994,58 @@ fn CommandRecordingOps command_recording_ops_real() @private {
     };
 }
 
+fn void? ensure_command_buffer_locked(
+    VkDeviceState* state,
+    CommandAllocatorSlot* slot,
+    uint buffer_index,
+    CommandPoolOps* ops,
+) @private {
+    if (slot.command_buffers[buffer_index] != null) return;
+    vk::CommandBufferAllocateInfo info = vk::command_buffer_allocate_info()
+        .set_command_pool(slot.pool)
+        .set_level(vk::CommandBufferLevel.PRIMARY)
+        .set_command_buffer_count(1);
+    check_device_result(state, ops.allocate(
+        ops.user_data,
+        state.device,
+        &info,
+        &slot.command_buffers[buffer_index],
+    ))!;
+}
+
 fn void? vk_begin_commands_with_ops(
     VkDeviceState* state,
     gpu::CommandAllocator* allocator,
     gpu::CommandList* out_commands,
     CommandRecordingOps* ops,
+    CommandPoolOps* pool_ops = null,
 ) @private {
     CommandAllocatorSlot* slot = lock_command_allocator(
         state,
         allocator,
     )!;
     defer unlock_command_allocator(slot);
+    CommandRecord* record = begin_commands_locked(
+        state:    state,
+        slot:     slot,
+        handle:   allocator.handle,
+        queue:    allocator.queue,
+        device:   allocator.device,
+        ops:      ops,
+        pool_ops: pool_ops,
+    )!;
+    gpu::internal::publish_command_list(record, out_commands);
+}
 
+fn CommandRecord*? begin_commands_locked(
+    VkDeviceState* state,
+    CommandAllocatorSlot* slot,
+    gpu::CommandAllocatorHandle handle,
+    gpu::Queue queue,
+    gpu::Device device,
+    CommandRecordingOps* ops,
+    CommandPoolOps* pool_ops = null,
+) @private {
     RecordingThreadIdentity current_identity =
         current_recording_thread_identity();
     if (contract_uses_full_validation(state.validation_policy)
@@ -1005,6 +1060,7 @@ fn void? vk_begin_commands_with_ops(
     CommandScratch* scratch = &slot.scratch[buffer_index];
     scratch.in_use = true;
     scratch.reference_count = 0;
+    scratch.stencil_discard_count = 0;
     scratch.generated_preprocess_count = 0;
     scratch.acceleration_structure_geometry_count = 0;
     slot.live_recordings++;
@@ -1021,12 +1077,23 @@ fn void? vk_begin_commands_with_ops(
         }
     }
 
+    CommandPoolOps real_pool_ops;
+    if (pool_ops == null) {
+        real_pool_ops = command_pool_ops_real(state);
+        pool_ops = &real_pool_ops;
+    }
+    ensure_command_buffer_locked(
+        state:        state,
+        slot:         slot,
+        buffer_index: buffer_index,
+        ops:          pool_ops,
+    )!;
     vk::CommandBuffer command_buffer = slot.command_buffers[buffer_index];
     CommandRecord backend_record = {
         .command_buffer   = command_buffer,
-        .allocator        = allocator.handle,
+        .allocator        = handle,
         .allocator_buffer = buffer_index,
-        .queue            = allocator.queue,
+        .queue            = queue,
         .scratch          = scratch,
         .pending_acceleration_structure_head =
             ACCELERATION_STRUCTURE_PENDING_NONE,
@@ -1036,7 +1103,7 @@ fn void? vk_begin_commands_with_ops(
         state.command_mutex.lock()!!;
         defer state.command_mutex.unlock();
         record = state.commands.claim(
-            device:       allocator.device,
+            device:       device,
             ops:          state.command_ops,
             device_state: state,
             value:        backend_record,
@@ -1064,9 +1131,190 @@ fn void? vk_begin_commands_with_ops(
     ))!;
 
     record.state = gpu::internal::CommandState.RECORDING;
-    gpu::internal::publish_command_list(record, out_commands);
     record_claimed = false;
     claimed = false;
+    return record;
+}
+
+<* Library-owned allocators live on the queue completion state, outside the
+   public table, until device teardown. *>
+fn CommandAllocatorSlot* record_allocator_slot(
+    VkDeviceState* state,
+    CommandRecord* record,
+) {
+    if (record.internal) {
+        return state.queue_completions[record.queue.id].internal_allocator;
+    }
+    return state.command_allocators.get(record.allocator)!!;
+}
+
+fn CommandAllocatorSlot*? lock_internal_command_allocator(
+    CommandAllocatorSlot* slot,
+) @private {
+    pin_command_allocator_slot(slot);
+    defer catch (void)slot.operation_pins.sub(1, AtomicOrdering.RELEASE);
+    slot.mutex.lock()!;
+    return slot;
+}
+
+<* The record owns a device pin and child like an application record, so
+   retirement's release balances. *>
+fn CommandRecord*? begin_internal_commands(
+    VkDeviceState* state,
+    QueueCompletionState* completion,
+    gpu::Queue queue,
+) {
+    gpu::Device owner = state.owner;
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(&owner)!;
+    defer gpu::internal::end_device_operation(&operation);
+    CommandAllocatorSlot* slot = lock_internal_command_allocator(
+        completion.internal_allocator,
+    )!;
+    defer unlock_command_allocator(slot);
+    CommandRecordingOps ops = command_recording_ops_real();
+    CommandRecord* record = begin_commands_locked(
+        state:  state,
+        slot:   slot,
+        handle: {},
+        queue:  queue,
+        device: owner,
+        ops:    &ops,
+    )!;
+    record.internal = true;
+    gpu::internal::retain_device_children(&operation);
+    gpu::internal::transfer_device_operation_pin(&operation);
+    return record;
+}
+
+<* End a library-recorded list and mark it claimed for the current submit. *>
+fn void? end_internal_commands(
+    VkDeviceState* state,
+    CommandRecord* record,
+) {
+    CommandAllocatorSlot* slot = lock_internal_command_allocator(
+        record_allocator_slot(state, record),
+    )!;
+    defer unlock_command_allocator(slot);
+    CommandRecordingOps ops = command_recording_ops_real();
+    end_commands_locked(
+        state:  state,
+        slot:   slot,
+        record: record,
+        ops:    &ops,
+    )!;
+    state.command_mutex.lock()!!;
+    defer state.command_mutex.unlock();
+    record.state = gpu::internal::CommandState.SUBMITTING;
+}
+
+fn void discard_internal_commands(
+    VkDeviceState* state,
+    CommandRecord* record,
+) {
+    CommandAllocatorSlot*? locked = lock_internal_command_allocator(
+        record_allocator_slot(state, record),
+    );
+    if (catch locked) return;
+    CommandAllocatorSlot* slot = locked;
+    defer unlock_command_allocator(slot);
+    gpu::Device owner = record.device;
+    {
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        bool executable = record.state != gpu::internal::CommandState.RECORDING;
+        discard_commands_locked(
+        state:      state,
+        slot:       slot,
+        record:     record,
+        executable: executable,
+    );
+    }
+    gpu::internal::release_command_record_ownership(owner);
+}
+
+<* Unified mode: transition freshly created textures to GENERAL. *>
+fn void record_texture_init_barriers(
+    VkDeviceState* state,
+    CommandRecord* record,
+    gpu::TextureHandle[] textures,
+) {
+    const uint BATCH = 64;
+    vk::ImageMemoryBarrier2[BATCH] barriers;
+    uint count = 0;
+    foreach (handle : textures) {
+        TextureSlot*? slot = state.textures.get(handle);
+        if (catch slot) continue;
+        barriers[count++] = texture_init_barrier(slot.image, slot.format);
+        if (count == BATCH) {
+            emit_image_barriers(record, barriers[:count]);
+            count = 0;
+        }
+    }
+    if (count > 0) emit_image_barriers(record, barriers[:count]);
+}
+
+<* Unified mode: the swapchain image enters GENERAL before the application
+   lists and PRESENT_SRC after them. *>
+fn void record_swapchain_transition(
+    VkDeviceState* state,
+    CommandRecord* record,
+    gpu::TextureHandle texture,
+    bool acquire,
+) {
+    TextureSlot*? slot = state.textures.get(texture);
+    if (catch slot) return;
+    vk::ImageMemoryBarrier2 barrier = acquire
+        ? texture_init_barrier(slot.image, slot.format)
+        : vk::image_memory_barrier2()
+            .set_src_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT)
+            .set_src_access_mask(vk::AccessFlagBits2.ACCESS_2_MEMORY_WRITE_BIT)
+            .set_dst_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_NONE)
+            .set_dst_access_mask(vk::AccessFlagBits2.ACCESS_2_NONE)
+            .set_old_layout(vk::ImageLayout.GENERAL)
+            .set_new_layout(vk::ImageLayout.PRESENT_SRC_KHR)
+            .set_src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .set_dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .set_image(slot.image)
+            .set_subresource_range(full_image_range(slot.format));
+    emit_image_barriers(record, (&barrier)[:1]);
+}
+
+fn vk::ImageMemoryBarrier2 texture_init_barrier(
+    vk::Image image,
+    gpu::Format format,
+) @private {
+    return vk::image_memory_barrier2()
+        .set_src_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_NONE)
+        .set_src_access_mask(vk::AccessFlagBits2.ACCESS_2_NONE)
+        .set_dst_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT)
+        .set_dst_access_mask(
+            (vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT
+                | (vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_MEMORY_WRITE_BIT,
+        )
+        .set_old_layout(vk::ImageLayout.UNDEFINED)
+        .set_new_layout(vk::ImageLayout.GENERAL)
+        .set_src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .set_dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+        .set_image(image)
+        .set_subresource_range(full_image_range(format));
+}
+
+fn vk::ImageSubresourceRange full_image_range(gpu::Format format) @private {
+    return {
+        .aspect_mask = format_aspect(format),
+        .level_count = vk::REMAINING_MIP_LEVELS,
+        .layer_count = vk::REMAINING_ARRAY_LAYERS,
+    };
+}
+
+fn void emit_image_barriers(
+    CommandRecord* record,
+    vk::ImageMemoryBarrier2[] barriers,
+) @private {
+    vk::DependencyInfo dependency = vk::dependency_info()
+        .set_image_memory_barriers(barriers);
+    vk::cmd_pipeline_barrier2(record.command_buffer, &dependency);
 }
 
 fn void? vk_begin_commands(
@@ -1075,12 +1323,25 @@ fn void? vk_begin_commands(
     gpu::CommandList* out_commands,
 ) {
     CommandRecordingOps ops = command_recording_ops_real();
-    return vk_begin_commands_with_ops(
+    if (catch err = vk_begin_commands_with_ops(
         state:        state,
         allocator:    allocator,
         out_commands: out_commands,
         ops:          &ops,
-    );
+    )) {
+        if (err != gpu::DEVICE_BUSY) return err~;
+        retire_queue_latest_with_query(
+            state,
+            allocator.queue.id,
+            &real_semaphore_counter_query,
+        )!;
+        return vk_begin_commands_with_ops(
+            state:        state,
+            allocator:    allocator,
+            out_commands: out_commands,
+            ops:          &ops,
+        );
+    }
 }
 
 fn void? vk_end_commands_with_ops(
@@ -1098,11 +1359,25 @@ fn void? vk_end_commands_with_ops(
         record.allocator,
     )!;
     defer unlock_command_allocator(slot);
+    return end_commands_locked(
+        state:  state,
+        slot:   slot,
+        record: record,
+        ops:    ops,
+    );
+}
+
+fn void? end_commands_locked(
+    VkDeviceState* state,
+    CommandAllocatorSlot* slot,
+    CommandRecord* record,
+    CommandRecordingOps* ops,
+) @private {
     check_device_result(state, ops.end(
         ops.user_data,
         record.command_buffer,
     ))!;
-    commands.state = gpu::internal::CommandState.EXECUTABLE;
+    record.state = gpu::internal::CommandState.EXECUTABLE;
     slot.live_recordings--;
     slot.live_executables++;
     if (slot.live_recordings == 0) slot.recording_thread_set = false;
@@ -1121,12 +1396,14 @@ fn CommandRecord*? begin_commands_with_injected_ops(
     gpu::CommandAllocator* allocator,
     gpu::CommandList* out_commands,
     CommandRecordingOps* ops,
+    CommandPoolOps* pool_ops = null,
 ) @feat(TESTING) {
     vk_begin_commands_with_ops(
         state:        state,
         allocator:    allocator,
         out_commands: out_commands,
         ops:          ops,
+        pool_ops:     pool_ops,
     )!;
     CommandRecord* record =
         gpu::internal::recording_command(out_commands)!;
@@ -1179,7 +1456,22 @@ fn void? vk_discard_commands(
     if (!state_matches || record.allocator != allocator_handle) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    command.state = gpu::internal::CommandState.INACTIVE;
+    discard_commands_locked(
+        state:      state,
+        slot:       slot,
+        record:     record,
+        executable: executable,
+    );
+}
+
+fn void discard_commands_locked(
+    VkDeviceState* state,
+    CommandAllocatorSlot* slot,
+    CommandRecord* record,
+    bool executable,
+) @private {
+    gpu::internal::CommandListHandle handle = record.identity;
+    record.state = gpu::internal::CommandState.INACTIVE;
     abandon_pending_acceleration_structure_builds(record, true);
     clear_command_scratch_references(record.scratch);
     recycle_generated_preprocess_indices_locked(
@@ -1528,8 +1820,11 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
     uint width,
     uint height,
     uint depth,
+    gpu::TextureAspect aspect = gpu::TextureAspect.AUTO,
 ) @private {
     if (mip >= slot.mip_levels) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::internal::texture_aspect_valid(aspect)) return gpu::INVALID_ARGUMENT~;
+    vk::ImageAspectFlags aspect_mask = resolve_aspect(slot.format, aspect)!;
     MipExtent extent = texture_mip_extent(slot, mip);
     bool is_3d = texture_slot_is_3d(slot);
     if (x > extent.width || y > extent.height) {
@@ -1567,7 +1862,7 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
         return gpu::INVALID_ARGUMENT~;
     }
 
-    gpu::internal::FormatBlock block = gpu::internal::format_block(slot.format);
+    gpu::internal::FormatBlock block = gpu::internal::format_aspect_block(slot.format, aspect);
     if (block.bytes == 0) return gpu::INVALID_ARGUMENT~;
     if (x % block.width != 0 || y % block.height != 0) {
         return gpu::INVALID_ARGUMENT~;
@@ -1600,7 +1895,7 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
         .buffer_row_length   = row_length_texels,
         .buffer_image_height = 0,
         .image_subresource   = {
-            .aspect_mask      = format_aspect(slot.format),
+            .aspect_mask      = aspect_mask,
             .mip_level        = mip,
             .base_array_layer = is_3d ? 0 : base_layer,
             .layer_count      = is_3d ? 1 : layers,
@@ -1654,6 +1949,7 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
             width:             desc.width,
             height:            desc.height,
             depth:             desc.depth,
+            aspect:            desc.aspect,
         )!,
     };
 }
@@ -1727,6 +2023,7 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
             width:             desc.width,
             height:            desc.height,
             depth:             desc.depth,
+            aspect:            desc.aspect,
         )!,
     };
 }
@@ -1790,12 +2087,14 @@ fn void? track_buffer_texture_copy_references(
 fn vk::ImageLayout texture_copy_layout(
     TextureSlot* texture,
     bool destination,
+    bool unified = false,
 ) {
     return texture_layout_to_vk(
         destination
             ? gpu::TextureLayout.TRANSFER_DESTINATION
             : gpu::TextureLayout.TRANSFER_SOURCE,
         texture.format,
+        unified,
     );
 }
 
@@ -1810,6 +2109,7 @@ fn void record_buffer_to_texture_copy(
         dst_image_layout: texture_copy_layout(
             copy.texture,
             true,
+            commands.device_state.unified_layouts,
         ),
         region_count:    1,
         p_regions:       &copy.region,
@@ -1826,6 +2126,7 @@ fn void record_texture_to_buffer_copy(
         src_image_layout: texture_copy_layout(
             copy.texture,
             false,
+            commands.device_state.unified_layouts,
         ),
         dst_buffer:      copy.buffer.slot.buffer,
         region_count:    1,

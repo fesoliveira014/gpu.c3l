@@ -61,9 +61,10 @@ for (uint i = 0; i < adapters.count; i++) {
 
 `AdapterList` and `Adapter` are borrowed from the runtime and cost nothing
 to copy. Strings in `AdapterInfo` and `AdapterDiagnostics` are valid until
-the runtime is destroyed. `AdapterInfo` reports class, memory totals,
-available queue roles, and limits. `AdapterDiagnostics` reports backend and
-driver identity for logs.
+the runtime is destroyed. `AdapterInfo` reports class, memory totals
+(including `device_local_host_visible_bytes`, the size of the heaps that
+back `CPU_WRITE_GPU_LOCAL` placement), available queue roles, and limits.
+`AdapterDiagnostics` reports backend and driver identity for logs.
 
 Preflight a description before creating:
 
@@ -90,6 +91,7 @@ gpu::DeviceDesc desc = {
     .enable_ray_queries           = false,
     .enable_ray_tracing_pipelines = false,
     .enable_mesh_shaders          = false,
+    .unified_layouts              = false,   // one image layout, no app transitions
 };
 gpu::Device device = gpu::create_device(&adapter, &desc)!;
 defer (void)gpu::destroy_device(&device);
@@ -143,6 +145,12 @@ uint max_targets = caps.max_color_attachments;
   `mesh_shaders` (`MeshShaderCaps`: `enabled`, `task_shaders`, task and mesh
   work-group count limits, mesh output limits). Each is all-zero when its
   feature was not enabled.
+- `acceleration_structures`, `ray_queries`, `ray_tracing_pipelines`. Each
+  is all-zero when its feature was not enabled;
+- `unified_layouts` (the mode is active) and `unified_layouts_optimal`
+  (`VK_KHR_unified_image_layouts` is enabled, so the one layout is free).
+  The mode is satisfiable on every device; the optimal flag depends on the
+  driver.
 
 `AccelerationStructureCaps` carries `indirect_build`, heap capacity, and
 maximum geometry, primitive, and instance counts.

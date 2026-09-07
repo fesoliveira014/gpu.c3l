@@ -16,9 +16,13 @@ alias Vec4f = float[<4>];
 
 // Same shared-ABI rules as Vec2f.
 alias Vec4u = uint[<4>];
+
+// Column-major: element [c] is column c, matching std430 `mat4`.
+alias Mat4f = float[<4>][4];
 $assert Vec2f::size == 8;
 $assert Vec4f::size == 16;
 $assert Vec4u::size == 16;
+$assert Mat4f::size == 64;
 
 // Device handles are compact registry tokens. Device-owned resources also
 // carry an exact owner identity so coincident local slots cannot alias.
@@ -447,6 +451,10 @@ struct DeviceCaps {
     RayQueryCaps ray_queries;
     RayTracingPipelineCaps ray_tracing_pipelines;
     MeshShaderCaps mesh_shaders;
+    // Unified layouts mode is active.
+    bool unified_layouts;
+    // VK_KHR_unified_image_layouts is enabled, so the one layout costs nothing.
+    bool unified_layouts_optimal;
     // Configured semantic heap capacity, not the hardware maximum.
     uint texture_heap_capacity;
     // Configured semantic heap capacity, not the hardware maximum.
@@ -466,6 +474,8 @@ struct DeviceCaps {
     // 0 means anisotropic filtering is unsupported.
     float max_sampler_anisotropy;
     SparseTextureCaps sparse_textures;
+    // First of D24_UNORM_S8_UINT, D32_FLOAT_S8_UINT with depth_attach support.
+    Format depth_stencil_format;
 }
 
 <* Selects library contract behavior; this is independent of Vulkan validation
@@ -522,6 +532,7 @@ const Adapter ADAPTER_INVALID = {};
 struct AdapterMemoryInfo {
     ulong device_local_bytes;
     ulong host_visible_bytes;
+    ulong device_local_host_visible_bytes;
 }
 
 struct AdapterQueueInfo {
@@ -625,6 +636,9 @@ struct DeviceDesc {
     bool         enable_ray_queries;
     bool         enable_ray_tracing_pipelines;
     bool         enable_mesh_shaders;
+    // Keep every texture in one layout. TextureBarrier layouts lower to that
+    // layout and swapchain transitions are internal.
+    bool         unified_layouts;
 }
 
 <* Result of a read-only semantic support query. unmet_requirement is a
@@ -723,6 +737,7 @@ enum MemoryClass : int {
     GPU_PRIVATE,
     CPU_READ,
     TEXTURE,
+    CPU_WRITE_GPU_LOCAL,
 }
 
 <* Non-owning identity and range into generic GPU data. *>
@@ -766,6 +781,7 @@ struct AllocationInfo {
     QueueRoles  access;
     bool        mapped;
     bool        coherent;
+    bool        device_local;
     bool        addressable;
 }
 
@@ -823,6 +839,18 @@ enum Format : int {
     BC6H_UFLOAT,
     BC7_UNORM,
     BC7_SRGB,
+    D24_UNORM_S8_UINT,
+    D32_FLOAT_S8_UINT,
+    S8_UINT,
+}
+
+<* Aspect of a depth-stencil texture selected by a sampled view or a copy.
+   AUTO is color for color formats, depth for depth-only formats, stencil for
+   S8_UINT, and INVALID_ARGUMENT for combined formats. *>
+enum TextureAspect : int {
+    AUTO,
+    DEPTH,
+    STENCIL,
 }
 
 <* Rasterization samples per texel. The zero value is single-sampled. *>
@@ -1006,6 +1034,8 @@ struct TextureViewDesc {
     uint   layer_count;
     // Sampled cube of the six layers from base_layer.
     bool   cube;
+    // Aspect for sampled views of depth-stencil textures; AUTO in barriers.
+    TextureAspect aspect;
 }
 
 <* Semantic parameters for intern_sampler. *>
@@ -1156,6 +1186,40 @@ struct DepthState {
     bool      test_enable;
     bool      write_enable;
     CompareOp compare;
+}
+
+<* Stencil result operation. *>
+enum StencilOp : int {
+    KEEP,
+    ZERO,
+    REPLACE,
+    INCREMENT_CLAMP,
+    DECREMENT_CLAMP,
+    INVERT,
+    INCREMENT_WRAP,
+    DECREMENT_WRAP,
+}
+
+const uint STENCIL_MASK_ALL = 0xff;
+
+<* Per-face stencil test. The zero value never passes; set `compare`
+   explicitly. *>
+struct StencilFaceState {
+    CompareOp compare;
+    StencilOp fail;
+    StencilOp pass;
+    StencilOp depth_fail;
+    uint      compare_mask;
+    uint      write_mask;
+    uint      reference;
+}
+
+<* Stencil state; the zero value means stencil off. Face state is emitted
+   only when `test_enable` is set. *>
+struct StencilState {
+    bool             test_enable;
+    StencilFaceState front;
+    StencilFaceState back;
 }
 
 <* Blend equation for one color target; disabled is the zero value. *>
@@ -1319,7 +1383,7 @@ enum IndexType : int {
     U16,
 }
 
-const uint DEFAULT_COMMAND_ALLOCATOR_CAPACITY = 8;
+const uint DEFAULT_COMMAND_ALLOCATOR_CAPACITY = 32;
 
 const uint DEFAULT_COMMAND_REFERENCES_PER_LIST = 64;
 
@@ -1373,6 +1437,7 @@ struct GraphicsState {
     ScissorRect        scissor;
     DynamicRasterState raster;
     DepthState         depth;
+    StencilState       stencil;
     ColorState         color;
 }
 
@@ -1512,6 +1577,8 @@ struct BufferTextureCopyDesc {
     uint          width;
     uint          height;
     uint          depth;
+    // Required for combined depth-stencil formats.
+    TextureAspect aspect;
 }
 
 <* Texture-to-buffer readback region with the same dimension-specific
@@ -1529,6 +1596,8 @@ struct TextureBufferCopyDesc {
     uint          width;
     uint          height;
     uint          depth;
+    // Required for combined depth-stencil formats.
+    TextureAspect aspect;
 }
 
 const uint DEFAULT_ATTACHMENT_VIEW_CAPACITY = 4096;
@@ -1554,9 +1623,10 @@ union ClearColor {
 }
 $assert ClearColor::size == 16;
 
-<* Depth clear value; depth in [0, 1]. *>
+<* Depth and stencil clear values; depth in [0, 1]. *>
 struct ClearDepth {
     float depth;
+    uint  stencil;
 }
 
 <* One texture subresource prepared for render-pass attachment use.
@@ -1576,15 +1646,20 @@ struct ColorTargetDesc {
     ClearColor           clear;
 }
 
-<* One depth attachment. `clear` applies only with LoadOp.CLEAR. *>
+<* One depth-stencil attachment. The depth ops apply to the depth aspect and
+   the stencil ops to the stencil aspect; each `clear` value applies only with
+   its LoadOp.CLEAR. Zero stencil ops are LOAD and STORE. *>
 struct DepthTargetDesc {
     AttachmentViewHandle view;
     LoadOp               load_op;
     StoreOp              store_op;
+    LoadOp               stencil_load_op;
+    StoreOp              stencil_store_op;
     ClearDepth           clear;
 }
 
-<* A dynamic render pass. Every selected attachment must cover the render area. *>
+<* A dynamic render pass. Every selected attachment must cover the render
+   area. A zero `width` and `height` select the first attachment's extent. *>
 struct RenderPassDesc {
     ColorTargetDesc[] colors;
     DepthTargetDesc*  depth;
@@ -1632,6 +1707,8 @@ enum TextureLayout : int {
     COLOR_ATTACHMENT,
     DEPTH_ATTACHMENT,
     PRESENT,
+    // Any use; valid only on a device with unified layouts.
+    GENERAL,
 }
 
 <* Read/write intent for a texture state. The zero value means no access and is

@@ -20,13 +20,81 @@ fn void vec3_rejected() @test {
     `, UNKNOWN_TYPE);
 }
 
-fn void fixed_array_rejected() @test {
+fn void array_suffix_form_rejected() @test {
     @expect_fault(`
         abi t;
         struct Bad {
             float vals[4];
         }
     `, PARSE_ERROR);
+}
+
+fn void array_prefix_form_accepted() @test {
+    Schema schema;
+    schema.init();
+    defer schema.free();
+    TypeTable types;
+    types.init();
+    defer types.free();
+    build_schema(`
+        abi t;
+        struct Ok {
+            float[4] vals;
+            mat4     m;
+        }
+    `, &schema, &types)!!;
+    StructDecl* decl = schema.structs.get_ref(0);
+    assert(decl.fields.get_ref(0).array_len == 4);
+    assert(decl.fields.get_ref(1).array_len == 0);
+}
+
+fn void nested_array_rejected() @test {
+    @expect_fault(`
+        abi t;
+        struct Bad {
+            float[4][2] vals;
+        }
+    `, PARSE_ERROR);
+}
+
+fn void zero_length_array_rejected() @test {
+    @expect_fault(`
+        abi t;
+        struct Bad {
+            float[0] vals;
+        }
+    `, PARSE_ERROR);
+}
+
+fn void mat3_rejected() @test {
+    @expect_fault(`
+        abi t;
+        struct Bad {
+            mat3 basis;
+        }
+    `, UNKNOWN_TYPE);
+    @expect_fault(`
+        abi t;
+        struct Bad {
+            mat4x3 basis;
+        }
+    `, UNKNOWN_TYPE);
+}
+
+fn void push_aggregate_rejected() @test {
+    @expect_fault(`
+        abi t;
+        push Bad {
+            GpuAddress root_gpu;
+            uint[2]    ids;
+        }
+    `, LAYOUT_ERROR);
+    @expect_fault(`
+        abi t;
+        push Bad {
+            mat4 m;
+        }
+    `, LAYOUT_ERROR);
 }
 
 fn void duplicate_symbol_rejected() @test {

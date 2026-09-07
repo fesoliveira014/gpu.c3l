@@ -87,6 +87,12 @@ fn void rendering_attachments_use_classic_layouts() @test {
 
     gpu::internal::vk::PreparedRenderPass prepared =
         gpu::internal::vk::lower_render_pass(record, &pass)!!;
+    if (gpu::get_device_caps(&device)!!.unified_layouts) {
+        assert(prepared.attachments[0].image_layout == vk::ImageLayout.GENERAL
+            && prepared.depth_attachment.image_layout == vk::ImageLayout.GENERAL,
+            "unified mode renders in GENERAL");
+        return;
+    }
     assert(prepared.attachments[0].image_layout
             == vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL
         && prepared.depth_attachment.image_layout
@@ -224,8 +230,9 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         gpu::internal::recording_command(&commands)!!;
     gpu::internal::vk::PreparedRenderPass prepared =
         gpu::internal::vk::lower_render_pass(record, &pass)!!;
+    bool unified = gpu::get_device_caps(&device)!!.unified_layouts;
     assert(prepared.attachments[0].resolve_image_layout
-            == vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+            == (unified ? vk::ImageLayout.GENERAL : vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL),
         "resolve uses the classic color-attachment layout");
 
     gpu::DepthState depth_state = {

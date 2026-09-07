@@ -144,6 +144,21 @@ fn void format_blocks_are_texel_or_bc_sized() @test {
     assert(!gpu::internal::format_is_block_compressed(gpu::Format.D32_FLOAT)
             && gpu::internal::format_is_block_compressed(gpu::Format.BC6H_UFLOAT),
         "block compression is derived from the block extent");
+    assert(gpu::internal::format_block(gpu::Format.D32_FLOAT_S8_UINT).bytes == 0
+            && gpu::internal::format_block(gpu::Format.D24_UNORM_S8_UINT).bytes == 0
+            && gpu::internal::format_block(gpu::Format.S8_UINT).bytes == 1,
+        "combined formats have no single footprint and S8_UINT is one byte");
+    assert(gpu::internal::format_aspect_block(gpu::Format.D32_FLOAT_S8_UINT, gpu::TextureAspect.DEPTH).bytes == 4
+            && gpu::internal::format_aspect_block(gpu::Format.D24_UNORM_S8_UINT, gpu::TextureAspect.STENCIL).bytes == 1
+            && gpu::internal::format_aspect_block(gpu::Format.D24_UNORM_S8_UINT, gpu::TextureAspect.AUTO).bytes == 0
+            && gpu::internal::format_aspect_block(gpu::Format.RGBA8_UNORM, gpu::TextureAspect.AUTO).bytes == 4,
+        "aspect footprints are 4 bytes for depth, 1 for stencil, and the format block otherwise");
+    assert(gpu::internal::format_has_depth(gpu::Format.D24_UNORM_S8_UINT)
+            && gpu::internal::format_has_stencil(gpu::Format.D24_UNORM_S8_UINT)
+            && !gpu::internal::format_has_depth(gpu::Format.S8_UINT)
+            && !gpu::internal::format_has_stencil(gpu::Format.D32_FLOAT)
+            && !gpu::internal::format_is_depth_stencil(gpu::Format.R8_UINT),
+        "aspect predicates follow the format");
 }
 
 fn void texture_desc_profile_validates_block_compressed_usage() @test {

@@ -84,7 +84,9 @@ if (catch err = acquired) {
 
 `timeout_ns` defaults to zero (nonblocking). `AcquiredImage` holds the
 `texture`, its `attachment_view`, the one-shot `readiness`, `prior_state`,
-and `suboptimal`. Transition from `prior_state`; never assume a layout.
+and `suboptimal`. Transition from `prior_state`; never assume a layout. In
+unified mode `prior_state.layout` is `GENERAL` and no transition is needed
+before rendering or presenting.
 
 ## Submit and present
 
@@ -104,8 +106,10 @@ if (catch err = gpu::present(&device, &acquired, point)) {
 ```
 
 `readiness` goes into the first submit that writes the image and is
-consumed by it. `present` takes that submit's completion point and consumes
-the image on success. `WAIT_TIMEOUT` from `present` leaves the image
+consumed by it. In unified mode `readiness_before` is accepted with any
+value and ignored, and the library places the acquire and present
+transitions around the application's lists in that submit. `present` takes
+that submit's completion point and consumes the image on success. `WAIT_TIMEOUT` from `present` leaves the image
 intact.
 
 ## Resize and destroy

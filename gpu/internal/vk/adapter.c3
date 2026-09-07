@@ -45,12 +45,17 @@ fn gpu::BackendVersion backend_version(uint version) {
 fn gpu::AdapterMemoryInfo query_adapter_memory(vk::PhysicalDevice physical_device) {
     vk::PhysicalDeviceMemoryProperties properties;
     vk::get_physical_device_memory_properties(physical_device, &properties);
+    uint host_visible = (uint)vk::MemoryPropertyFlagBits.HOST_VISIBLE_BIT;
+    uint device_local = (uint)vk::MemoryPropertyFlagBits.DEVICE_LOCAL_BIT;
     bool[vk::MAX_MEMORY_HEAPS] host_visible_heaps;
+    bool[vk::MAX_MEMORY_HEAPS] device_local_host_visible_heaps;
     for (uint i = 0; i < properties.memory_type_count; i++) {
         vk::MemoryType* memory_type = &properties.memory_types[i];
-        if (((uint)memory_type.property_flags
-            & (uint)vk::MemoryPropertyFlagBits.HOST_VISIBLE_BIT) != 0) {
-            host_visible_heaps[memory_type.heap_index] = true;
+        uint flags = (uint)memory_type.property_flags;
+        if ((flags & host_visible) == 0) continue;
+        host_visible_heaps[memory_type.heap_index] = true;
+        if ((flags & device_local) != 0) {
+            device_local_host_visible_heaps[memory_type.heap_index] = true;
         }
     }
 
@@ -61,6 +66,9 @@ fn gpu::AdapterMemoryInfo query_adapter_memory(vk::PhysicalDevice physical_devic
             info.device_local_bytes += heap.size;
         }
         if (host_visible_heaps[i]) info.host_visible_bytes += heap.size;
+        if (device_local_host_visible_heaps[i]) {
+            info.device_local_host_visible_bytes += heap.size;
+        }
     }
     return info;
 }

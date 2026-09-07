@@ -34,13 +34,17 @@ gpu::AllocationInfo info = gpu::get_allocation_info(&device, allocation)!;
 
 | `MemoryClass` | Mapped | Addressable | Use |
 |---|---|---|---|
-| `CPU_WRITE` | yes | yes | uploads, root data, per-frame data |
+| `CPU_WRITE` | yes | yes | upload staging read once by a copy |
+| `CPU_WRITE_GPU_LOCAL` | yes | yes | root records, per-frame constants, CPU-written indirect arguments |
 | `CPU_READ` | yes | yes | readback |
 | `GPU_PRIVATE` | no | yes | device-local buffers |
 | `TEXTURE` | no | no | backing for placed and sparse textures |
 
-`AllocationInfo` reports the actual `mapped`, `coherent`, and
-`addressable` properties. `free_allocation` never waits; free only after
+`AllocationInfo` reports the actual `mapped`, `coherent`, `device_local`,
+and `addressable` properties. `CPU_WRITE_GPU_LOCAL` prefers a memory type
+that is both device-local and host-visible and falls back to host memory
+without a fault; `device_local` reports which one was selected.
+`free_allocation` never waits; free only after
 the last completion point that reads the memory. A live placed texture or
 acceleration structure makes it return `RESOURCE_IN_USE`.
 
@@ -60,6 +64,16 @@ char[] bytes = gpu::get_span_mapping(&device, part)!;      // CPU_WRITE / CPU_RE
 gpu::GpuAddress address = gpu::get_span_address(&device, part)!;
 
 gpu::MappedGpuSpan mapped = gpu::mapped_gpu_span(&device, part)!;  // span + bytes + address
+gpu::GpuAllocation owner = part.allocation();                      // token for free_allocation
+```
+
+`allocate_mapped_memory` allocates a mapped class and returns the same
+three views in one call; free it through `span.allocation()`:
+
+```c3
+gpu::MappedGpuSpan frame = gpu::allocate_mapped_memory(&device, &desc)!;
+gpu::GpuAllocation frame_allocation = frame.span.allocation();
+defer (void)gpu::free_allocation(&device, &frame_allocation);
 ```
 
 After writing through a mapping:
@@ -74,8 +88,8 @@ After the GPU wrote and its completion point completed:
 gpu::invalidate_mapped_span(&device, part)!;
 ```
 
-Both are no-ops on coherent memory and required regardless. Neither waits
-for the GPU. A `GpuAddress` is a raw `ulong` valid until the allocation is
+Both are required unless `AllocationInfo.coherent` is true, in which case
+they are no-ops. Neither waits for the GPU. A `GpuAddress` is a raw `ulong` valid until the allocation is
 freed.
 
 ## Memory statistics
@@ -133,7 +147,13 @@ allocation. It fails with `RESOURCE_IN_USE` while a view or attachment view
 is live.
 
 Limits: 2D and 3D only; multisample textures are single-mip attachments;
-depth is `D32_FLOAT`; no stencil.
+depth-stencil formats are 2D, single-sampled or attachment-only, never
+storage or cube. `DeviceCaps.depth_stencil_format` names the first supported
+combined format. A sampled view of a combined format sets
+`TextureViewDesc.aspect` to `DEPTH` or `STENCIL`; copies of a combined format
+set the same field on the copy descriptor and size buffers with
+`texture_mip_aspect_bytes`. `TextureBarrier.view.aspect` stays `AUTO`: both
+aspects move together.
 
 A cube map is a 2D texture with `cube_compatible` set: equal width and
 height, single-sampled, and a layer count that is a multiple of six. Layers

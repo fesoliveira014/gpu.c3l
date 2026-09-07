@@ -740,6 +740,7 @@ fn gpu::TextureHandle? create_sparse_texture_for_state_with_ops(
     }
 
     gpu::TextureHandle handle = state.textures.alloc(slot)!;
+    note_pending_texture_init(state, handle);
     owns_image = false;
     owns_view = false;
     return handle;

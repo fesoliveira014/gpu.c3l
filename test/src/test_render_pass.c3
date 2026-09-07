@@ -105,7 +105,9 @@ fn void render_pass_descriptor_rejects_invalid_structure() @test {
     gpu::RenderPassDesc desc = valid_render_pass_desc(colors[..]);
 
     desc.width = 0;
-    assert(!gpu::internal::render_pass_desc_valid(&desc), "zero width is invalid");
+    assert(!gpu::internal::render_pass_desc_valid(&desc), "zero width with a nonzero height is invalid");
+    desc.height = 0;
+    assert(gpu::internal::render_pass_desc_valid(&desc), "a zero extent derives from the attachments");
     desc = valid_render_pass_desc(colors[..]);
     desc.colors = {};
     assert(!gpu::internal::render_pass_desc_valid(&desc), "a pass needs an attachment");

@@ -26,4 +26,12 @@ layout(buffer_reference, std430, buffer_reference_align = 8) buffer ShadowProbeR
     uint _pad1;
 };
 
+layout(buffer_reference, std430, buffer_reference_align = 8) buffer FetchStencilRoot {
+    uint64_t out_gpu;
+    uint texture_index;
+    uint x;
+    uint y;
+    uint _pad0;
+};
+
 #endif

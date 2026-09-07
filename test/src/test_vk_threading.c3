@@ -5,6 +5,7 @@ import gpu @public;
 import gpu::internal::vk @public;
 import vk;
 import std::thread;
+import std::io;
 import std::atomic;
 import std::core::mem;
 import std::core::mem::allocators;
@@ -63,6 +64,14 @@ struct ScratchWorkerArgs {
     gpu::CommandAllocator* allocator;
     gpu::PipelineHandle    pipeline;
     Atomic{bool}*          start;
+    bool                   failed;
+}
+
+struct RetrySubmitArgs {
+    gpu::CommandAllocator* allocator;
+    gpu::Queue             queue;
+    uint                   iterations;
+    uint                   completed;
     bool                   failed;
 }
 
@@ -432,6 +441,36 @@ fn int reuse_recording_pool_worker(void* raw_args) {
     return 0;
 }
 
+fn void? run_retry_submits(RetrySubmitArgs* args) {
+    for (uint i = 0; i < args.iterations; i++) {
+        gpu::CommandList commands;
+        while (true) {
+            gpu::CommandList? begun = gpu::begin_commands(args.allocator);
+            if (catch err = begun) {
+                if (err != gpu::DEVICE_BUSY) return err~;
+                continue;
+            }
+            commands = begun;
+            break;
+        }
+        gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)! };
+        gpu::SubmitDesc submit = { .command_lists = lists[..] };
+        gpu::submit(args.queue, &submit)!;
+        args.completed++;
+    }
+}
+
+fn int retry_submit_worker(void* raw_args) {
+    RetrySubmitArgs* args = (RetrySubmitArgs*)raw_args;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+        if (catch err = run_retry_submits(args)) {
+            args.failed = true;
+            io::eprintfn("retry submit worker failed: %s", err);
+        }
+    };
+    return args.failed ? 1 : 0;
+}
+
 fn int allocator_begin_worker(void* raw_args) {
     AllocatorBeginArgs* args = (AllocatorBeginArgs*)raw_args;
     args.entered.store(true, AtomicOrdering.RELEASE);
@@ -548,6 +587,35 @@ fn void worker_thread_reuses_explicit_allocator_buffers() @test {
             == gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY,
         "completion returns both buffers to the exact allocator");
     gpu::destroy_command_allocator(&allocator)!!;
+}
+
+fn void begin_retry_survives_concurrent_submits_on_one_queue() @test {
+    gpu::Device device = make_thr_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocatorDesc desc = { .command_buffer_capacity = 1 };
+    gpu::CommandAllocator worker_allocator = gpu::create_command_allocator(&device, queue, &desc)!!;
+    gpu::CommandAllocator main_allocator = gpu::create_command_allocator(&device, queue, &desc)!!;
+
+    RetrySubmitArgs worker_args = {
+        .allocator  = &worker_allocator,
+        .queue      = queue,
+        .iterations = 64,
+    };
+    RetrySubmitArgs main_args = {
+        .allocator  = &main_allocator,
+        .queue      = queue,
+        .iterations = 64,
+    };
+    Thread worker;
+    worker.create(&retry_submit_worker, &worker_args)!!;
+    run_retry_submits(&main_args)!!;
+    assert(worker.join()!! == 0 && !worker_args.failed, "the worker completes every retried submission");
+    assert(worker_args.completed == 64 && main_args.completed == 64,
+        "both threads submitted through a capacity-one allocator with begin retries");
+    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::destroy_command_allocator(&worker_allocator)!!;
+    gpu::destroy_command_allocator(&main_allocator)!!;
 }
 
 fn void contended_allocator_does_not_hold_the_device_resource_lock() @test {

@@ -563,6 +563,7 @@ fn gpu::AcquiredImage make_acquired_image(
     gpu::SwapchainReadiness readiness,
     uint index,
     bool suboptimal,
+    bool unified = false,
 ) {
     return {
         .texture         = handle,
@@ -570,7 +571,7 @@ fn gpu::AcquiredImage make_acquired_image(
         .readiness       = readiness,
         .index           = index,
         .suboptimal      = suboptimal,
-        .prior_state     = swapchain_prior_state(texture),
+        .prior_state     = swapchain_prior_state(texture, unified),
     };
 }
 
@@ -1303,6 +1304,7 @@ fn gpu::AcquiredImage? commit_acquired_image(
         readiness:       candidate.readiness,
         index:           image_index,
         suboptimal:      suboptimal,
+        unified:         context.state.unified_layouts,
     );
 
     slot.acquire_pending = true;

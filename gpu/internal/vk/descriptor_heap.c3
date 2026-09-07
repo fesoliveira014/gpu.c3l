@@ -53,6 +53,7 @@ struct AccelerationStructureDescriptorOps {
 }
 
 struct DescriptorHeapState {
+    bool                    unified_layouts;
     ulong                   texture_view_owner;
     TextureDescriptorCell[] texture_cells;
     uint                    texture_next_new;
@@ -282,6 +283,7 @@ fn void? create_descriptor_heap(VkDeviceState* state) {
         state.resource_owner,
         gpu::internal::ResourceOwnerKind.TEXTURE_VIEW,
     );
+    heap.unified_layouts        = state.unified_layouts;
     heap.texture_cells          = mem::new_array(TextureDescriptorCell, tex_capacity);
     heap.texture_free           = mem::new_array(uint, tex_capacity);
     if (state.acceleration_structures_enabled) {
@@ -557,12 +559,14 @@ fn void? destroy_acceleration_structure_descriptor_view(
 fn vk::ImageLayout texture_descriptor_layout(
     TextureSlot* texture,
     TextureDescriptorKind kind,
+    bool unified = false,
 ) {
     return texture_layout_to_vk(
         kind == TextureDescriptorKind.STORAGE
             ? gpu::TextureLayout.STORAGE
             : gpu::TextureLayout.SAMPLED,
         texture.format,
+        unified,
     );
 }
 
@@ -680,6 +684,7 @@ fn void write_texture_descriptor(
             .image_layout = texture_descriptor_layout(
                 texture,
                 TextureDescriptorKind.SAMPLED,
+                state.unified_layouts,
             ),
         };
         writes[write_count] = vk::write_descriptor_set()
@@ -696,6 +701,7 @@ fn void write_texture_descriptor(
             .image_layout = texture_descriptor_layout(
                 texture,
                 TextureDescriptorKind.STORAGE,
+                state.unified_layouts,
             ),
         };
         writes[write_count] = vk::write_descriptor_set()
@@ -992,6 +998,7 @@ fn uint accumulate_texture_descriptor_write(
             .image_layout = texture_descriptor_layout(
                 texture_slot,
                 TextureDescriptorKind.SAMPLED,
+                heap.unified_layouts,
             ),
         };
         writes[write_count] = vk::write_descriptor_set()
@@ -1008,6 +1015,7 @@ fn uint accumulate_texture_descriptor_write(
             .image_layout = texture_descriptor_layout(
                 texture_slot,
                 TextureDescriptorKind.STORAGE,
+                heap.unified_layouts,
             ),
         };
         writes[write_count] = vk::write_descriptor_set()

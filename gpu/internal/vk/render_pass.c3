@@ -4,6 +4,7 @@ import gpu::internal @public;
 import gpu @public;
 import vk;
 import std::math;
+import std::atomic;
 
 struct PreparedRenderPass {
     AttachmentViewSlot*[gpu::MAX_COLOR_ATTACHMENTS] color_slots;
@@ -14,11 +15,14 @@ struct PreparedRenderPass {
     AttachmentViewSlot*       depth_view;
     gpu::AttachmentViewHandle depth_handle;
     vk::RenderingAttachmentInfo depth_attachment;
+    vk::RenderingAttachmentInfo stencil_attachment;
     RenderCompatibility       compatibility;
     uint                      width;
     uint                      height;
     uint                      color_count;
     bool                      has_depth;
+    bool                      has_depth_aspect;
+    bool                      has_stencil_aspect;
 }
 
 struct LoweredColorState {
@@ -33,6 +37,7 @@ struct LoweredGraphicsState {
     vk::Rect2D              scissor;
     gpu::DynamicRasterState raster;
     gpu::DepthState         depth;
+    gpu::StencilState       stencil;
     LoweredColorState       color;
 }
 
@@ -193,6 +198,63 @@ fn void emit_raster_state(
     );
 }
 
+fn bool stencil_faces_equal(gpu::StencilFaceState* a, gpu::StencilFaceState* b) @private {
+    return a.compare == b.compare
+        && a.fail == b.fail
+        && a.pass == b.pass
+        && a.depth_fail == b.depth_fail
+        && a.compare_mask == b.compare_mask
+        && a.write_mask == b.write_mask
+        && a.reference == b.reference;
+}
+
+fn void emit_stencil_face(
+    vk::CommandBuffer command_buffer,
+    vk::StencilFaceFlags faces,
+    gpu::StencilFaceState* face,
+) @private {
+    vk::cmd_set_stencil_op(
+        command_buffer: command_buffer,
+        face_mask:      faces,
+        fail_op:        stencil_op_to_vk(face.fail),
+        pass_op:        stencil_op_to_vk(face.pass),
+        depth_fail_op:  stencil_op_to_vk(face.depth_fail),
+        compare_op:     compare_op_to_vk(face.compare),
+    );
+    vk::cmd_set_stencil_compare_mask(command_buffer, faces, face.compare_mask);
+    vk::cmd_set_stencil_write_mask(command_buffer, faces, face.write_mask);
+    vk::cmd_set_stencil_reference(command_buffer, faces, face.reference);
+}
+
+fn void emit_stencil_state(
+    CommandRecord* commands,
+    gpu::StencilState* stencil,
+) @private {
+    CommandRecord* record = commands;
+    vk::cmd_set_stencil_test_enable(
+        record.command_buffer,
+        stencil.test_enable ? vk::TRUE : vk::FALSE,
+    );
+    if (!stencil.test_enable || stencil_faces_equal(&stencil.front, &stencil.back)) {
+        emit_stencil_face(
+            record.command_buffer,
+            (vk::StencilFaceFlags)vk::StencilFaceFlagBits.FRONT_AND_BACK,
+            &stencil.front,
+        );
+        return;
+    }
+    emit_stencil_face(
+        record.command_buffer,
+        (vk::StencilFaceFlags)vk::StencilFaceFlagBits.FRONT_BIT,
+        &stencil.front,
+    );
+    emit_stencil_face(
+        record.command_buffer,
+        (vk::StencilFaceFlags)vk::StencilFaceFlagBits.BACK_BIT,
+        &stencil.back,
+    );
+}
+
 fn void emit_depth_state(
     CommandRecord* commands,
     gpu::DepthState* depth,
@@ -218,7 +280,8 @@ fn PreparedRenderPass? lower_render_pass(
 ) {
     if (desc == null
         || desc.colors.len > gpu::MAX_COLOR_ATTACHMENTS
-        || (desc.colors.len > 0 && desc.colors.ptr == null)) {
+        || (desc.colors.len > 0 && desc.colors.ptr == null)
+        || (desc.width == 0) != (desc.height == 0)) {
         return gpu::INVALID_ARGUMENT~;
     }
     CommandRecord* record = commands;
@@ -250,6 +313,7 @@ fn PreparedRenderPass? lower_render_pass(
         attachment.image_layout = texture_layout_to_vk(
             gpu::TextureLayout.COLOR_ATTACHMENT,
             view.format,
+            state.unified_layouts,
         );
         attachment.load_op = load_op_to_vk(target.load_op);
         attachment.store_op = store_op_to_vk(target.store_op);
@@ -270,6 +334,7 @@ fn PreparedRenderPass? lower_render_pass(
             attachment.resolve_image_layout = texture_layout_to_vk(
                 gpu::TextureLayout.COLOR_ATTACHMENT,
                 resolve.format,
+                state.unified_layouts,
             );
         }
     }
@@ -285,18 +350,41 @@ fn PreparedRenderPass? lower_render_pass(
         if (!samples_initialized) {
             pass.compatibility.sample_count = depth.sample_count;
         }
-        pass.depth_attachment = vk::rendering_attachment_info();
-        pass.depth_attachment.image_view = depth.native;
-        pass.depth_attachment.image_layout = texture_layout_to_vk(
+        vk::ImageLayout layout = texture_layout_to_vk(
             gpu::TextureLayout.DEPTH_ATTACHMENT,
             depth.format,
+            state.unified_layouts,
         );
-        pass.depth_attachment.load_op = load_op_to_vk(desc.depth.load_op);
-        pass.depth_attachment.store_op = store_op_to_vk(desc.depth.store_op);
-        pass.depth_attachment.clear_value.depth_stencil = {
+        vk::ClearDepthStencilValue clear = {
             .depth   = desc.depth.clear.depth,
-            .stencil = 0,
+            .stencil = desc.depth.clear.stencil,
         };
+        pass.has_depth_aspect = gpu::internal::format_has_depth(depth.format);
+        pass.has_stencil_aspect = gpu::internal::format_has_stencil(depth.format);
+        if (pass.has_depth_aspect) {
+            pass.depth_attachment = vk::rendering_attachment_info();
+            pass.depth_attachment.image_view = depth.native;
+            pass.depth_attachment.image_layout = layout;
+            pass.depth_attachment.load_op = load_op_to_vk(desc.depth.load_op);
+            pass.depth_attachment.store_op = store_op_to_vk(desc.depth.store_op);
+            pass.depth_attachment.clear_value.depth_stencil = clear;
+        }
+        if (pass.has_stencil_aspect) {
+            pass.stencil_attachment = vk::rendering_attachment_info();
+            pass.stencil_attachment.image_view = depth.native;
+            pass.stencil_attachment.image_layout = layout;
+            pass.stencil_attachment.load_op = load_op_to_vk(desc.depth.stencil_load_op);
+            pass.stencil_attachment.store_op = store_op_to_vk(desc.depth.stencil_store_op);
+            pass.stencil_attachment.clear_value.depth_stencil = clear;
+        }
+    }
+    if (desc.width == 0 && desc.height == 0) {
+        AttachmentViewSlot* first = pass.color_count > 0
+            ? pass.color_slots[0]
+            : pass.depth_view;
+        if (first == null) return gpu::INVALID_ARGUMENT~;
+        pass.width = first.width;
+        pass.height = first.height;
     }
     return pass;
 }
@@ -309,6 +397,55 @@ fn void? validate_render_pass_desc_fields(
         || desc.colors.len > state.caps.max_color_attachments) {
         return gpu::INVALID_ARGUMENT~;
     }
+}
+
+<* FULL only: within one command list, a DONT_CARE stencil store followed
+   by a LOAD of the same texture mip and layer through any attachment view.
+   Runs after the pass is recorded, so a rejected begin leaves no history.
+   The set holds up to the list's retained-reference capacity. *>
+fn void note_stencil_load_after_discard(
+    VkDeviceState* state,
+    CommandRecord* record,
+    AttachmentViewSlot* view,
+    ZString operation,
+    gpu::DepthTargetDesc* depth,
+) @private {
+    CommandScratch* scratch = record.scratch;
+    StencilDiscardKey key = {
+        .texture     = view.texture,
+        .mip_level   = view.mip_level,
+        .array_layer = view.array_layer,
+    };
+    uint found = scratch.stencil_discard_count;
+    for (uint i = 0; i < scratch.stencil_discard_count; i++) {
+        if (stencil_discard_key_equals(scratch.stencil_discards[i], key)) found = i;
+    }
+    bool discarded = found < scratch.stencil_discard_count;
+    if (depth.stencil_load_op == gpu::LoadOp.LOAD && discarded) {
+        report_state_diagnostic(
+            state:          state,
+            category:       { .public_contract },
+            operation:      operation,
+            rejected_field: "DepthTargetDesc.stencil_load_op",
+            invariant:      "a LOAD after a DONT_CARE stencil store reads undefined contents",
+        );
+    }
+    bool discards = depth.stencil_store_op == gpu::StoreOp.DONT_CARE;
+    if (discards && !discarded
+        && scratch.stencil_discard_count < scratch.stencil_discards.len) {
+        scratch.stencil_discards[scratch.stencil_discard_count++] = key;
+    } else if (!discards && discarded) {
+        scratch.stencil_discards[found] =
+            scratch.stencil_discards[--scratch.stencil_discard_count];
+    }
+}
+
+fn bool stencil_discard_key_equals(StencilDiscardKey a, StencilDiscardKey b) @private {
+    return a.texture.owner == b.texture.owner
+        && a.texture.index == b.texture.index
+        && a.texture.generation == b.texture.generation
+        && a.mip_level == b.mip_level
+        && a.array_layer == b.array_layer;
 }
 
 fn PreparedRenderPass? full_prepare_render_pass(
@@ -350,8 +487,8 @@ fn PreparedRenderPass? full_prepare_render_pass(
                 backend_text:        null,
             )~;
         }
-        if (desc.width > view.width || desc.height > view.height) {
-            ZString rejected_field = desc.width > view.width
+        if (pass.width > view.width || pass.height > view.height) {
+            ZString rejected_field = pass.width > view.width
                 ? "RenderPassDesc.width"
                 : "RenderPassDesc.height";
             return report_contract_failure(
@@ -389,8 +526,8 @@ fn PreparedRenderPass? full_prepare_render_pass(
                 || !resolve_texture.usage.color_attach
                 || resolve.sample_count != gpu::SampleCount.ONE
                 || resolve.format != view.format
-                || desc.width > resolve.width
-                || desc.height > resolve.height) {
+                || pass.width > resolve.width
+                || pass.height > resolve.height) {
                 return gpu::INVALID_ARGUMENT~;
             }
         }
@@ -407,8 +544,8 @@ fn PreparedRenderPass? full_prepare_render_pass(
             operation:   operation,
         )!;
         if (!depth_texture.usage.depth_attach
-            || desc.width > depth.width
-            || desc.height > depth.height) {
+            || pass.width > depth.width
+            || pass.height > depth.height) {
             return gpu::INVALID_ARGUMENT~;
         }
         if (pass.color_count > 0
@@ -508,8 +645,11 @@ fn void record_render_pass(
     rendering.p_color_attachments = pass.color_count == 0
         ? null
         : &pass.attachments[0];
-    if (pass.has_depth) {
+    if (pass.has_depth_aspect) {
         rendering.p_depth_attachment = &pass.depth_attachment;
+    }
+    if (pass.has_stencil_aspect) {
+        rendering.p_stencil_attachment = &pass.stencil_attachment;
     }
     vk::cmd_begin_rendering(cb, &rendering);
     record.active_render = pass.compatibility;
@@ -541,6 +681,15 @@ fn void? full_begin_render_pass(
     );
     track_render_pass(commands, &pass)!;
     record_render_pass(commands, &pass);
+    if (pass.has_stencil_aspect) {
+        note_stencil_load_after_discard(
+            state:     commands.device_state,
+            record:    record,
+            view:      pass.depth_view,
+            operation: "cmd_begin_render_pass",
+            depth:     desc.depth,
+        );
+    }
 }
 
 fn fault report_dynamic_state_rejection(
@@ -931,15 +1080,86 @@ fn void? validate_depth_state(
     }
 }
 
+fn bool stencil_face_valid(gpu::StencilFaceState* face) @private {
+    return compare_op_valid(face.compare)
+        && stencil_op_valid(face.fail)
+        && stencil_op_valid(face.pass)
+        && stencil_op_valid(face.depth_fail);
+}
+
+fn bool stencil_state_valid(gpu::StencilState* stencil) @private {
+    return !stencil.test_enable
+        || (stencil_face_valid(&stencil.front) && stencil_face_valid(&stencil.back));
+}
+
+fn void? validate_stencil_face(
+    VkDeviceState* state,
+    ZString operation,
+    gpu::StencilFaceState* face,
+    ZString field,
+) @private {
+    if (!stencil_face_valid(face)) {
+        return reject_dynamic_state(
+            state:     state,
+            operation: operation,
+            field:     field,
+            invariant: "stencil compare and operations must be defined",
+        );
+    }
+}
+
+fn void? validate_stencil_state(
+    VkDeviceState* state,
+    ZString operation,
+    gpu::StencilState* stencil,
+) @private {
+    if (!stencil.test_enable) return;
+    validate_stencil_face(
+        state:     state,
+        operation: operation,
+        face:      &stencil.front,
+        field:     "GraphicsState.stencil.front",
+    )!;
+    validate_stencil_face(
+        state:     state,
+        operation: operation,
+        face:      &stencil.back,
+        field:     "GraphicsState.stencil.back",
+    )!;
+}
+
+<* FULL only: an enabled stencil test on a pipeline without a stencil aspect
+   is legal and does nothing. *>
+fn void note_stencil_without_aspect(
+    VkDeviceState* state,
+    CommandRecord* record,
+    ZString operation,
+    gpu::StencilState* stencil,
+) @private {
+    if (!stencil.test_enable) return;
+    BoundPipeline*? bound = borrow_bound_pipeline(record);
+    if (catch err = bound) return;
+    BoundPipeline* pipeline = bound;
+    if (gpu::internal::format_has_stencil(pipeline.render.depth_format)) return;
+    report_state_diagnostic(
+        state:          state,
+        category:       { .performance },
+        operation:      operation,
+        rejected_field: "GraphicsState.stencil.test_enable",
+        invariant:      "stencil test has no effect without a stencil aspect in the bound pipeline",
+    );
+}
+
 fn LoweredGraphicsState? lower_graphics_state(
     gpu::GraphicsState* state,
 ) {
-    if (state == null) return gpu::INVALID_ARGUMENT~;
+    if (state == null || !stencil_state_valid(&state.stencil)) return gpu::INVALID_ARGUMENT~;
     return {
         .viewport = lower_viewport(&state.viewport),
         .scissor  = lower_scissor(&state.scissor),
         .raster   = state.raster,
         .depth    = state.depth,
+        .stencil  = state.stencil,
         .color    = lower_color_state(&state.color)!,
     };
 }
@@ -965,6 +1185,13 @@ fn LoweredGraphicsState? full_prepare_graphics_state(
     validate_scissor(device, operation, &state.scissor)!;
     validate_raster_state(device, operation, &state.raster)!;
     validate_depth_state(device, operation, &state.depth)!;
+    validate_stencil_state(device, operation, &state.stencil)!;
+    note_stencil_without_aspect(
+        state:     device,
+        record:    record,
+        operation: operation,
+        stencil:   &state.stencil,
+    );
     LoweredColorState color = full_prepare_color_state(
         state:     device,
         record:    record,
@@ -976,6 +1203,7 @@ fn LoweredGraphicsState? full_prepare_graphics_state(
         .scissor  = lower_scissor(&state.scissor),
         .raster   = state.raster,
         .depth    = state.depth,
+        .stencil  = state.stencil,
         .color    = color,
     };
 }
@@ -996,6 +1224,7 @@ fn void emit_graphics_state(
     emit_scissor(commands, &state.scissor);
     emit_raster_state(commands, &state.raster);
     emit_depth_state(commands, &state.depth);
+    emit_stencil_state(commands, &state.stencil);
     emit_color_state(commands, &state.color);
 }
 

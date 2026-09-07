@@ -77,4 +77,6 @@ the condition that would reopen them:
   range allocator.
 - [Root-pointer data](root_pointer_data.md): no library-owned dynamic-uniform
   path.
+- [Unified image layouts](unified_layouts.md): opt-in one-layout mode; cost
+  unmeasured on hardware.
 - [Shader variants](shader_variants.md): no specialization constants.

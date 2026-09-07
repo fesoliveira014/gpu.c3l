@@ -92,9 +92,13 @@ Layout rules:
 | `u64`, `GpuAddress` | 8 | 8 |
 | `vec2` | 8 | 8 |
 | `vec4` | 16 | 16 |
+| `mat4` | 64 | 16 |
+| `T[N]` | N × stride | alignment of `T` |
 
-Avoid `vec3`. Represent a matrix as `vec4` columns. Pad explicitly where C3
-packing and std430 differ. Do not hand-write both sides; use the
+Avoid `vec3`; `mat4` is the only matrix type and is column-major (`Mat4f`
+element `[c]` is column `c`). An array's stride is the element size rounded
+up to the element alignment. Pad explicitly where C3 packing and std430
+differ. Do not hand-write both sides; use the
 [generator](#schema-generator).
 
 ## Data behind the root
@@ -174,7 +178,14 @@ store_storage_texture(root.image, coord, v * 2.0);
 
 // depth compare; sampler must have compare_enable
 float lit = sample_shadow_2d(root.shadow_map, root.shadow_sampler, vec3(uv, depth));
+
+// integer fetch: a stencil-aspect view or an integer color format
+uint id = gpu_fetch_uint(root.stencil_mask, ivec2(coord), 0);
 ```
+
+`gpu_fetch_uint` reads binding 0 through a `utexture2D` alias, the same
+aliasing the shadow sampler uses on binding 2, so integer-format textures
+published with `create_texture_view` are readable without a sampler.
 
 3D variants are `sample_texture_3d`, `sample_texture_3d_implicit`,
 `load_storage_texture_3d`, and `store_storage_texture_3d`. Cube views are
@@ -279,9 +290,10 @@ struct Material {
 
 Declarations: `const`, `type Name : scalar`, `struct`, `root`, `push`, and
 `extern struct` (GLSL twin of an existing C3 record). Field types: `uint`,
-`int`, `float`, `u64`, `vec2`, `vec4`, `GpuAddress`, `TextureIndex`,
-`SamplerIndex`, `AccelerationStructureIndex`, or an earlier struct. No
-matrices, no fixed arrays.
+`int`, `float`, `u64`, `vec2`, `vec4`, `mat4`, `GpuAddress`, `TextureIndex`,
+`SamplerIndex`, `AccelerationStructureIndex`, an earlier struct, or a fixed
+array `T[N]` of any of those (`uint[8] ids;`). `push` members stay scalar,
+vector, or semantic.
 
 Build and run the generator:
 

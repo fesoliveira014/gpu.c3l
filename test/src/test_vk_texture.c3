@@ -1112,6 +1112,7 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
 fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
+    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
     gpu::TextureDesc desc = {
         .access       = { .graphics },
         .width        = 16,
@@ -1192,6 +1193,7 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
 fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
+    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
     gpu::TextureDesc desc = {
         .access    = { .graphics, .compute },
         .width     = 16,
@@ -1330,6 +1332,7 @@ fn void assert_present_barrier_emission_for_contract(
 ) {
     gpu::Device device = make_texture_test_device_with_contract(contract);
     defer destroy_test_device(&device)!!;
+    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
     gpu::TextureDesc desc = {
         .access = { .graphics },
         .width  = 16,
@@ -1434,6 +1437,7 @@ fn void present_barrier_emission_matches_both_contract_policies() @test {
 fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
+    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
     gpu::TextureDesc desc = {
         .access     = { .graphics },
         .width      = 8,
@@ -1490,6 +1494,7 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
 fn void texture_barrier_rejects_unsupported_texture_states() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
+    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
 
     gpu::TextureDesc desc = {
         .access    = { .graphics },
@@ -2162,6 +2167,7 @@ fn void texture_barrier_state_diagnostics_name_nested_side_fields() @test {
     };
     gpu::Device device = make_texture_diagnostic_device(&capture);
     defer destroy_test_device(&device)!!;
+    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
     gpu::TextureDesc desc = {
         .access     = { .graphics },
         .width      = 8,

@@ -19,3 +19,11 @@ root ShadowProbeRoot {
     uint         _pad0;
     uint         _pad1;
 }
+
+root FetchStencilRoot {
+    GpuAddress   out_gpu;
+    TextureIndex texture_index;
+    uint         x;
+    uint         y;
+    uint         _pad0;
+}

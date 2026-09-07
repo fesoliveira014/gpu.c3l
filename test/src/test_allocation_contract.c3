@@ -112,6 +112,54 @@ fn void allocation_ownership_queries_and_consumption() @test {
     gpu::destroy_device(&second)!!;
 }
 
+fn void mapped_allocation_composes_views_and_frees_through_span() @test {
+    gpu::internal::vk::VkDeviceState state;
+    Device device = create_allocation_stub_device(&state);
+    AllocationDesc desc = allocation_stub_desc();
+    MappedGpuSpan mapped = gpu::allocate_mapped_memory(&device, &desc)!!;
+    assert(mapped.bytes.len == mapped.span.size && mapped.span.size == desc.size,
+        "the composed mapping covers the allocation");
+    assert((ulong)mapped.address == (ulong)gpu::get_span_address(&device, mapped.span)!!,
+        "the composed address matches the public query");
+    GpuAllocation allocation = mapped.span.allocation();
+    gpu::free_allocation(&device, &allocation)!!;
+    assert(!state.allocation_live, "freeing through the span accessor releases the stub allocation");
+
+    AllocationDesc private_desc = allocation_stub_desc(MemoryClass.GPU_PRIVATE);
+    assert(@catch(gpu::allocate_mapped_memory(&device, &private_desc)) == gpu::INVALID_ARGUMENT,
+        "an unmapped class faults before allocating");
+    assert(!state.allocation_live, "a rejected class leaves nothing allocated");
+
+    state.mapping_unavailable = true;
+    assert(@catch(gpu::allocate_mapped_memory(&device, &desc)) == gpu::BACKEND_ERROR,
+        "a mapping failure after allocation propagates the mapping fault");
+    assert(!state.allocation_live && state.allocation_free_calls == 2,
+        "a mapping failure after allocation frees the allocation");
+    assert(state.abandoned_allocation_reports == 0,
+        "a rollback free that succeeds reports nothing");
+    state.mapping_unavailable = false;
+    gpu::destroy_device(&device)!!;
+}
+
+fn void device_local_cpu_write_class_is_mapped() @test {
+    gpu::internal::vk::VkDeviceState state;
+    Device device = create_allocation_stub_device(&state);
+    AllocationDesc desc = allocation_stub_desc(MemoryClass.CPU_WRITE_GPU_LOCAL);
+    GpuAllocation allocation = gpu::allocate_memory(&device, &desc)!!;
+
+    AllocationInfo info = gpu::get_allocation_info(&device, allocation)!!;
+    assert(info.memory_class == MemoryClass.CPU_WRITE_GPU_LOCAL
+        && info.mapped
+        && info.device_local
+        && info.addressable,
+        "the device-local CPU-write class is mapped and addressable");
+    GpuSpan span = gpu::get_allocation_span(&device, allocation)!!;
+    assert(gpu::get_span_mapping(&device, span)!!.len == desc.size,
+        "the device-local CPU-write class exposes its host mapping");
+    gpu::free_allocation(&device, &allocation)!!;
+    gpu::destroy_device(&device)!!;
+}
+
 fn void zero_sized_span_resolvers_are_rejected() @test {
     gpu::internal::vk::VkDeviceState state;
     Device device = create_allocation_stub_device(&state);
