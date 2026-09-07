@@ -386,20 +386,25 @@ fn void? validate_render_pass_desc_fields(
 }
 
 <* FULL only: within one command list, a DONT_CARE stencil store followed
-   by a LOAD of the same attachment view. Runs after the pass is recorded, so
-   a rejected begin leaves no history. The set holds up to the list's
-   retained-reference capacity. *>
+   by a LOAD of the same texture mip and layer through any attachment view.
+   Runs after the pass is recorded, so a rejected begin leaves no history.
+   The set holds up to the list's retained-reference capacity. *>
 fn void note_stencil_load_after_discard(
     VkDeviceState* state,
     CommandRecord* record,
-    gpu::AttachmentViewHandle view,
+    AttachmentViewSlot* view,
     ZString operation,
     gpu::DepthTargetDesc* depth,
 ) @private {
     CommandScratch* scratch = record.scratch;
+    StencilDiscardKey key = {
+        .texture     = view.texture,
+        .mip_level   = view.mip_level,
+        .array_layer = view.array_layer,
+    };
     uint found = scratch.stencil_discard_count;
     for (uint i = 0; i < scratch.stencil_discard_count; i++) {
-        if (scratch.stencil_discards[i] == view) found = i;
+        if (stencil_discard_key_equals(scratch.stencil_discards[i], key)) found = i;
     }
     bool discarded = found < scratch.stencil_discard_count;
     if (depth.stencil_load_op == gpu::LoadOp.LOAD && discarded) {
@@ -414,11 +419,19 @@ fn void note_stencil_load_after_discard(
     bool discards = depth.stencil_store_op == gpu::StoreOp.DONT_CARE;
     if (discards && !discarded
         && scratch.stencil_discard_count < scratch.stencil_discards.len) {
-        scratch.stencil_discards[scratch.stencil_discard_count++] = view;
+        scratch.stencil_discards[scratch.stencil_discard_count++] = key;
     } else if (!discards && discarded) {
         scratch.stencil_discards[found] =
             scratch.stencil_discards[--scratch.stencil_discard_count];
     }
+}
+
+fn bool stencil_discard_key_equals(StencilDiscardKey a, StencilDiscardKey b) @private {
+    return a.texture.owner == b.texture.owner
+        && a.texture.index == b.texture.index
+        && a.texture.generation == b.texture.generation
+        && a.mip_level == b.mip_level
+        && a.array_layer == b.array_layer;
 }
 
 fn PreparedRenderPass? full_prepare_render_pass(
@@ -658,7 +671,7 @@ fn void? full_begin_render_pass(
         note_stencil_load_after_discard(
             state:     commands.device_state,
             record:    record,
-            view:      pass.depth_handle,
+            view:      pass.depth_view,
             operation: "cmd_begin_render_pass",
             depth:     desc.depth,
         );

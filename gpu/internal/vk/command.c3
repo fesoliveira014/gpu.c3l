@@ -129,11 +129,20 @@ struct CommandRecordingOps @private {
     EndCommandBufferFn   end;
 }
 
+
+<* One stencil subresource whose last recorded store in this list was
+   DONT_CARE. *>
+struct StencilDiscardKey {
+    gpu::TextureHandle texture;
+    uint               mip_level;
+    uint               array_layer;
+}
+
 struct CommandScratch {
     CommandResourceReference[] references;
     uint                       reference_count;
-    gpu::AttachmentViewHandle[] stencil_discards;
-    uint                       stencil_discard_count;
+    StencilDiscardKey[] stencil_discards;
+    uint                stencil_discard_count;
     uint[]                     generated_preprocess_indices;
     uint                       generated_preprocess_count;
     vk::AccelerationStructureGeometryKHR[]
@@ -151,7 +160,7 @@ struct CommandAllocatorSlot {
     vk::CommandBuffer[]          command_buffers;
     CommandScratch[]             scratch;
     CommandResourceReference[]   reference_storage;
-    gpu::AttachmentViewHandle[]  stencil_discard_storage;
+    StencilDiscardKey[]          stencil_discard_storage;
     uint[]                       preprocess_index_storage;
     vk::AccelerationStructureGeometryKHR[]
         acceleration_structure_geometry_storage;
@@ -398,12 +407,12 @@ fn void? initialize_command_allocator_slot_with_ops(
             return gpu::OUT_OF_HOST_MEMORY~;
         }
         slot.reference_storage = reference_storage;
-        gpu::AttachmentViewHandle[]? stencil_storage = alloc::new_array_try(
+        StencilDiscardKey[]? stencil_storage = alloc::new_array_try(
             state.host_allocator,
-            gpu::AttachmentViewHandle,
+            StencilDiscardKey,
             (usz)capacity * (usz)reference_capacity,
         );
-        if (catch stencil_storage) return gpu::OUT_OF_HOST_MEMORY~;
+        if (catch err = stencil_storage) return gpu::OUT_OF_HOST_MEMORY~;
         slot.stencil_discard_storage = stencil_storage;
     }
     uint acceleration_structure_geometry_capacity =

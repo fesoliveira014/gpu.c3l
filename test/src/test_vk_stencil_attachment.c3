@@ -611,6 +611,8 @@ fn void stencil_full_diagnostics_report_without_faulting() @test {
     defer gpu::destroy_texture(&device, ds)!!;
     gpu::AttachmentViewHandle ds_view = create_test_attachment_view(&device, ds)!!;
     defer destroy_test_attachment_view(&device, &ds_view)!!;
+    gpu::AttachmentViewHandle ds_alias = create_test_attachment_view(&device, ds)!!;
+    defer destroy_test_attachment_view(&device, &ds_alias)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
@@ -657,6 +659,15 @@ fn void stencil_full_diagnostics_report_without_faulting() @test {
     assert(capture.public_contract == 1, "a LOAD after a STORE reports nothing");
     gpu::cmd_begin_render_pass(&passes, &discard_pass)!!;
     gpu::cmd_end_render_pass(&passes)!!;
+    gpu::DepthTargetDesc alias_load = {
+        .view = ds_alias,
+        .stencil_load_op = gpu::LoadOp.LOAD, .stencil_store_op = gpu::StoreOp.STORE,
+    };
+    gpu::RenderPassDesc alias_pass = { .depth = &alias_load, .width = DP_RT, .height = DP_RT };
+    gpu::cmd_begin_render_pass(&passes, &alias_pass)!!;
+    gpu::cmd_end_render_pass(&passes)!!;
+    assert(capture.public_contract == 2 && capture.field_matches,
+        "a LOAD through another view of the discarded subresource reports the diagnostic");
     gpu::CommandList other = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&other)!!;
     gpu::RenderPassDesc oversized = { .depth = &discard, .width = DP_RT * 2, .height = DP_RT * 2 };
@@ -666,7 +677,7 @@ fn void stencil_full_diagnostics_report_without_faulting() @test {
         "a rejected begin records no stencil history");
     gpu::cmd_begin_render_pass(&other, &load_pass)!!;
     gpu::cmd_end_render_pass(&other)!!;
-    assert(capture.public_contract == 1, "a discard in one list does not mark a LOAD in another");
+    assert(capture.public_contract == 2, "a discard in one list does not mark a LOAD in another");
 }
 
 fn void stencil_aspect_fetches_in_fragment_stage() @test {
