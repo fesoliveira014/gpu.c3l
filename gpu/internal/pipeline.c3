@@ -16,6 +16,8 @@ enum ShaderRole : int {
     ANY_HIT,
     INTERSECTION,
     CALLABLE,
+    TASK,
+    MESH,
 }
 
 fn ulong shader_identity_hash(char[] spirv) @private {

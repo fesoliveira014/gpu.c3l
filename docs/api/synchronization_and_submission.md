@@ -22,8 +22,9 @@ flowchart LR
 `mesh_shader`. `all` and `present` cannot be combined with others.
 `index_input` is destination-only: valid in `Barrier.after` and
 `CompletionWait.before`, rejected in `Barrier.before`, texture states, and
-`SubmitDesc.readiness_before`. `mesh_shader` is reserved and rejected
-everywhere.
+`SubmitDesc.readiness_before`. `mesh_shader` needs
+`DeviceDesc.enable_mesh_shaders` and covers the mesh stage and the task stage
+when task shaders are enabled.
 
 ## Global barriers
 

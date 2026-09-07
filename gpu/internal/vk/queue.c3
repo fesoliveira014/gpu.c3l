@@ -1416,6 +1416,8 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
                 generated_work: false,
                 ray_queries:    state.acceleration_structures_enabled,
                 ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
+                mesh_shaders:   state.mesh_shaders_enabled,
+                task_shaders:   state.task_shaders_enabled,
             )!;
         }
         gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
@@ -1453,6 +1455,8 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
                 generated_work: state.generated_work.enabled,
                 ray_queries:    state.acceleration_structures_enabled,
                 ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
+                mesh_shaders:   state.mesh_shaders_enabled,
+                task_shaders:   state.task_shaders_enabled,
             )!;
             inputs.completion_waits[i] = {
                 .source   = source,

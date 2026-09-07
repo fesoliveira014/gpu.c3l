@@ -97,7 +97,7 @@ gpu::cmd_dispatch_generated(&commands, records_span, count_span, max_count)!;
 ```
 
 `root_address` is pushed unchanged; zero is allowed. Every direct dispatch,
-draw, and trace also takes a trailing `char[] inline_root` (default empty),
+draw, mesh draw, and trace also takes a trailing `char[] inline_root` (default empty),
 pushed after the root header; see
 [shader ABI](../shader_abi.md#inline-payload). Group counts must fit
 `DeviceCaps.max_compute_work_group_count`. Indirect argument memory is a
@@ -227,6 +227,43 @@ gpu::cmd_draw_indexed_indirect_count(
 `cmd_draw_indexed_indirect` is the counted form without the count span.
 Indirect draw counts must fit `DeviceCaps.max_draw_indirect_count`;
 `cmd_draw_indexed_indirect_count` needs `DeviceCaps.draw_indirect_count`.
+
+
+## Mesh draws
+
+```c3
+gpu::cmd_bind_pipeline(&commands, mesh_pipeline)!;
+gpu::cmd_set_graphics_state(&commands, &state)!;
+gpu::cmd_draw_mesh_tasks(
+    commands:      &commands,
+    mesh_root:     meshlet_root,
+    fragment_root: material_root,
+    groups:        { meshlet_count, 1, 1 },
+)!;
+gpu::cmd_draw_mesh_tasks_indirect(
+    commands:      &commands,
+    mesh_root:     meshlet_root,
+    fragment_root: material_root,
+    args:          mesh_args_span,      // DrawMeshTasksIndirectCommand records
+    draw_count:    1,
+)!;
+gpu::cmd_draw_mesh_tasks_indirect_count(
+    commands:       &commands,
+    mesh_root:      meshlet_root,
+    fragment_root:  material_root,
+    args:           mesh_args_span,
+    count_span:     count_span,
+    max_draw_count: 2,
+)!;
+```
+
+Mesh draws need a bound mesh pipeline, a render pass, and a complete
+graphics state. `groups` are task work groups when the pipeline has a task
+shader, else mesh work groups; each axis and the product must fit the
+`DeviceCaps.mesh_shaders` limits in every validation mode.
+Indirect records are 12-byte `DrawMeshTasksIndirectCommand` values made
+visible with a barrier to `.indirect`; the count form needs
+`DeviceCaps.draw_indirect_count`.
 
 ## Generated work
 

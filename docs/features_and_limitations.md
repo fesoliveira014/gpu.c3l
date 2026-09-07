@@ -56,6 +56,10 @@ Optional capabilities are reported in `DeviceCaps`: asynchronous compute,
 indirect-count draws, generated work, line polygon mode, sparse textures,
 anisotropy, timestamps, and workload limits. Ray queries and ray-tracing
 pipelines are requested in `DeviceDesc` and also need a nonzero
+`RuntimeDesc.acceleration_structure_heap_capacity`. Mesh shaders are
+requested with `DeviceDesc.enable_mesh_shaders` and reported in
+`DeviceCaps.mesh_shaders`. A request the adapter cannot satisfy fails
+atomically.
 `RuntimeDesc.acceleration_structure_heap_capacity`. A request the adapter
 cannot satisfy fails atomically. `DeviceDesc.unified_layouts` keeps every
 texture in one layout and is satisfiable everywhere;

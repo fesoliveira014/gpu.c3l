@@ -39,6 +39,7 @@ const ZString GENERATED_WORK_USAGE_EXTENSION = "VK_KHR_maintenance5";
 const ZString ACCELERATION_STRUCTURE_EXTENSION =
     "VK_KHR_acceleration_structure";
 const ZString RAY_QUERY_EXTENSION = "VK_KHR_ray_query";
+const ZString MESH_SHADER_EXTENSION = "VK_EXT_mesh_shader";
 const ZString UNIFIED_IMAGE_LAYOUTS_EXTENSION = "VK_KHR_unified_image_layouts";
 const ZString RAY_TRACING_PIPELINE_EXTENSION =
     "VK_KHR_ray_tracing_pipeline";
@@ -140,6 +141,11 @@ struct VkDeviceState @public {
     bool                       acceleration_structures_enabled;
     bool                       ray_queries_enabled;
     bool                       ray_tracing_pipelines_enabled;
+    bool                       mesh_shaders_enabled;
+    bool                       task_shaders_enabled;
+    gpu::MeshShaderCaps        mesh_shader_caps;
+    vk::PipelineLayout         mesh_layout;
+    vk::ShaderStageFlags       mesh_push_stages;
     bool                       unified_layouts;
     bool                       unified_layouts_extension;
     // Leaf lock: nothing else is taken while it is held.
@@ -197,6 +203,7 @@ struct CapsInputs {
     bool                      acceleration_structures_enabled;
     bool                      ray_queries_enabled;
     bool                      ray_tracing_pipelines_enabled;
+    gpu::MeshShaderCaps       mesh_shaders;
     bool                      unified_layouts;
     bool                      unified_layouts_extension;
     uint                      acceleration_structure_heap_capacity;
@@ -385,6 +392,41 @@ fn gpu::RayTracingPipelineCaps normalize_ray_tracing_pipeline_caps(
 fn uint ray_dispatch_dimension_limit(uint group_count, uint group_size) {
     ulong limit = (ulong)group_count * group_size;
     return limit > uint::max ? uint::max : (uint)limit;
+}
+
+<* Mesh shading caps of a physical device; `enabled` is false without the
+   extension or its mesh feature. *>
+fn gpu::MeshShaderCaps query_mesh_shader_caps(vk::PhysicalDevice physical_device) {
+    if (!device_supports_extension(physical_device, MESH_SHADER_EXTENSION)) return {};
+    vk::PhysicalDeviceMeshShaderFeaturesEXT features =
+        vk::physical_device_mesh_shader_features_ext();
+    vk::PhysicalDeviceFeatures2 features2 =
+        vk::physical_device_features2().set_next(&features);
+    vk::get_physical_device_features2(physical_device, &features2);
+    if (features.mesh_shader == 0) return {};
+    vk::PhysicalDeviceMeshShaderPropertiesEXT properties =
+        vk::physical_device_mesh_shader_properties_ext();
+    vk::PhysicalDeviceProperties2 properties2 =
+        vk::physical_device_properties2().set_next(&properties);
+    vk::get_physical_device_properties2(physical_device, &properties2);
+    return {
+        .enabled      = true,
+        .task_shaders = features.task_shader != 0,
+        .max_task_work_group_count = {
+            properties.max_task_work_group_count[0],
+            properties.max_task_work_group_count[1],
+            properties.max_task_work_group_count[2],
+        },
+        .max_mesh_work_group_count = {
+            properties.max_mesh_work_group_count[0],
+            properties.max_mesh_work_group_count[1],
+            properties.max_mesh_work_group_count[2],
+        },
+        .max_task_work_group_total_count = properties.max_task_work_group_total_count,
+        .max_mesh_work_group_total_count = properties.max_mesh_work_group_total_count,
+        .max_mesh_output_vertices   = properties.max_mesh_output_vertices,
+        .max_mesh_output_primitives = properties.max_mesh_output_primitives,
+    };
 }
 
 fn RayTracingCandidateSupport query_ray_tracing_candidate_support(
@@ -642,6 +684,9 @@ const CommandOps TRUSTED_COMMAND_OPS @private = {
     .draw_indirect               = &trusted_draw_indirect,
     .draw_indexed_indirect       = &trusted_draw_indexed_indirect,
     .draw_indexed_indirect_count = &trusted_draw_indexed_indirect_count,
+    .draw_mesh_tasks             = &trusted_draw_mesh_tasks,
+    .draw_mesh_tasks_indirect    = &trusted_draw_mesh_tasks_indirect,
+    .draw_mesh_tasks_indirect_count = &trusted_draw_mesh_tasks_indirect_count,
     .dispatch_indirect           = &trusted_dispatch_indirect,
     .draw_generated              = &trusted_draw_generated,
     .draw_indexed_generated      = &trusted_draw_indexed_generated,
@@ -684,6 +729,9 @@ const CommandOps FULL_COMMAND_OPS @private = {
     .draw_indirect               = &full_draw_indirect,
     .draw_indexed_indirect       = &full_draw_indexed_indirect,
     .draw_indexed_indirect_count = &full_draw_indexed_indirect_count,
+    .draw_mesh_tasks             = &full_draw_mesh_tasks,
+    .draw_mesh_tasks_indirect    = &full_draw_mesh_tasks_indirect,
+    .draw_mesh_tasks_indirect_count = &full_draw_mesh_tasks_indirect_count,
     .dispatch_indirect           = &full_dispatch_indirect,
     .draw_generated              = &full_draw_generated,
     .draw_indexed_generated      = &full_draw_indexed_generated,
@@ -770,6 +818,7 @@ fn gpu::Device? create_vk_device_with_probe(
         enable_ray_queries:          normalized.enable_ray_queries,
         enable_ray_tracing_pipelines:
             normalized.enable_ray_tracing_pipelines,
+        enable_mesh_shaders:         normalized.enable_mesh_shaders,
         unified_layouts:             normalized.unified_layouts,
         shader_heap_support:         &adapter_state.shader_heap,
         probe:                       probe,
@@ -811,6 +860,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     bool enable_sparse_textures = false,
     bool enable_ray_queries = false,
     bool enable_ray_tracing_pipelines = false,
+    bool enable_mesh_shaders = false,
     bool unified_layouts = false,
     ShaderHeapSupport* shader_heap_support = null,
     DeviceCreationProbe* probe = null,
@@ -888,6 +938,12 @@ fn gpu::Device? create_vk_device_from_runtime(
     if (enable_ray_tracing_pipelines
         && !ray_tracing_queue_request_compatible(queue_request)) {
         return gpu::UNSUPPORTED_FEATURE~;
+    }
+    if (enable_mesh_shaders) {
+        state.mesh_shader_caps = query_mesh_shader_caps(physical_device);
+        if (!state.mesh_shader_caps.enabled) return gpu::UNSUPPORTED_FEATURE~;
+        state.mesh_shaders_enabled = true;
+        state.task_shaders_enabled = state.mesh_shader_caps.task_shaders;
     }
     families = presentation_surface == null
         ? select_queue_families(
@@ -1094,6 +1150,7 @@ fn gpu::Device? create_vk_device_from_runtime(
             && ray_tracing_indirect2_candidate_supported(
                 &state.ray_tracing_support,
             ),
+        .mesh_shaders            = state.mesh_shaders_enabled,
     };
     state.device_dispatch = creation_ops != null
             && creation_ops.load_dispatch != null
@@ -1114,6 +1171,10 @@ fn gpu::Device? create_vk_device_from_runtime(
     }
     if (state.generated_work.enabled
         && !device_dispatch_supports_generated_work(&state.device_dispatch)) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+    if (state.mesh_shaders_enabled
+        && !device_dispatch_supports_mesh_shaders(&state.device_dispatch)) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
     if (state.acceleration_structures_enabled
@@ -1291,6 +1352,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         .ray_queries_enabled   = state.ray_queries_enabled,
         .ray_tracing_pipelines_enabled =
             state.ray_tracing_pipelines_enabled,
+        .mesh_shaders          = state.mesh_shader_caps,
         .unified_layouts       = state.unified_layouts,
         .unified_layouts_extension = state.unified_layouts_extension,
         .acceleration_structure_heap_capacity =
@@ -1949,6 +2011,14 @@ fn void? create_logical_device_with_queue_infos(
         );
         features13 = features13.set_next(&presentation_features);
     }
+    vk::PhysicalDeviceMeshShaderFeaturesEXT mesh_features =
+        vk::physical_device_mesh_shader_features_ext();
+    mesh_features.mesh_shader = vk::TRUE;
+    mesh_features.task_shader = state.task_shaders_enabled ? vk::TRUE : vk::FALSE;
+    if (state.mesh_shaders_enabled) {
+        mesh_features = mesh_features.set_next(features13.p_next);
+        features13 = features13.set_next(&mesh_features);
+    }
     vk::PhysicalDeviceUnifiedImageLayoutsFeaturesKHR unified_layouts_features =
         vk::physical_device_unified_image_layouts_features_khr()
             .set_unified_image_layouts(vk::TRUE);
@@ -2014,6 +2084,9 @@ fn void? create_logical_device_with_queue_infos(
             )) {
             extensions[extension_count++] = RAY_TRACING_MAINTENANCE1_EXTENSION;
         }
+    }
+    if (state.mesh_shaders_enabled) {
+        extensions[extension_count++] = MESH_SHADER_EXTENSION;
     }
     if (state.unified_layouts_extension) {
         extensions[extension_count++] = UNIFIED_IMAGE_LAYOUTS_EXTENSION;
@@ -2141,6 +2214,7 @@ fn gpu::DeviceCaps build_caps(
             inputs.ray_tracing_pipelines_enabled,
             &inputs.ray_tracing_support,
         ),
+        .mesh_shaders               = inputs.mesh_shaders,
         .unified_layouts            = inputs.unified_layouts,
         .unified_layouts_optimal    = inputs.unified_layouts_extension,
         .texture_heap_capacity      = inputs.texture_capacity,

@@ -431,6 +431,6 @@ fn void submit_wait_mask_shape_is_backend_independent() @test {
     assert(!gpu::internal::submit_wait_stage_mask_valid({ .all, .compute }));
     assert(gpu::internal::stage_mask_valid({ .index_input }));
     assert(gpu::internal::submit_wait_stage_mask_valid({ .index_input }));
-    assert(!gpu::internal::stage_mask_valid({ .mesh_shader }));
-    assert(!gpu::internal::submit_wait_stage_mask_valid({ .mesh_shader }));
+    assert(gpu::internal::stage_mask_valid({ .mesh_shader }));
+    assert(gpu::internal::submit_wait_stage_mask_valid({ .mesh_shader }));
 }

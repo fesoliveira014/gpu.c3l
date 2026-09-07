@@ -20,6 +20,8 @@ alias ShaderModuleCreateFn @private = fn vk::Result (
 const ShaderId SHADER_ID_INVALID = (ShaderId)uint::max;
 const uint SHADER_FREE_NONE = 0;
 const uint SHADER_STORE_MAX_PIPELINE_CAPACITY = 0x20000000;
+const spvreflect::ShaderStage SPV_SHADER_STAGE_TASK_EXT = (spvreflect::ShaderStage)0x40;
+const spvreflect::ShaderStage SPV_SHADER_STAGE_MESH_EXT = (spvreflect::ShaderStage)0x80;
 
 struct ShaderIdentityInput {
     char[]                    spirv;
@@ -285,7 +287,7 @@ fn void? create_shader_store(VkDeviceState* state, uint pipeline_capacity) {
         || pipeline_capacity > SHADER_STORE_MAX_PIPELINE_CAPACITY) {
         return gpu::INVALID_ARGUMENT~;
     }
-    uint entry_capacity = pipeline_capacity * 2;
+    uint entry_capacity = pipeline_capacity * 3;
     state.shader_store.entries = mem::new_array(
         ShaderStoreEntry,
         entry_capacity,
@@ -376,10 +378,15 @@ fn void? check_heap_convention(
     };
 }
 
+
 fn gpu::internal::ShaderRole? shader_role_from_spv(
     spvreflect::ShaderStage stage,
 ) @private {
     switch (stage) {
+        case SPV_SHADER_STAGE_TASK_EXT:
+            return gpu::internal::ShaderRole.TASK;
+        case SPV_SHADER_STAGE_MESH_EXT:
+            return gpu::internal::ShaderRole.MESH;
         case spvreflect::ShaderStage.SHADER_STAGE_COMPUTE:
             return gpu::internal::ShaderRole.COMPUTE;
         case spvreflect::ShaderStage.SHADER_STAGE_VERTEX:
@@ -425,6 +432,10 @@ fn vk::ShaderStageFlagBits? shader_role_to_vk(
             return vk::ShaderStageFlagBits.INTERSECTION_BIT_KHR;
         case gpu::internal::ShaderRole.CALLABLE:
             return vk::ShaderStageFlagBits.CALLABLE_BIT_KHR;
+        case gpu::internal::ShaderRole.TASK:
+            return vk::ShaderStageFlagBits.TASK_BIT_EXT;
+        case gpu::internal::ShaderRole.MESH:
+            return vk::ShaderStageFlagBits.MESH_BIT_EXT;
         default:
             return gpu::SHADER_INVALID~;
     }
@@ -438,6 +449,8 @@ fn gpu::internal::RootAbiSpec root_abi_for_role(
             return gpu::internal::ROOT_PUSH_ABI;
         case gpu::internal::ShaderRole.VERTEX:
         case gpu::internal::ShaderRole.FRAGMENT:
+        case gpu::internal::ShaderRole.TASK:
+        case gpu::internal::ShaderRole.MESH:
             return gpu::internal::GRAPHICS_ROOT_PUSH_ABI;
         case gpu::internal::ShaderRole.RAY_GENERATION:
         case gpu::internal::ShaderRole.MISS:

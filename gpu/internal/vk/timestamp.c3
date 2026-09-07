@@ -236,6 +236,10 @@ fn vk::PipelineStageFlags2 timestamp_stage_to_vk(
         return (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2
             .STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
     }
+    if (stage.mesh_shader) {
+        return (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2
+            .STAGE_2_MESH_SHADER_BIT_EXT;
+    }
     if (stage.index_input) {
         return (vk::PipelineStageFlags2)
             vk::PipelineStageFlagBits2.STAGE_2_INDEX_INPUT_BIT;
@@ -558,10 +562,11 @@ fn void? validate_full_timestamp_stage(
     )!;
     if (timestamp_stage_mask_valid(stage)
         && barrier_stage_mask_supported(
-            stage,
-            completion.queue_flags,
-            record.device_state.acceleration_structures_enabled,
-            record.device_state.ray_tracing_pipelines_enabled,
+            stages:                stage,
+            flags:                 completion.queue_flags,
+            ray_queries:           record.device_state.acceleration_structures_enabled,
+            ray_tracing_pipelines: record.device_state.ray_tracing_pipelines_enabled,
+            mesh_shaders:          record.device_state.mesh_shaders_enabled,
         )) return;
     return report_timestamp_command_failure(
         state:           record.device_state,

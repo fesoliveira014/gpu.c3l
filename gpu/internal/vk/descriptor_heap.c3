@@ -757,7 +757,8 @@ fn void? bind_descriptor_heap(
         default:
             return gpu::INVALID_ARGUMENT~;
     }
-    if (*set_bound) return;
+    bool graphics = bind_point == vk::PipelineBindPoint.GRAPHICS;
+    if (*set_bound && (!graphics || binding.graphics_layout == layout)) return;
     vk::cmd_bind_descriptor_sets(
         command_buffer:        record.command_buffer,
         pipeline_bind_point:   bind_point,
@@ -769,6 +770,7 @@ fn void? bind_descriptor_heap(
         p_dynamic_offsets:     null,
     );
     *set_bound = true;
+    if (graphics) binding.graphics_layout = layout;
 }
 
 fn TextureSlot*? resolve_descriptor_texture(

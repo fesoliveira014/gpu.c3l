@@ -1401,12 +1401,21 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
             true,
         )) == gpu::INVALID_ARGUMENT,
         "transfer-only queues reject ray tracing waits");
-    gpu::StageMask reserved = { .mesh_shader };
+    gpu::StageMask mesh = { .mesh_shader };
     assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            reserved,
+            mesh,
             graphics_only,
         )) == gpu::INVALID_ARGUMENT,
-        "reserved submission wait stage bits are invalid");
+        "mesh stage waits need the mesh shader feature");
+    assert(gpu::internal::vk::submit_wait_stages_to_vk(
+            stages:       mesh,
+            flags:        graphics_only,
+            mesh_shaders: true,
+            task_shaders: true,
+        )!! == (vk::PipelineStageFlags2)(
+            (ulong)vk::PipelineStageFlagBits2.STAGE_2_MESH_SHADER_BIT_EXT
+            | (ulong)vk::PipelineStageFlagBits2.STAGE_2_TASK_SHADER_BIT_EXT),
+        "mesh stage waits lower to the mesh and task stages when enabled");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             { .index_input },
             graphics_only,

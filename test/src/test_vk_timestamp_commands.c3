@@ -268,7 +268,7 @@ fn void timestamp_stage_shape_rejects_invalid_masks() @test {
     }));
     assert(timestamp_stage_mask_valid({ .acceleration_structure_build }));
     assert(timestamp_stage_mask_valid({ .ray_tracing }));
-    assert(!timestamp_stage_mask_valid({ .mesh_shader }));
+    assert(timestamp_stage_mask_valid({ .mesh_shader }));
 }
 
 fn void timestamp_destination_requires_packed_ulong_alignment() @test {
@@ -531,12 +531,11 @@ fn void timestamp_trusted_write_rejects_invalid_masks_without_emission() @test {
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
     TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
-    gpu::StageMask[5] invalid = {
+    gpu::StageMask[4] invalid = {
         {},
         { .host },
         { .present },
         { .compute, .transfer },
-        { .mesh_shader },
     };
 
     foreach (stage : invalid) {

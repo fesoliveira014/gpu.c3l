@@ -43,6 +43,12 @@ struct DispatchIndirectCommand {
     uint z;
 };
 
+struct DrawMeshTasksIndirectCommand {
+    uint x;
+    uint y;
+    uint z;
+};
+
 struct TraceRaysIndirectCommand {
     uint width;
     uint height;

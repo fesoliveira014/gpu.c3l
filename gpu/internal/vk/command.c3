@@ -2270,18 +2270,38 @@ fn BoundPipeline*? borrow_bound_pipeline(CommandRecord* record) @private {
     return pipeline;
 }
 
+<* TRUSTED: the bound pipeline, faulting INVALID_ARGUMENT when its kind is
+   not the one the command needs. *>
+fn BoundPipeline*? borrow_bound_pipeline_of_kind(
+    CommandRecord* record,
+    PipelineKind kind,
+) @private {
+    BoundPipeline* pipeline = borrow_bound_pipeline(record)!;
+    if (pipeline.kind != kind) return gpu::INVALID_ARGUMENT~;
+    return pipeline;
+}
+
+fn bool pipeline_kind_rasterizes(PipelineKind kind) {
+    return kind == PipelineKind.GRAPHICS || kind == PipelineKind.MESH;
+}
+
 fn BoundPipeline*? active_bound_pipeline(
     VkDeviceState* state,
     CommandRecord* record,
     PipelineKind expected_kind,
     ZString operation,
+    bool any_raster = false,
 ) @private {
     BoundPipeline* pipeline = &record.logical_pipeline;
     if (!pipeline.handle.is_valid()) return gpu::COMMAND_RECORDING_ERROR~;
-    if (pipeline.kind != expected_kind) {
+    bool matches = pipeline.kind == expected_kind
+        || (any_raster && pipeline_kind_rasterizes(pipeline.kind));
+    if (!matches) {
         ZString invariant = expected_kind == PipelineKind.COMPUTE
             ? "pipeline kind must match the COMPUTE bind point"
-            : "pipeline kind must match the GRAPHICS bind point";
+            : (expected_kind == PipelineKind.MESH
+                ? "pipeline kind must be a mesh pipeline"
+                : "pipeline kind must match the GRAPHICS bind point");
         return report_contract_failure(
             state:               state,
             operation:           operation,
@@ -2303,7 +2323,7 @@ fn void? validate_pipeline_render_compatibility(
     BoundPipeline* pipeline,
     RenderCompatibility* render,
 ) @private {
-    if (pipeline.kind != PipelineKind.GRAPHICS) return;
+    if (!pipeline_kind_rasterizes(pipeline.kind)) return;
     RenderCompatibility* expected = &pipeline.render;
     if (expected.color_count != render.color_count
         || expected.depth_format != render.depth_format
@@ -2363,6 +2383,7 @@ fn BoundPipeline? lower_bound_pipeline(
         .generated_dispatch_layout = slot.generated_dispatch_layout,
         .cache_entry               = slot.entry,
         .kind                      = (PipelineKind)entry.key.kind,
+        .mesh_task_stage           = entry.mesh_task_stage,
         .push_block_size           = entry.push_block_size,
         .inline_root_offset        = entry.inline_root_offset,
         .render                    = pipeline_render_compatibility(&entry.key),
@@ -2429,6 +2450,7 @@ fn void? record_bound_pipeline_with_ops(
             native = &record.native_compute_pipeline;
             bind_point = vk::PipelineBindPoint.COMPUTE;
         case PipelineKind.GRAPHICS:
+        case PipelineKind.MESH:
             native = &record.native_graphics_pipeline;
             bind_point = vk::PipelineBindPoint.GRAPHICS;
         case PipelineKind.RAY_TRACING:
@@ -2456,6 +2478,15 @@ fn void? record_bound_pipeline_with_ops(
         layout:     bound.layout,
         bind_point: bind_point,
     )!;
+    if (bound.kind == PipelineKind.GRAPHICS
+        && record.graphics_state_initialized
+        && !record.raster_topology_emitted) {
+        vk::cmd_set_primitive_topology(
+            record.command_buffer,
+            topology_to_vk(record.raster_topology),
+        );
+        record.raster_topology_emitted = true;
+    }
     if (bound.kind == PipelineKind.RAY_TRACING
         && !bound.dynamic_ray_tracing_stack_size) {
         record.ray_tracing_stack_size_set = false;
@@ -2476,7 +2507,7 @@ fn void update_full_color_state_for_bind(
     BoundPipeline* bound,
 ) @private {
     if (!record.color_state_initialized
-        || bound.kind != PipelineKind.GRAPHICS) return;
+        || !pipeline_kind_rasterizes(bound.kind)) return;
     if (!color_compatibility_matches(
         &record.color_state,
         &bound.render,

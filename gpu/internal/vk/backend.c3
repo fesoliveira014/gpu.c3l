@@ -5,6 +5,28 @@ import vma;
 
 alias InstanceProcLoader = fn vk::PFN_vkVoidFunction(vk::Instance, char*);
 alias DeviceProcLoader = fn vk::PFN_vkVoidFunction(vk::Device, char*);
+alias CmdDrawMeshTasksNativeFn = fn void (
+    vk::CommandBuffer command_buffer,
+    uint group_count_x,
+    uint group_count_y,
+    uint group_count_z,
+);
+alias CmdDrawMeshTasksIndirectNativeFn = fn void (
+    vk::CommandBuffer command_buffer,
+    vk::Buffer buffer,
+    vk::DeviceSize offset,
+    uint draw_count,
+    uint stride,
+);
+alias CmdDrawMeshTasksIndirectCountNativeFn = fn void (
+    vk::CommandBuffer command_buffer,
+    vk::Buffer buffer,
+    vk::DeviceSize offset,
+    vk::Buffer count_buffer,
+    vk::DeviceSize count_buffer_offset,
+    uint max_draw_count,
+    uint stride,
+);
 
 struct VkInstanceDispatchPlan {
     bool debug;
@@ -22,6 +44,7 @@ struct VkDeviceDispatchPlan {
     bool acceleration_structure_indirect_build;
     bool ray_tracing_pipelines;
     bool ray_tracing_indirect2;
+    bool mesh_shaders;
 }
 
 struct VkInstanceDebugDispatch {
@@ -92,6 +115,12 @@ struct VkRayTracingPipelineDispatch {
     vk::PFN_vkCmdTraceRaysIndirect2KHR             cmd_trace_rays_indirect2;
 }
 
+struct VkMeshShaderDispatch {
+    CmdDrawMeshTasksNativeFn              cmd_draw_mesh_tasks;
+    CmdDrawMeshTasksIndirectNativeFn      cmd_draw_mesh_tasks_indirect;
+    CmdDrawMeshTasksIndirectCountNativeFn cmd_draw_mesh_tasks_indirect_count;
+}
+
 struct VkDeviceDispatch {
     VkDeviceDebugDispatch        debug;
     VkDevicePresentationDispatch presentation;
@@ -99,6 +128,7 @@ struct VkDeviceDispatch {
     VkDynamicColorDispatch       dynamic_color;
     VkAccelerationStructureDispatch acceleration_structures;
     VkRayTracingPipelineDispatch    ray_tracing_pipelines;
+    VkMeshShaderDispatch            mesh_shaders;
 }
 
 fn VkInstanceDispatch load_vk_instance_dispatch(
@@ -309,6 +339,24 @@ fn VkDeviceDispatch load_vk_device_dispatch(
                 );
         }
     }
+    if (plan.mesh_shaders) {
+        dispatch.mesh_shaders = {
+            .cmd_draw_mesh_tasks = (CmdDrawMeshTasksNativeFn)loader(
+                device,
+                "vkCmdDrawMeshTasksEXT",
+            ),
+            .cmd_draw_mesh_tasks_indirect =
+                (CmdDrawMeshTasksIndirectNativeFn)loader(
+                    device,
+                    "vkCmdDrawMeshTasksIndirectEXT",
+                ),
+            .cmd_draw_mesh_tasks_indirect_count =
+                (CmdDrawMeshTasksIndirectCountNativeFn)loader(
+                    device,
+                    "vkCmdDrawMeshTasksIndirectCountEXT",
+                ),
+        };
+    }
     dispatch.dynamic_color = {
         .set_blend_enable = (vk::PFN_vkCmdSetColorBlendEnableEXT)loader(
             device,
@@ -371,6 +419,12 @@ fn bool device_dispatch_supports_indirect_acceleration_structure_builds(
     VkDeviceDispatch* dispatch,
 ) {
     return dispatch.acceleration_structures.cmd_build_indirect != null;
+}
+
+fn bool device_dispatch_supports_mesh_shaders(VkDeviceDispatch* dispatch) {
+    return dispatch.mesh_shaders.cmd_draw_mesh_tasks != null
+        && dispatch.mesh_shaders.cmd_draw_mesh_tasks_indirect != null
+        && dispatch.mesh_shaders.cmd_draw_mesh_tasks_indirect_count != null;
 }
 
 fn bool device_dispatch_supports_ray_tracing_pipelines(

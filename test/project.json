@@ -127,6 +127,8 @@
         "src/test_vk_timestamp_pool_table.c3",
         "src/test_vk_timestamp_commands.c3",
         "src/test_vk_timestamp_queries.c3",
+        "src/test_vk_mesh_draw.c3",
+        "src/mesh_abi.c3",
         "src/test_vk_unified_layouts.c3"
       ]
     },
@@ -191,6 +193,8 @@
         "src/test_vk_timestamp_pool_table.c3",
         "src/test_vk_timestamp_commands.c3",
         "src/test_vk_timestamp_queries.c3",
+        "src/test_vk_mesh_draw.c3",
+        "src/mesh_abi.c3",
         "src/inline_root_abi.c3",
         "src/tint_abi.c3",
         "src/test_vk_unified_layouts.c3"

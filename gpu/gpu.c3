@@ -1517,6 +1517,23 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
     return pipeline;
 }
 
+<* Create a mesh pipeline. Needs DeviceDesc.enable_mesh_shaders; a task
+   shader needs DeviceCaps.mesh_shaders.task_shaders. The mesh root travels
+   in vertex_root_gpu; raster.topology is ignored.
+
+   @param device : "Live device."
+   @param desc : "Borrowed mesh pipeline description."
+   @return "Owning pipeline handle, or a recoverable validation, support, capacity, or device fault." *>
+fn PipelineHandle? create_mesh_pipeline(Device* device, MeshPipelineDesc* desc) {
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (desc == null) return INVALID_ARGUMENT~;
+    PipelineHandle pipeline =
+        gpu::internal::vk::vk_create_mesh_pipeline(operation.state, desc)!;
+    gpu::internal::retain_device_children(&operation);
+    return pipeline;
+}
+
 <* Create a KHR ray-tracing pipeline. Shader groups are ordered ray
    generation, miss, hit, then callable. A zero recursion depth selects one.
    Identical immutable descriptors may alias one backend pipeline under
@@ -2486,6 +2503,74 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
         index_count:    index_count,
         instance_count: instance_count,
         index_type:     index_type,
+    );
+}
+
+<* Dispatch mesh work groups inside a render pass with a bound mesh pipeline
+   and complete graphics state. Roots are pushed unchanged; zero is valid.
+   Group counts must fit DeviceCaps.mesh_shaders.
+
+   @param commands : "Live recording token inside a render pass."
+   @param mesh_root : "Task or mesh stage root address."
+   @param fragment_root : "Fragment root address."
+   @param groups : "Task work groups with a task shader, else mesh work groups."
+   @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
+   @return "Success, or a recoverable command, pipeline, support, limit, or device fault." *>
+fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, Vec3u groups, char[] inline_root = {}) {
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_mesh_tasks")!;
+    return record.ops.draw_mesh_tasks(
+        record:        record,
+        mesh_root:     mesh_root,
+        fragment_root: fragment_root,
+        groups:        groups,
+    );
+}
+
+<* Dispatch mesh work groups from GPU-visible DrawMeshTasksIndirectCommand
+   records; one root pair applies to every draw. Same preconditions as
+   cmd_draw_mesh_tasks; args must be visible to the indirect stage.
+
+   @param commands : "Live recording token inside a render pass."
+   @param mesh_root : "Task or mesh stage root address."
+   @param fragment_root : "Fragment root address."
+   @param args : "Non-owning record array retained by the command."
+   @param draw_count : "Number of records to execute."
+   @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
+   @return "Success, or a recoverable command, ownership, bounds, support, pipeline, or device fault." *>
+fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_mesh_tasks_indirect")!;
+    return record.ops.draw_mesh_tasks_indirect(
+        record:        record,
+        mesh_root:     mesh_root,
+        fragment_root: fragment_root,
+        args:          args,
+        draw_count:    draw_count,
+    );
+}
+
+<* As cmd_draw_mesh_tasks_indirect with a GPU-written draw count. Needs
+   DeviceCaps.draw_indirect_count.
+
+   @param commands : "Live recording token inside a render pass."
+   @param mesh_root : "Task or mesh stage root address."
+   @param fragment_root : "Fragment root address."
+   @param args : "Non-owning record array retained by the command."
+   @param count_span : "Non-owning span holding the GPU-written draw count."
+   @param max_draw_count : "Maximum records the GPU count may select."
+   @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
+   @return "Success, or a recoverable command, ownership, bounds, support, pipeline, or device fault." *>
+fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, char[] inline_root = {}) {
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_mesh_tasks_indirect_count")!;
+    return record.ops.draw_mesh_tasks_indirect_count(
+        record:         record,
+        mesh_root:      mesh_root,
+        fragment_root:  fragment_root,
+        args:           args,
+        count_span:     count_span,
+        max_draw_count: max_draw_count,
     );
 }
 

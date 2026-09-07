@@ -20,6 +20,8 @@ that read push constants declare the header for their pipeline kind first,
 exactly, and any payload members at or after the header end. The capacity is
 128 minus the header: `INLINE_ROOT_CAPACITY` (120) for compute and ray
 tracing, 112 for graphics.
+Mesh and task shaders use the graphics header; `vertex_root_gpu` carries
+the root passed as `mesh_root`.
 
 Compute and ray tracing header, 8 bytes:
 

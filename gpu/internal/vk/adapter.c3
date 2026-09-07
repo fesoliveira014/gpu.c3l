@@ -18,6 +18,7 @@ struct VkAdapterState {
     vk::PhysicalDeviceDriverProperties driver_properties;
     ShaderHeapSupport                  shader_heap;
     RayTracingCandidateSupport         ray_tracing;
+    gpu::MeshShaderCaps                mesh_shaders;
     bool                               device_baseline_supported;
     gpu::AdapterInfo                   info;
     gpu::AdapterDiagnostics            diagnostics;
@@ -153,6 +154,7 @@ fn void initialize_adapter(
         &adapter.shader_heap,
     );
     adapter.ray_tracing = query_ray_tracing_candidate_support(physical_device);
+    adapter.mesh_shaders = query_mesh_shader_caps(physical_device);
 
     bool has_driver_properties = adapter.properties.api_version >= API_VERSION_1_2
         || device_supports_extension(physical_device, "VK_KHR_driver_properties");
@@ -232,6 +234,16 @@ fn bool? vk_adapter_supports_ray_tracing_pipelines(
     return ray_tracing_pipeline_candidate_supported(
         &state.adapters[adapter_index].ray_tracing,
     );
+}
+
+fn bool? vk_adapter_supports_mesh_shaders(
+    VkRuntimeState* state,
+    uint adapter_index,
+) {
+    if (state == null || adapter_index >= state.adapters.len) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return state.adapters[adapter_index].mesh_shaders.enabled;
 }
 
 fn bool? vk_adapter_supports_ray_query_heap(

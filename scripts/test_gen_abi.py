@@ -49,6 +49,8 @@ class GenAbiTest(unittest.TestCase):
             ".comp": "compute",
             ".vert": "vertex",
             ".frag": "fragment",
+            ".mesh": "mesh",
+            ".task": "task",
             ".rgen": "rgen",
             ".rmiss": "rmiss",
             ".rchit": "rchit",

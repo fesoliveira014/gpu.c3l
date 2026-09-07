@@ -2687,7 +2687,7 @@ fn void barrier_unknown_stage_bit_faults() @test {
 
     fault rejected = @catch(gpu::cmd_barrier(&commands, &barrier));
     assert(rejected == gpu::INVALID_ARGUMENT,
-        "an unknown stage bit faults INVALID_ARGUMENT");
+        "the mesh stage faults INVALID_ARGUMENT without the feature");
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;

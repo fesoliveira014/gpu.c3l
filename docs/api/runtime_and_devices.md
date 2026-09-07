@@ -90,6 +90,7 @@ gpu::DeviceDesc desc = {
     .enable_sparse_textures       = false,
     .enable_ray_queries           = false,
     .enable_ray_tracing_pipelines = false,
+    .enable_mesh_shaders          = false,
     .unified_layouts              = false,   // one image layout, no app transitions
 };
 gpu::Device device = gpu::create_device(&adapter, &desc)!;
@@ -140,8 +141,10 @@ uint max_targets = caps.max_color_attachments;
   `max_draw_indirect_count`, `max_generated_work_count`;
 - `max_sampler_lod_bias`, `max_sampler_anisotropy` (0 means unsupported);
 - `timestamps` (`TimestampCaps`), `sparse_textures` (`SparseTextureCaps`);
-- `acceleration_structures`, `ray_queries`, `ray_tracing_pipelines`. Each
-  is all-zero when its feature was not enabled;
+- `acceleration_structures`, `ray_queries`, `ray_tracing_pipelines`,
+  `mesh_shaders` (`MeshShaderCaps`: `enabled`, `task_shaders`, task and mesh
+  per-axis and total work-group count limits, mesh output limits). Each is
+  all-zero when its feature was not enabled;
 - `unified_layouts` (the mode is active) and `unified_layouts_optimal`
   (`VK_KHR_unified_image_layouts` is enabled, so the one layout is free).
   The mode is satisfiable on every device; the optimal flag depends on the
