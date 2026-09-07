@@ -491,6 +491,9 @@ bool[STUB_ADAPTER_CAPACITY] configured_adapter_class_overrides @private;
 bool[STUB_ADAPTER_CAPACITY] configured_adapter_unsupported @private;
 bool configured_allocator_create_failure @private;
 bool configured_swapchain_create_failure @private;
+bool configured_swapchain_info_override @private;
+gpu::SwapchainInfo configured_swapchain_info @private;
+fault configured_swapchain_info_fault @private;
 bool configured_device_destroy_failure @private;
 gpu::Device last_created_device @private;
 uint allocator_destroy_attempts @private;
@@ -1260,6 +1263,14 @@ fn void stub_set_context_creation_failures(bool allocator, bool swapchain, bool 
     configured_allocator_create_failure = allocator;
     configured_swapchain_create_failure = swapchain;
     configured_device_destroy_failure = device_destroy;
+    configured_swapchain_info_override = false;
+    configured_swapchain_info_fault = {};
+}
+
+fn void stub_set_context_swapchain_info(gpu::SwapchainInfo info, fault info_fault = {}) {
+    configured_swapchain_info_override = true;
+    configured_swapchain_info = info;
+    configured_swapchain_info_fault = info_fault;
 }
 
 fn gpu::Device stub_last_created_device() => last_created_device;
@@ -1851,6 +1862,7 @@ fn gpu::SwapchainHandle? vk_create_swapchain(
         .image_count  = desc.image_count,
         .present_mode = desc.present_mode,
     };
+    if (configured_swapchain_info_override) state.swapchain_info = configured_swapchain_info;
     state.present_wait_pending_count = 0;
     state.present_wait_fault = {};
     state.present_reset_fault = {};
@@ -1916,6 +1928,7 @@ fn gpu::SwapchainInfo? vk_get_swapchain_info(
     if (state == null || !state.swapchain_live || state.swapchain != handle) {
         return gpu::INVALID_HANDLE~;
     }
+    if (configured_swapchain_info_fault) return configured_swapchain_info_fault~;
     return state.swapchain_info;
 }
 

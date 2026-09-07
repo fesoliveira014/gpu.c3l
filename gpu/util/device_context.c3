@@ -37,7 +37,8 @@ struct DeviceContextDesc {
 
 <* Owns setup resources; copies do not create independent ownership.
    Pass by pointer and release through destroy_device_context after all use.
-   adapter and queue borrow their runtime and device; userdata outlives teardown. *>
+   adapter and queue borrow their runtime and device; userdata outlives teardown.
+   swapchain_info is a creation snapshot; refresh it after resize, and ignore it when headless. *>
 struct DeviceContext {
     gpu::Runtime runtime;
     gpu::Surface surface;
@@ -46,6 +47,7 @@ struct DeviceContext {
     gpu::Queue queue;
     gpu::CommandAllocator command_allocator;
     gpu::SwapchainHandle swapchain;
+    gpu::SwapchainInfo swapchain_info;
     gpu::DebugMessageCallback debug_callback;
     void* debug_user_data;
 }
@@ -124,8 +126,11 @@ fn DeviceContext? create_device_context(DeviceContextDesc* desc) {
     defer catch (void)gpu::destroy_command_allocator(&command_allocator);
 
     gpu::SwapchainHandle swapchain;
+    gpu::SwapchainInfo swapchain_info;
     if (surface.is_valid()) {
         swapchain = gpu::create_swapchain(&device, &surface, &settings.swapchain)!;
+        defer catch (void)gpu::destroy_swapchain(&device, swapchain);
+        swapchain_info = gpu::get_swapchain_info(&device, swapchain)!;
     }
 
     return {
@@ -136,6 +141,7 @@ fn DeviceContext? create_device_context(DeviceContextDesc* desc) {
         .queue = queue,
         .command_allocator = command_allocator,
         .swapchain = swapchain,
+        .swapchain_info = swapchain_info,
         .debug_callback = settings.runtime.debug_callback,
         .debug_user_data = settings.runtime.debug_user_data,
     };

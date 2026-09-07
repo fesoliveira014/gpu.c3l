@@ -81,6 +81,11 @@ fn void assert_context_empty(util::DeviceContext* context) {
     assert(!context.command_allocator.handle.is_valid());
     assert(!context.command_allocator.device.is_valid());
     assert(!context.swapchain.is_valid());
+    assert(context.swapchain_info.format == Format.UNDEFINED);
+    assert(context.swapchain_info.width == 0 && context.swapchain_info.height == 0);
+    assert(context.swapchain_info.image_count == 0);
+    assert(context.swapchain_info.present_mode == PresentMode.FIFO);
+    assert(!context.swapchain_info.dormant);
     assert(context.debug_callback == null && context.debug_user_data == null);
 }
 
@@ -116,6 +121,8 @@ fn void context_headless_owns_exact_adapter_device_queue_and_allocator() @test {
     assert(context.queue == gpu::get_queue(&context.device, QueueKind.GRAPHICS)!!);
     assert(context.command_allocator.device == context.device);
     assert(!context.surface.is_valid() && !context.swapchain.is_valid());
+    assert(context.swapchain_info.format == Format.UNDEFINED);
+    assert(context.swapchain_info.width == 0 && context.swapchain_info.image_count == 0);
     assert(vk::stub_swapchain_create_attempt_count() == 0);
 
     util::destroy_device_context(&context);
@@ -315,6 +322,75 @@ fn void context_presentation_transfers_same_runtime_surface_once() @test {
     assert(vk::stub_surface_destroy_count() == 1);
     assert(vk::stub_runtime_destroy_count() == 1);
     assert(vk::stub_context_wait_count() == 0);
+}
+
+fn void context_caches_actual_swapchain_configuration() @test {
+    reset_context_stub();
+    vk::stub_set_context_swapchain_info({
+        .format = Format.BGRA8_SRGB,
+        .width = 1280,
+        .height = 720,
+        .image_count = 3,
+        .present_mode = PresentMode.MAILBOX,
+    });
+    ContextCallbackCapture capture;
+    util::DeviceContextDesc desc = util::default_device_context_desc();
+    desc.create_surface = &context_surface_factory;
+    desc.surface_user_data = &capture;
+    desc.swapchain.width = 640;
+    desc.swapchain.height = 480;
+    util::DeviceContext context = util::create_device_context(&desc)!!;
+    defer util::destroy_device_context(&context);
+
+    assert(context.swapchain_info.format == Format.BGRA8_SRGB);
+    assert(context.swapchain_info.width == 1280 && context.swapchain_info.height == 720);
+    assert(context.swapchain_info.image_count == 3);
+    assert(context.swapchain_info.present_mode == PresentMode.MAILBOX);
+    assert(!context.swapchain_info.dormant);
+    assert(desc.swapchain.width == 640 && desc.swapchain.height == 480);
+
+    gpu::resize_swapchain(
+        device: &context.device,
+        swapchain: context.swapchain,
+        width: 1920,
+        height: 1080,
+    )!!;
+    assert(context.swapchain_info.width == 1280);
+    context.swapchain_info = gpu::get_swapchain_info(&context.device, context.swapchain)!!;
+    assert(context.swapchain_info.width == 1920 && context.swapchain_info.height == 1080);
+}
+
+fn void context_caches_dormant_swapchain_configuration() @test {
+    reset_context_stub();
+    vk::stub_set_context_swapchain_info({ .dormant = true });
+    ContextCallbackCapture capture;
+    util::DeviceContextDesc desc = util::default_device_context_desc();
+    desc.create_surface = &context_surface_factory;
+    desc.surface_user_data = &capture;
+    util::DeviceContext context = util::create_device_context(&desc)!!;
+    defer util::destroy_device_context(&context);
+
+    assert(context.swapchain.is_valid());
+    assert(context.swapchain_info.dormant);
+    assert(context.swapchain_info.format == Format.UNDEFINED);
+    assert(context.swapchain_info.width == 0 && context.swapchain_info.height == 0);
+    assert(context.swapchain_info.image_count == 0);
+}
+
+fn void context_swapchain_info_fault_rolls_back_every_owner() @test {
+    reset_context_stub();
+    vk::stub_set_context_swapchain_info({}, gpu::BACKEND_ERROR);
+    ContextCallbackCapture capture;
+    util::DeviceContextDesc desc = util::default_device_context_desc();
+    desc.create_surface = &context_surface_factory;
+    desc.surface_user_data = &capture;
+
+    assert(@catch(util::create_device_context(&desc)) == gpu::BACKEND_ERROR);
+    assert(vk::stub_swapchain_destroy_attempt_count() == 1);
+    assert(vk::stub_allocator_destroy_attempt_count() == 1);
+    assert(vk::stub_device_temporary_destroy_count() == 1);
+    assert(vk::stub_surface_destroy_count() == 1);
+    assert(vk::stub_runtime_destroy_count() == 1);
 }
 
 fn void context_empty_adapter_list_never_calls_surface_factory() @test {

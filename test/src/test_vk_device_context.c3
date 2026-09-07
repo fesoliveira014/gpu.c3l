@@ -30,6 +30,8 @@ fn void device_context_submits_and_reads_back_before_teardown() @test {
 
     gpu::util::DeviceContext context = gpu::util::create_device_context(&desc)!!;
     defer gpu::util::destroy_device_context(&context);
+    assert(context.swapchain_info.format == gpu::Format.UNDEFINED);
+    assert(context.swapchain_info.width == 0 && context.swapchain_info.height == 0);
 
     gpu::AllocationDesc allocation_desc = {
         .size = CONTEXT_FILL_COUNT * uint::size,
