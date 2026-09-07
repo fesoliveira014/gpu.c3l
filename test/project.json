@@ -11,7 +11,7 @@
   // The vendored VulkanMemoryAllocator.lib is built /MD (release CRT); linking
   // c3c's dynamic-debug default against it mixes debug/release STL DLLs, which
   // crashes in VMA's std::mutex when the runtimes drift apart.
-  "wincrt": "dynamic",
+  "wincrt": "static",
   "sources": [
     "../gpu/gpu.c3i", "../gpu/gpu.c3", "../gpu/surface/**",
     "../gpu/internal/**",
