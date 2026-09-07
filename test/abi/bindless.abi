@@ -34,3 +34,12 @@ root CubeHeapRoot {
     SamplerIndex nearest_sampler;
     SamplerIndex linear_sampler;
 }
+
+root RowSampleRoot {
+    TextureIndex base;
+    SamplerIndex sampler_index;
+    uint         attachment_count;
+    uint         frame;
+    uint         attachment;
+    uint         _pad0;
+}

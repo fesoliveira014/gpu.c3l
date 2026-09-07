@@ -197,6 +197,8 @@ struct BoundPipeline {
     RenderCompatibility               render;
     bool                              dynamic_ray_tracing_stack_size;
     bool                              mesh_task_stage;
+    uint                              push_block_size;
+    uint                              inline_root_offset;
 }
 
 struct NativePipelineBinding {
@@ -235,6 +237,7 @@ struct CommandRecord @public {
     bool                             ray_tracing_stack_size_set;
     CommandScratch*                  scratch;
     uint                             pending_acceleration_structure_head;
+    char[]                           inline_root;
     bool                             internal;
     gpu::TextureHandle[]             init_textures;
 }

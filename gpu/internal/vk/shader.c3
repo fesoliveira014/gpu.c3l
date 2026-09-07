@@ -57,6 +57,8 @@ struct PreparedShaderIdentity {
 struct PipelineShaderModule {
     vk::ShaderModule shader_module;
     char[gpu::internal::SHADER_ENTRY_POINT_CAP] entry_point;
+    uint push_block_size;
+    uint inline_root_offset;
 }
 
 struct ShaderModuleCreateOps @private {
@@ -565,13 +567,13 @@ fn ZString root_abi_mismatch_invariant(
         case RootAbiMismatch.BLOCK_OFFSET:
             return "selected-entry push block offset must be zero";
         case RootAbiMismatch.BLOCK_SIZE:
-            return "selected-entry push block size must match the root ABI";
+            return "selected-entry push block must cover the root header and fit ROOT_PUSH_CAPACITY";
         case RootAbiMismatch.MEMBER_COUNT:
-            return "selected-entry push member count must match the root ABI";
+            return "selected-entry push block must declare every root header member";
         case RootAbiMismatch.MEMBER_MISSING:
             return "selected-entry push member must be present";
         case RootAbiMismatch.MEMBER_OFFSET:
-            return "selected-entry push member offset must match the root ABI";
+            return "selected-entry push header members must match the root ABI and inline members must start at or after the root header";
         case RootAbiMismatch.MEMBER_SIZE:
             return "selected-entry push member size must match the root ABI";
         case RootAbiMismatch.MEMBER_WIDTH:
@@ -592,8 +594,12 @@ fn RootAbiMismatch root_push_abi_mismatch(
     ZString entry_point,
     gpu::internal::ShaderRole role,
     bool allow_alternate = false,
+    uint* block_size_out = null,
+    uint* inline_offset_out = null,
 ) @private {
     gpu::internal::RootAbiSpec expected = root_abi_for_role(role);
+    if (block_size_out != null) *block_size_out = 0;
+    if (inline_offset_out != null) *inline_offset_out = expected.block_size;
     uint count = 0;
     if (reflect_module.enumerate_entry_point_push_constant_blocks(
         entry_point,
@@ -618,10 +624,11 @@ fn RootAbiMismatch root_push_abi_mismatch(
     spvreflect::BlockVariable* block = blocks[0];
     if (block == null) return RootAbiMismatch.BLOCK_MISSING;
     if (block.byte_offset() != 0) return RootAbiMismatch.BLOCK_OFFSET;
-    if (block.byte_size() != expected.block_size) {
+    if (block.byte_size() < expected.block_size
+        || block.byte_size() > gpu::ROOT_PUSH_CAPACITY) {
         return RootAbiMismatch.BLOCK_SIZE;
     }
-    if (block.member_count() != expected.member_count) {
+    if (block.member_count() < expected.member_count) {
         return RootAbiMismatch.MEMBER_COUNT;
     }
     for (uint i = 0; i < expected.member_count; i++) {
@@ -633,11 +640,20 @@ fn RootAbiMismatch root_push_abi_mismatch(
             );
         if (mismatch != RootAbiMismatch.NONE) return mismatch;
     }
+    for (uint i = expected.member_count; i < block.member_count(); i++) {
+        spvreflect::BlockVariable* member = block.member(i);
+        if (member == null) return RootAbiMismatch.MEMBER_MISSING;
+        if (member.byte_offset() < expected.block_size) {
+            return RootAbiMismatch.MEMBER_OFFSET;
+        }
+    }
+    if (block_size_out != null) *block_size_out = block.byte_size();
     return RootAbiMismatch.NONE;
 }
 
 <* Fault SHADER_INVALID unless the selected entry declares no push block or
-   one exact schema-generated root block for its pipeline role. *>
+   one block that starts with the schema-generated root header for its
+   pipeline role and fits ROOT_PUSH_CAPACITY. *>
 fn void? check_root_push_abi(
     spvreflect::ShaderModule* reflect_module,
     ZString entry_point,
@@ -864,6 +880,8 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
         entry_point:     selected_entry_point,
         role:            code.role,
         allow_alternate: allow_alternate_root_abi,
+        block_size_out:  &shader.push_block_size,
+        inline_offset_out: &shader.inline_root_offset,
     );
     if (root_mismatch != RootAbiMismatch.NONE) {
         return report_shader_contract_failure(

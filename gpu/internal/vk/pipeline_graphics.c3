@@ -548,6 +548,7 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         create_ops:      &create_ops.shader_module,
     )!;
     defer destroy_pipeline_shader_module(state, &fragment_shader);
+    uint inline_root_offset = gpu::GraphicsRootPush::size;
     @pool() {
         vk::PipelineShaderStageCreateInfo[2] stages;
         stages[0] = vk::pipeline_shader_stage_create_info()
@@ -590,10 +591,12 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         } else if (try idx = insert_entry(
             state: state,
             value: {
-                .hash     = hash,
-                .key      = key,
-                .pipeline = pipeline,
-                .layout   = state.graphics_layout,
+                .hash            = hash,
+                .key             = key,
+                .pipeline        = pipeline,
+                .layout          = state.graphics_layout,
+                .push_block_size = max(vertex_shader.push_block_size, fragment_shader.push_block_size),
+                .inline_root_offset = inline_root_offset,
             },
         )) {
             transfer_prepared_shader(prepared_vertex_shader);
@@ -866,6 +869,10 @@ fn gpu::PipelineHandle? create_mesh_pipeline_from_modules(
             .set_mod(modules[i].shader_module)
             .set_name(&modules[i].entry_point[0]);
     }
+    uint push_block_size = 0;
+    for (usz i = 0; i < module_count; i++) {
+        push_block_size = max(push_block_size, modules[i].push_block_size);
+    }
     vk::Pipeline pipeline = create_raster_pipeline_native(
         state:             state,
         key_ref:           &key,
@@ -894,6 +901,8 @@ fn gpu::PipelineHandle? create_mesh_pipeline_from_modules(
             .pipeline        = pipeline,
             .layout          = state.mesh_layout,
             .mesh_task_stage = has_task,
+            .push_block_size = push_block_size,
+            .inline_root_offset = gpu::GraphicsRootPush::size,
         },
     )) {
         foreach (&identity : prepared) transfer_prepared_shader(identity);

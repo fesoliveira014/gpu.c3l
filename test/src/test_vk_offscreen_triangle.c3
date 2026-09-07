@@ -12,6 +12,7 @@ import std::io;
 
 const char[*] OFFSCREEN_VERT_SPIRV = $embed("shaders/offscreen.vert.spv");
 const char[*] OFFSCREEN_FRAG_SPIRV = $embed("shaders/offscreen.frag.spv");
+const char[*] TINT_FRAG_SPIRV = $embed("shaders/tint.frag.spv");
 const char[*] DYNAMIC_RECT_VERT_SPIRV = $embed("shaders/depth.vert.spv");
 const char[*] DYNAMIC_RECT_FRAG_SPIRV = $embed("shaders/depth.frag.spv");
 
@@ -209,6 +210,23 @@ fn void repeated_render_pass_retains_precreated_attachment() @test {
 }
 
 fn void offscreen_textured_triangle() @test {
+    render_textured_triangle(
+        frag_spirv:  OFFSCREEN_FRAG_SPIRV[..],
+        inline_root: {},
+        expected:    { 100, 150, 200 },
+    );
+}
+
+fn void offscreen_tinted_triangle() @test {
+    TintRoot tint = { .tint = { 0.5f, 1.0f, 0.5f, 1.0f } };
+    render_textured_triangle(
+        frag_spirv:  TINT_FRAG_SPIRV[..],
+        inline_root: gpu::@inline_root(&tint),
+        expected:    { 50, 150, 100 },
+    );
+}
+
+fn void render_textured_triangle(char[] frag_spirv, char[] inline_root, char[3] expected) {
     gpu::Device device = make_offscreen_test_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device);
@@ -269,7 +287,7 @@ fn void offscreen_textured_triangle() @test {
 
     gpu::ShaderDesc vert_sd = { .spirv = OFFSCREEN_VERT_SPIRV[..], .entry_point = "main" };
     gpu::ShaderDesc vert = vert_sd;
-    gpu::ShaderDesc frag_sd = { .spirv = OFFSCREEN_FRAG_SPIRV[..], .entry_point = "main" };
+    gpu::ShaderDesc frag_sd = { .spirv = frag_spirv, .entry_point = "main" };
     gpu::ShaderDesc frag = frag_sd;
 
     gpu::Format[1] pipeline_color_formats = {
@@ -392,6 +410,7 @@ fn void offscreen_textured_triangle() @test {
         fragment_root:  test_span_address(&device, frag_span),
         vertex_count:   3,
         instance_count: 1,
+        inline_root:    inline_root,
     )!!;
     gpu::cmd_end_render_pass(&cmd)!!;
 
@@ -435,9 +454,9 @@ fn void offscreen_textured_triangle() @test {
     char* pixels = (char*)test_span_mapping(&device, rb_span).ptr;
     // Triangle interior: the center of the target sits well inside.
     char* center = &pixels[(RT_SIZE / 2 * RT_SIZE + RT_SIZE / 2) * 4];
-    assert(center[0] == (char)100, "triangle interior red is the sampled texture");
-    assert(center[1] == (char)150, "triangle interior green is the sampled texture");
-    assert(center[2] == (char)200, "triangle interior blue is the sampled texture");
+    assert(center[0] == expected[0], "triangle interior red is the sampled texture");
+    assert(center[1] == expected[1], "triangle interior green is the sampled texture");
+    assert(center[2] == expected[2], "triangle interior blue is the sampled texture");
     // Corners: well outside the triangle, must be the clear color.
     char* corner = &pixels[0];
     assert(corner[0] == (char)8 && corner[1] == (char)16 && corner[2] == (char)32, "corner is the clear color");

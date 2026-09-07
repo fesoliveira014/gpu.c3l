@@ -1,0 +1,10 @@
+abi inline_root;
+
+const uint INLINE_ROOT_WORKGROUP = 64;
+
+push compute InlineRoot {
+    GpuAddress input_gpu;
+    GpuAddress output_gpu;
+    uint       count;
+    uint       _pad0;
+}

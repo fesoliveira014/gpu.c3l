@@ -15,6 +15,12 @@ enum DeclKind {
     EXTERN_STRUCT,
 }
 
+enum PushRole {
+    NONE,
+    COMPUTE,
+    GRAPHICS,
+}
+
 enum TypeKind {
     SCALAR,
     VECTOR,
@@ -59,11 +65,13 @@ struct TypeDecl {
 
 struct StructDecl {
     DeclKind  kind;
+    PushRole  push_role;
     String    name;
     Loc       loc;
     FieldList fields;
     uint      size;
     uint      alignment;
+    uint      payload_offset;
 }
 
 struct Schema {

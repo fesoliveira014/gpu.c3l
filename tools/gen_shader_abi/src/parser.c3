@@ -125,15 +125,40 @@ fn void? Parser.parse_typedecl(&self, Schema* schema, TypeTable* types) {
 
 fn void? Parser.parse_struct(&self, Schema* schema, TypeTable* types, DeclKind kind) {
     self.advance();
-    return self.parse_struct_body(schema, types, kind);
+    PushRole role = PushRole.NONE;
+    if (kind == DeclKind.PUSH) role = self.parse_push_role();
+    return self.parse_struct_body(
+        schema: schema,
+        types:  types,
+        kind:   kind,
+        role:   role,
+    );
 }
 
-fn void? Parser.parse_struct_body(&self, Schema* schema, TypeTable* types, DeclKind kind) {
+<* `push compute Name` / `push graphics Name`; a bare `push Name` keeps the
+   core header meaning. *>
+fn PushRole Parser.parse_push_role(&self) {
+    Token token = self.peek();
+    if (self.pos + 1 >= self.tokens.len) return PushRole.NONE;
+    Token next = self.tokens[self.pos + 1];
+    if (next.kind == TokenKind.LBRACE) return PushRole.NONE;
+    if (token.text == "compute") {
+        self.advance();
+        return PushRole.COMPUTE;
+    }
+    if (token.text == "graphics") {
+        self.advance();
+        return PushRole.GRAPHICS;
+    }
+    return PushRole.NONE;
+}
+
+fn void? Parser.parse_struct_body(&self, Schema* schema, TypeTable* types, DeclKind kind, PushRole role = PushRole.NONE) {
     Token name = self.expect_name("struct name")!;
     validate_glsl_name(name.text, name.loc)!;
     types.declare(name.text, name.loc)!;
     self.expect(TokenKind.LBRACE, "'{'")!;
-    StructDecl decl = { .kind = kind, .name = name.text, .loc = name.loc };
+    StructDecl decl = { .kind = kind, .push_role = role, .name = name.text, .loc = name.loc };
     decl.fields.init(mem);
     defer catch decl.fields.free();
     while (self.peek().kind != TokenKind.RBRACE) {
@@ -151,6 +176,11 @@ fn void? Parser.parse_struct_body(&self, Schema* schema, TypeTable* types, DeclK
         }
         Token field_name = self.expect_name("field name")!;
         validate_glsl_name(field_name.text, field_name.loc)!;
+        if (role != PushRole.NONE && is_push_header_name(role, field_name.text)) {
+            diagnostic(field_name.loc, "field '%s' collides with the %s push header", field_name.text,
+                role == PushRole.COMPUTE ? "compute" : "graphics");
+            return PARSE_ERROR~;
+        }
         if (self.peek().kind == TokenKind.LBRACKET) {
             diagnostic(self.peek().loc, "declare arrays as 'type[N] name', not 'type name[N]'");
             return PARSE_ERROR~;
@@ -170,6 +200,11 @@ fn void? Parser.parse_struct_body(&self, Schema* schema, TypeTable* types, DeclK
         return PARSE_ERROR~;
     }
     schema.structs.push(decl);
+}
+
+fn bool is_push_header_name(PushRole role, String name) {
+    if (role == PushRole.COMPUTE) return name == "root_gpu";
+    return name == "vertex_root_gpu" || name == "fragment_root_gpu";
 }
 
 fn bool is_keyword(TokenKind kind) {

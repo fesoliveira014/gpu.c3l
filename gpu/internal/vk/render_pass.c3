@@ -1544,15 +1544,18 @@ fn void push_graphics_roots(
         .vertex_root_gpu   = vertex_root,
         .fragment_root_gpu = fragment_root,
     };
-    vk::cmd_push_constants(
+    uint push_stages = pipeline.kind == PipelineKind.MESH
+        ? (uint)record.device_state.mesh_push_stages
+        : (uint)vk::ShaderStageFlagBits.VERTEX_BIT
+            | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT;
+    push_root_block(
         command_buffer: record.command_buffer,
+        inline_root:    record.inline_root,
+        inline_offset:  pipeline.inline_root_offset,
         layout:         pipeline.layout,
-        stage_flags:    pipeline.kind == PipelineKind.MESH
-            ? record.device_state.mesh_push_stages
-            : generated_graphics_shader_stages(),
-        offset:         0,
-        size:           GRAPHICS_ROOT_PUSH_SIZE,
-        p_values:       &push,
+        stages:         (vk::ShaderStageFlags)push_stages,
+        header:         &push,
+        header_size:    GRAPHICS_ROOT_PUSH_SIZE,
     );
 }
 

@@ -62,3 +62,19 @@ $assert $reflect(CubeHeapRoot.cube_index).offset == 8;
 $assert $reflect(CubeHeapRoot.face_index).offset == 12;
 $assert $reflect(CubeHeapRoot.nearest_sampler).offset == 16;
 $assert $reflect(CubeHeapRoot.linear_sampler).offset == 20;
+
+struct RowSampleRoot {
+    TextureIndex base;
+    SamplerIndex sampler_index;
+    uint         attachment_count;
+    uint         frame;
+    uint         attachment;
+    uint         _pad0;
+}
+$assert RowSampleRoot::size == 24;
+$assert $reflect(RowSampleRoot.base).offset == 0;
+$assert $reflect(RowSampleRoot.sampler_index).offset == 4;
+$assert $reflect(RowSampleRoot.attachment_count).offset == 8;
+$assert $reflect(RowSampleRoot.frame).offset == 12;
+$assert $reflect(RowSampleRoot.attachment).offset == 16;
+$assert $reflect(RowSampleRoot._pad0).offset == 20;

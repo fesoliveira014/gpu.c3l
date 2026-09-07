@@ -1,0 +1,5 @@
+abi tint;
+
+push graphics TintRoot {
+    vec4 tint;
+}

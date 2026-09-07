@@ -169,6 +169,46 @@ Keep `view` alive until the last shader read completes, then
 `destroy_texture_view`. The sampler index never needs freeing. Shader side:
 [textures and samplers](shader_abi.md#textures-and-samplers).
 
+## Double-buffer render-target descriptors
+
+Reserve one row of slots per frame in flight so a shader addresses a
+G-buffer texture as `row_base + attachment`, and retarget a row in place
+when the attachments are recreated:
+
+```c3
+gpu::TextureIndexRange rows = gpu::reserve_texture_indices(device, FRAMES * GBUFFER_COUNT)!;
+gpu::TextureView[FRAMES * GBUFFER_COUNT] views;
+for (uint frame = 0; frame < FRAMES; frame++) {
+    for (uint i = 0; i < GBUFFER_COUNT; i++) {
+        uint at = frame * GBUFFER_COUNT + i;
+        gpu::TextureIndex slot = { .value = rows.base.value + at };
+        views[at] = gpu::create_texture_view_at(
+            device:  device,
+            slot:    slot,
+            texture: gbuffer[frame][i],
+            desc:    null,
+        )!;
+    }
+}
+root.gbuffer_base = rows.base;          // shader adds frame * GBUFFER_COUNT + i
+
+// after a resize, once the old textures are no longer read:
+for (uint frame = 0; frame < FRAMES; frame++) {
+    for (uint i = 0; i < GBUFFER_COUNT; i++) {
+        gpu::update_texture_view(
+            device:  device,
+            view:    &views[frame * GBUFFER_COUNT + i],
+            texture: resized[frame][i],
+            desc:    null,
+        )!;
+    }
+}
+```
+
+Slots keep their indices across `update_texture_view`, so root records that
+store `rows.base` need no rewrite. Destroy every view before
+`release_texture_indices`.
+
 ## Write a storage image, then sample it
 
 ```c3
@@ -563,6 +603,40 @@ sparse backing, and command allocators. Allocate the ring in
 `CPU_WRITE_GPU_LOCAL` so the GPU reads it from device-local memory where the
 adapter has a host-visible window; `AllocationInfo.device_local` reports the
 outcome.
+
+## Push a small root inline
+
+Up to 120 bytes per command (compute and ray tracing) or 112 bytes (graphics)
+can travel in the push block instead of a mapped record. No allocation,
+flush, or ring:
+
+```c3
+struct SpriteRoot @packed {
+    gpu::Vec4f rect;
+    gpu::Vec4f tint;
+    uint       texture;
+    uint       sampler;
+    uint       _pad0;
+    uint       _pad1;
+}
+
+fn void? draw_sprite(gpu::CommandList* commands, SpriteRoot* sprite) {
+    return gpu::cmd_draw(
+        commands:       commands,
+        vertex_root:    (gpu::GpuAddress)0,
+        fragment_root:  (gpu::GpuAddress)0,
+        vertex_count:   6,
+        instance_count: 1,
+        inline_root:    gpu::@inline_root(sprite),
+    );
+}
+```
+
+The shader declares the graphics header and then the payload from offset
+16, or generates both from `push graphics SpriteRoot { ... }`. The bytes
+are copied during the call; the value need not outlive it. Larger or shared
+data stays behind a root address. This default is provisional until the
+hardware comparison recorded with the contributor benchmarks is run.
 
 ## Draw indirectly
 

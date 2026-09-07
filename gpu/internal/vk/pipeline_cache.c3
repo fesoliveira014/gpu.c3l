@@ -72,6 +72,8 @@ struct PipelineCacheEntry {
     OwnedRayTracingPipelineKey     ray_tracing_key;
     ShaderId[]                     ray_tracing_shader_ids;
     bool                           mesh_task_stage;
+    uint                           push_block_size;
+    uint                           inline_root_offset;
     uint                           refcount;
     uint                           next_free;
     uint                           next_in_bucket;
@@ -603,7 +605,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
     vk::PushConstantRange range = {
         .stage_flags = (vk::ShaderStageFlags)push_stages,
         .offset      = 0,
-        .size        = GRAPHICS_ROOT_PUSH_SIZE,
+        .size        = gpu::ROOT_PUSH_CAPACITY,
     };
     vk::PipelineLayoutCreateInfo layout_info = vk::pipeline_layout_create_info()
         .set_set_layouts((&state.shader_pipeline_set_layout)[:1])
@@ -627,7 +629,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
         vk::PushConstantRange mesh_range = {
             .stage_flags = state.mesh_push_stages,
             .offset      = 0,
-            .size        = GRAPHICS_ROOT_PUSH_SIZE,
+            .size        = gpu::ROOT_PUSH_CAPACITY,
         };
         vk::PipelineLayoutCreateInfo mesh_layout_info = vk::pipeline_layout_create_info()
             .set_set_layouts((&state.shader_pipeline_set_layout)[:1])
@@ -648,7 +650,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
     vk::PushConstantRange compute_root = {
         .stage_flags = vk::ShaderStageFlagBits.COMPUTE_BIT,
         .offset      = 0,
-        .size        = gpu::RootPush::size,
+        .size        = gpu::ROOT_PUSH_CAPACITY,
     };
     vk::PipelineLayoutCreateInfo compute_layout_info =
         vk::pipeline_layout_create_info()
@@ -674,7 +676,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
         vk::PushConstantRange ray_tracing_root = {
             .stage_flags = ray_tracing_shader_stage_flags(),
             .offset      = 0,
-            .size        = gpu::RootPush::size,
+            .size        = gpu::ROOT_PUSH_CAPACITY,
         };
         vk::PipelineLayoutCreateInfo ray_tracing_layout_info =
             vk::pipeline_layout_create_info()

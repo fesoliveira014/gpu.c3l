@@ -219,6 +219,15 @@ struct CommandRecord @public {
     gpu::internal::CommandListHandle identity;
     gpu::internal::CommandState      state;
     gpu::Queue                       queue;
+    char[]                           inline_root;
+}
+
+fn void? set_inline_root(CommandRecord* record, char[] inline_root, ZString operation) {
+    (void)operation;
+    if (inline_root.len % 4 != 0 || inline_root.len > gpu::INLINE_ROOT_CAPACITY) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    record.inline_root = inline_root;
 }
 
 struct CommandOps @public {
@@ -785,6 +794,44 @@ fn void? vk_create_texture_views(
     (void)state;
     (void)descs;
     (void)out_views;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::TextureIndexRange? vk_reserve_texture_indices(VkDeviceState* state, uint count) {
+    (void)state;
+    (void)count;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_release_texture_indices(VkDeviceState* state, gpu::TextureIndexRange range) {
+    (void)state;
+    (void)range;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn gpu::TextureView? vk_create_texture_view_at(
+    VkDeviceState* state,
+    gpu::TextureIndex slot,
+    gpu::TextureHandle texture,
+    gpu::TextureViewDesc* desc,
+) {
+    (void)state;
+    (void)slot;
+    (void)texture;
+    (void)desc;
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_update_texture_view(
+    VkDeviceState* state,
+    gpu::TextureView* view,
+    gpu::TextureHandle texture,
+    gpu::TextureViewDesc* desc,
+) {
+    (void)state;
+    (void)view;
+    (void)texture;
+    (void)desc;
     return gpu::UNSUPPORTED_FEATURE~;
 }
 

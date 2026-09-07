@@ -96,7 +96,10 @@ gpu::cmd_dispatch_indirect(&commands, root_address, args_span)!;   // one Dispat
 gpu::cmd_dispatch_generated(&commands, records_span, count_span, max_count)!;
 ```
 
-`root_address` is pushed unchanged; zero is allowed. Group counts must fit
+`root_address` is pushed unchanged; zero is allowed. Every direct dispatch,
+draw, and trace also takes a trailing `char[] inline_root` (default empty),
+pushed after the root header; see
+[shader ABI](../shader_abi.md#inline-payload). Group counts must fit
 `DeviceCaps.max_compute_work_group_count`. Indirect argument memory is a
 caller-owned span made visible with a barrier to `.indirect`.
 
@@ -180,8 +183,8 @@ described in [shaders and pipelines](shaders_and_pipelines.md#graphics-pipelines
 
 ## Draws
 
-All draws take a vertex root and a fragment root, pushed unchanged. Zero
-is allowed.
+All draws take a vertex root and a fragment root, pushed unchanged, and an
+optional trailing `inline_root` payload. Zero roots are allowed.
 
 ```c3
 gpu::cmd_draw(
