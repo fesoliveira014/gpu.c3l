@@ -46,7 +46,7 @@ resolves all four:
   "dependency-search-paths": [ "lib", "lib/gpu.c3l/lib" ],
   "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
   "output": "build",
-  "wincrt": "dynamic",
+  "wincrt": "static",
   "targets": {
     "hello_gpu": {
       "type": "executable",
@@ -56,8 +56,11 @@ resolves all four:
 }
 ```
 
-Keep `"wincrt": "dynamic"` on Windows. The vendored VMA library is built
-against the release CRT.
+Keep `"wincrt": "static"` on Windows. The vendored VMA library is built against
+the static CRT, and an MSVC archive links only into an executable built against
+the same one — a mismatch surfaces as
+`lld-link: error: /failifmismatch: mismatch detected for 'RuntimeLibrary'`, not as
+a runtime bug.
 
 ## Step 1: double an array on the GPU
 
