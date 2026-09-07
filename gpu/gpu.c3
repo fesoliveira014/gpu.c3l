@@ -1038,6 +1038,80 @@ fn void? destroy_texture_view(Device* device, TextureView view) {
     gpu::internal::release_device_children(&operation);
 }
 
+<* Reserve `count` contiguous ascending texture-heap slots that
+   `create_texture_view` never hands out. Slots are carved downward from the
+   top of the heap; the general region ends where reservations begin.
+
+   @param device : "Live device that owns the heap."
+   @param count : "Nonzero number of slots."
+   @return "The reserved range, or a recoverable invalid-argument, capacity, or device fault." *>
+fn TextureIndexRange? reserve_texture_indices(Device* device, uint count) {
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    if (count == 0) return INVALID_ARGUMENT~;
+    return gpu::internal::vk::vk_reserve_texture_indices(operation.state, count);
+}
+
+<* Release a whole reservation. Every slot must be empty. Releasing the lowest
+   reservation returns it and any released reservations above it to the
+   general region; releasing a higher one leaves a hole until those below go.
+   A slot whose generation is exhausted stays reserved and out of both
+   regions.
+
+   @param device : "Live device that owns the heap."
+   @param range : "A range returned by `reserve_texture_indices`."
+   @return "Success, or a recoverable invalid-argument, in-use, or device fault." *>
+fn void? release_texture_indices(Device* device, TextureIndexRange range) {
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    return gpu::internal::vk::vk_release_texture_indices(operation.state, range);
+}
+
+<* Publish a view into one reserved slot. Same validation and hazard rule as
+   `create_texture_view`; the returned index equals `slot`.
+
+   @param device : "Live device that owns the texture."
+   @param slot : "A slot inside a live reservation."
+   @param texture : "Texture whose subresources are exposed."
+   @param desc : "Borrowed view description; null selects the full default view."
+   @return "An owning view token, or a recoverable invalid-argument, in-use, ownership, allocation, or device fault." *>
+fn TextureView? create_texture_view_at(Device* device, TextureIndex slot, TextureHandle texture, TextureViewDesc* desc) {
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
+    TextureView view = gpu::internal::vk::vk_create_texture_view_at(
+        state:   operation.state,
+        slot:    slot,
+        texture: texture,
+        desc:    desc,
+    )!;
+    gpu::internal::retain_device_children(&operation);
+    return view;
+}
+
+<* Rewrite the descriptor behind a live view without changing its index.
+   The token is rewritten with a new generation; older copies are stale. The
+   slot must not be read by executing commands.
+
+   @param device : "Live device that owns the view."
+   @param view : "Live view token, rewritten on success."
+   @param texture : "Texture the slot will expose."
+   @param desc : "Borrowed view description; null selects the full default view."
+   @return "Success, or a recoverable invalid-handle, ownership, capacity, allocation, or device fault." *>
+fn void? update_texture_view(Device* device, TextureView* view, TextureHandle texture, TextureViewDesc* desc) {
+    if (view == null) return INVALID_HANDLE~;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    defer gpu::internal::end_device_operation(&operation);
+    gpu::internal::validate_resource_owner(&operation, view.owner, gpu::internal::ResourceOwnerKind.TEXTURE_VIEW)!;
+    gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
+    return gpu::internal::vk::vk_update_texture_view(
+        state:   operation.state,
+        view:    view,
+        texture: texture,
+        desc:    desc,
+    );
+}
+
 <* Create an unbound single-layer, single-sample color sparse texture.
    Creation binds no memory; sparse page allocations remain caller-owned.
 

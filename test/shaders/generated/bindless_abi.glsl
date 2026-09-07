@@ -41,4 +41,13 @@ layout(buffer_reference, std430, buffer_reference_align = 8) buffer CubeHeapRoot
     uint linear_sampler;
 };
 
+layout(buffer_reference, std430, buffer_reference_align = 4) buffer RowSampleRoot {
+    uint base;
+    uint sampler_index;
+    uint attachment_count;
+    uint frame;
+    uint attachment;
+    uint _pad0;
+};
+
 #endif
