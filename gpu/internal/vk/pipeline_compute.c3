@@ -246,6 +246,8 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
             .pipeline                  = pipeline,
             .layout                    = state.compute_layout,
             .generated_dispatch_layout = state.generated_dispatch_layout,
+            .push_block_size           = shader.push_block_size,
+            .inline_root_offset        = shader.inline_root_offset,
         },
     )) {
         transfer_prepared_shader(prepared_shader);

@@ -1,5 +1,9 @@
 module gen_shader_abi;
 
+const uint ROOT_PUSH_CAPACITY = 128;
+const uint COMPUTE_ROOT_HEADER = 8;
+const uint GRAPHICS_ROOT_HEADER = 16;
+
 fn uint align_up(uint value, uint alignment) => (value + alignment - 1) / alignment * alignment;
 
 <* Compute std430 layout for every struct in declaration order, filling field
@@ -21,6 +25,10 @@ fn void? compute_layouts(Schema* schema, TypeTable* types) {
 
 fn void? compute_struct_layout(StructDecl* decl, TypeTable* types) {
     uint cursor = 0;
+    if (decl.push_role != PushRole.NONE) {
+        decl.payload_offset = decl.push_role == PushRole.COMPUTE ? COMPUTE_ROOT_HEADER : GRAPHICS_ROOT_HEADER;
+        cursor = decl.payload_offset;
+    }
     uint struct_align = 4;
     foreach (&field : decl.fields) {
         TypeInfo info = types.lookup(field.type_name, field.type_loc)!;
@@ -55,6 +63,16 @@ fn void? compute_struct_layout(StructDecl* decl, TypeTable* types) {
         diagnostic(decl.loc, "struct '%s' needs trailing std430 padding (size %d, alignment %d): insert %s",
             decl.name, cursor, struct_align, pad_suggestion(total - cursor));
         return LAYOUT_ERROR~;
+    }
+    if (decl.push_role != PushRole.NONE) {
+        decl.size = total - decl.payload_offset;
+        decl.alignment = struct_align;
+        if (total > ROOT_PUSH_CAPACITY) {
+            diagnostic(decl.loc, "push payload '%s' ends at byte %d; the push block holds %d bytes after the %d-byte header",
+                decl.name, total, ROOT_PUSH_CAPACITY - decl.payload_offset, decl.payload_offset);
+            return LAYOUT_ERROR~;
+        }
+        return;
     }
     decl.size = total;
     decl.alignment = struct_align;

@@ -399,6 +399,7 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         create_ops:      &create_ops.shader_module,
     )!;
     defer destroy_pipeline_shader_module(state, &fragment_shader);
+    uint inline_root_offset = gpu::GraphicsRootPush::size;
     @pool() {
         vk::Format[] color_formats = {};
         if (key.color_target_count > 0) {
@@ -560,10 +561,12 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
         } else if (try idx = insert_entry(
             state: state,
             value: {
-                .hash     = hash,
-                .key      = key,
-                .pipeline = pipeline,
-                .layout   = state.graphics_layout,
+                .hash            = hash,
+                .key             = key,
+                .pipeline        = pipeline,
+                .layout          = state.graphics_layout,
+                .push_block_size = max(vertex_shader.push_block_size, fragment_shader.push_block_size),
+                .inline_root_offset = inline_root_offset,
             },
         )) {
             transfer_prepared_shader(prepared_vertex_shader);

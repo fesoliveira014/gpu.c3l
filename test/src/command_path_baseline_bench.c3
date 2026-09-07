@@ -7,6 +7,8 @@ import std::time;
 
 const char[*] COMMAND_PATH_COMP_SPIRV =
     $embed("shaders/root_pointer.comp.spv");
+const char[*] COMMAND_PATH_INLINE_SPIRV =
+    $embed("shaders/root_inline.comp.spv");
 
 const uint COMMAND_PATH_ITERATIONS = 20_000;
 const uint COMMAND_PATH_REPETITIONS = 5;
@@ -16,6 +18,8 @@ const uint DISPATCH_DIRECT_SENTINEL = 0x11111111;
 const uint DISPATCH_PUBLIC_SENTINEL = 0x22222222;
 const uint COPY_DIRECT_SENTINEL = 0x33333333;
 const uint COPY_PUBLIC_SENTINEL = 0x44444444;
+const uint INLINE_ROOT_COMMANDS = 1_000;
+const uint[3] INLINE_ROOT_PAYLOAD_SIZES = { 32, 64, 112 };
 
 struct BenchSpan {
     gpu::GpuAllocation allocation;
@@ -39,9 +43,23 @@ $assert $reflect(ComputeRoot._pad0).offset == 20;
 $assert $reflect(ComputeRoot._pad1).offset == 24;
 $assert $reflect(ComputeRoot._pad2).offset == 28;
 
+struct InlineRoot @packed {
+    gpu::GpuAddress input_gpu;
+    gpu::GpuAddress output_gpu;
+    uint            count;
+    uint            _pad0;
+}
+
 struct OperationSamples {
     double[COMMAND_PATH_REPETITIONS] direct;
     double[COMMAND_PATH_REPETITIONS] library;
+}
+
+struct InlineRootSamples {
+    double[COMMAND_PATH_REPETITIONS] inline_record;
+    double[COMMAND_PATH_REPETITIONS] ring_record;
+    double[COMMAND_PATH_REPETITIONS] inline_execute;
+    double[COMMAND_PATH_REPETITIONS] ring_execute;
 }
 
 struct EquivalenceResult {
@@ -75,9 +93,9 @@ fn void? free_bench_span(gpu::Device* device, BenchSpan* owned) {
     owned.span = {};
 }
 
-fn gpu::PipelineHandle create_compute_pipeline(gpu::Device* device) {
+fn gpu::PipelineHandle create_compute_pipeline(gpu::Device* device, char[] spirv = COMMAND_PATH_COMP_SPIRV[..]) {
     gpu::ShaderDesc shader_desc = {
-        .spirv       = COMMAND_PATH_COMP_SPIRV[..],
+        .spirv       = spirv,
         .entry_point = "main",
     };
     gpu::ComputePipelineDesc pipeline_desc = {
@@ -527,6 +545,185 @@ fn EquivalenceResult execute_copy_equivalence(
     return result;
 }
 
+<* Per-command CPU cost of an inline payload against writing the same bytes
+   into a mapped ring and pushing the slot address. *>
+fn OperationSamples measure_inline_recording(
+    gpu::Device* device,
+    gpu::CommandAllocator* allocator,
+    gpu::PipelineHandle pipeline,
+    BenchSpan* ring,
+    uint payload_size,
+) {
+    OperationSamples result;
+    char[gpu::INLINE_ROOT_CAPACITY] payload;
+    for (uint i = 0; i < payload.len; i++) payload[i] = (char)i;
+    char[] inline_root = payload[:payload_size];
+    gpu::Vec3u groups = { 1, 1, 1 };
+    char* ring_base = (char*)gpu::get_span_mapping(device, ring.span)!!.ptr;
+    gpu::GpuAddress ring_address = gpu::get_span_address(device, ring.span)!!;
+    for (uint repetition = 0; repetition < COMMAND_PATH_REPETITIONS; repetition++) {
+        gpu::CommandList inline_list = gpu::begin_commands(allocator)!!;
+        gpu::CommandList ring_list = gpu::begin_commands(allocator)!!;
+        gpu::cmd_bind_pipeline(&inline_list, pipeline)!!;
+        gpu::cmd_bind_pipeline(&ring_list, pipeline)!!;
+
+        std::time::Clock start = std::time::clock::now();
+        for (uint i = 0; i < COMMAND_PATH_ITERATIONS; i++) {
+            gpu::cmd_dispatch(
+                commands:    &inline_list,
+                root:        (gpu::GpuAddress)0,
+                groups:      groups,
+                inline_root: inline_root,
+            )!!;
+        }
+        result.direct[repetition] = elapsed_per_operation(start);
+
+        start = std::time::clock::now();
+        for (uint i = 0; i < COMMAND_PATH_ITERATIONS; i++) {
+            usz slot = (usz)i * gpu::INLINE_ROOT_CAPACITY;
+            mem::copy(ring_base + slot, inline_root.ptr, payload_size);
+            gpu::cmd_dispatch(
+                commands: &ring_list,
+                root:     (gpu::GpuAddress)((ulong)ring_address + slot),
+                groups:   groups,
+            )!!;
+        }
+        gpu::flush_mapped_span(device, ring.span)!!;
+        result.library[repetition] = elapsed_per_operation(start);
+
+        finish_recording(&inline_list);
+        finish_recording(&ring_list);
+    }
+    return result;
+}
+
+<* End-to-end wall time for INLINE_ROOT_COMMANDS dispatches that each write
+   one element: the payload inline against a per-command root record. *>
+fn InlineRootSamples measure_inline_execution(
+    gpu::Device* device,
+    gpu::Queue queue,
+    gpu::CommandAllocator* allocator,
+    gpu::PipelineHandle record_pipeline,
+    gpu::PipelineHandle inline_pipeline,
+) {
+    InlineRootSamples result;
+    const usz DATA_BYTES = INLINE_ROOT_COMMANDS * float::size;
+    BenchSpan input = allocate_bench_span(
+        device:       device,
+        size:         DATA_BYTES,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        debug_name:   "inline_root_input",
+    )!!;
+    defer free_bench_span(device, &input)!!;
+    BenchSpan inline_output = allocate_bench_span(
+        device:       device,
+        size:         DATA_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        debug_name:   "inline_root_inline_output",
+    )!!;
+    defer free_bench_span(device, &inline_output)!!;
+    BenchSpan record_output = allocate_bench_span(
+        device:       device,
+        size:         DATA_BYTES,
+        memory_class: gpu::MemoryClass.CPU_READ,
+        debug_name:   "inline_root_record_output",
+    )!!;
+    defer free_bench_span(device, &record_output)!!;
+    BenchSpan records = allocate_bench_span(
+        device:       device,
+        size:         INLINE_ROOT_COMMANDS * ComputeRoot::size,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        debug_name:   "inline_root_records",
+    )!!;
+    defer free_bench_span(device, &records)!!;
+
+    float* input_values = (float*)gpu::get_span_mapping(device, input.span)!!.ptr;
+    for (uint i = 0; i < INLINE_ROOT_COMMANDS; i++) input_values[i] = (float)(i + 1);
+    gpu::flush_mapped_span(device, input.span)!!;
+    gpu::GpuAddress input_gpu = gpu::get_span_address(device, input.span)!!;
+    gpu::GpuAddress inline_output_gpu = gpu::get_span_address(device, inline_output.span)!!;
+    gpu::GpuAddress record_output_gpu = gpu::get_span_address(device, record_output.span)!!;
+    ComputeRoot* record_base = (ComputeRoot*)gpu::get_span_mapping(device, records.span)!!.ptr;
+    gpu::GpuAddress records_gpu = gpu::get_span_address(device, records.span)!!;
+    gpu::Vec3u groups = { 1, 1, 1 };
+    gpu::Barrier to_host = {
+        .before = { .compute = true },
+        .after  = { .host = true },
+    };
+
+    for (uint repetition = 0; repetition < COMMAND_PATH_REPETITIONS; repetition++) {
+        std::time::Clock start = std::time::clock::now();
+        gpu::CommandList inline_list = gpu::begin_commands(allocator)!!;
+        gpu::cmd_bind_pipeline(&inline_list, inline_pipeline)!!;
+        for (uint i = 0; i < INLINE_ROOT_COMMANDS; i++) {
+            InlineRoot payload = {
+                .input_gpu  = (gpu::GpuAddress)((ulong)input_gpu + (usz)i * float::size),
+                .output_gpu = (gpu::GpuAddress)((ulong)inline_output_gpu + (usz)i * float::size),
+                .count      = 1,
+            };
+            gpu::cmd_dispatch(
+                commands:    &inline_list,
+                root:        (gpu::GpuAddress)0,
+                groups:      groups,
+                inline_root: gpu::@inline_root(&payload),
+            )!!;
+        }
+        gpu::cmd_barrier(&inline_list, &to_host)!!;
+        gpu::ExecutableCommandList[1] inline_lists = { gpu::end_commands(&inline_list)!! };
+        result.inline_record[repetition] = (double)(long)start.to_now() / (double)INLINE_ROOT_COMMANDS;
+        start = std::time::clock::now();
+        gpu::wait_completion(submit_commands(queue, inline_lists[..]))!!;
+        result.inline_execute[repetition] = (double)(long)start.to_now();
+
+        start = std::time::clock::now();
+        gpu::CommandList ring_list = gpu::begin_commands(allocator)!!;
+        gpu::cmd_bind_pipeline(&ring_list, record_pipeline)!!;
+        for (uint i = 0; i < INLINE_ROOT_COMMANDS; i++) {
+            record_base[i] = {
+                .input_gpu  = (gpu::GpuAddress)((ulong)input_gpu + (usz)i * float::size),
+                .output_gpu = (gpu::GpuAddress)((ulong)record_output_gpu + (usz)i * float::size),
+                .count      = 1,
+            };
+            gpu::cmd_dispatch(
+                commands: &ring_list,
+                root:     (gpu::GpuAddress)((ulong)records_gpu + (usz)i * ComputeRoot::size),
+                groups:   groups,
+            )!!;
+        }
+        gpu::flush_mapped_span(device, records.span)!!;
+        gpu::cmd_barrier(&ring_list, &to_host)!!;
+        gpu::ExecutableCommandList[1] ring_lists = { gpu::end_commands(&ring_list)!! };
+        result.ring_record[repetition] = (double)(long)start.to_now() / (double)INLINE_ROOT_COMMANDS;
+        start = std::time::clock::now();
+        gpu::wait_completion(submit_commands(queue, ring_lists[..]))!!;
+        result.ring_execute[repetition] = (double)(long)start.to_now();
+    }
+    gpu::invalidate_mapped_span(device, inline_output.span)!!;
+    gpu::invalidate_mapped_span(device, record_output.span)!!;
+    float* inline_values = (float*)gpu::get_span_mapping(device, inline_output.span)!!.ptr;
+    float* record_values = (float*)gpu::get_span_mapping(device, record_output.span)!!.ptr;
+    for (uint i = 0; i < INLINE_ROOT_COMMANDS; i++) {
+        float expected = (float)(i + 1) * 2.0f;
+        assert(inline_values[i] == expected);
+        assert(record_values[i] == expected);
+    }
+    return result;
+}
+
+fn void print_inline_root(InlineRootSamples* result) {
+    io::printfn(
+        "inline root execution: commands=%d repetitions=%d "
+        "inline record=%.3f ns/op execute=%.3f us "
+        "ring record=%.3f ns/op execute=%.3f us",
+        INLINE_ROOT_COMMANDS,
+        COMMAND_PATH_REPETITIONS,
+        sample_median(result.inline_record),
+        sample_median(result.inline_execute) / 1000.0,
+        sample_median(result.ring_record),
+        sample_median(result.ring_execute) / 1000.0,
+    );
+}
+
 fn int main() {
     gpu::RuntimeDesc runtime_desc = {
         .application_name = "gpu_command_path_baseline",
@@ -568,7 +765,35 @@ fn int main() {
         .dst = copy_destination.span,
     };
 
+    gpu::PipelineHandle inline_pipeline =
+        create_compute_pipeline(&device, COMMAND_PATH_INLINE_SPIRV[..]);
+    defer gpu::destroy_pipeline(&device, inline_pipeline)!!;
+    BenchSpan ring = allocate_bench_span(
+        device:       &device,
+        size:         (usz)COMMAND_PATH_ITERATIONS * gpu::INLINE_ROOT_CAPACITY,
+        memory_class: gpu::MemoryClass.CPU_WRITE,
+        debug_name:   "inline_root_ring",
+    )!!;
+    defer free_bench_span(&device, &ring)!!;
+
     OperationSamples dispatch = measure_dispatch(&allocator, pipeline);
+    OperationSamples[3] inline_recording;
+    foreach (i, size : INLINE_ROOT_PAYLOAD_SIZES) {
+        inline_recording[i] = measure_inline_recording(
+            device:       &device,
+            allocator:    &allocator,
+            pipeline:     inline_pipeline,
+            ring:         &ring,
+            payload_size: size,
+        );
+    }
+    InlineRootSamples inline_execution = measure_inline_execution(
+        device:          &device,
+        queue:           queue,
+        allocator:       &allocator,
+        record_pipeline: pipeline,
+        inline_pipeline: inline_pipeline,
+    );
     OperationSamples copy =
         measure_copy(&device, &allocator, &timing_copy);
     EquivalenceResult dispatch_equivalence =
@@ -588,6 +813,16 @@ fn int main() {
     );
     print_operation("dispatch", &dispatch);
     print_operation("copy buffer", &copy);
+    foreach (i, size : INLINE_ROOT_PAYLOAD_SIZES) {
+        io::printfn(
+            "inline root recording: payload=%d B inline=%.3f ns/op ring=%.3f ns/op ring/inline=%.3fx",
+            size,
+            sample_median(inline_recording[i].direct),
+            sample_median(inline_recording[i].library),
+            sample_median(inline_recording[i].library) / sample_median(inline_recording[i].direct),
+        );
+    }
+    print_inline_root(&inline_execution);
     io::printfn(
         "dispatch equivalence: elements=%d nonzero output matched checksum=%d",
         COMMAND_PATH_EQUIVALENCE_ELEMENTS,

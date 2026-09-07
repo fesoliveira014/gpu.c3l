@@ -2363,6 +2363,8 @@ fn BoundPipeline? lower_bound_pipeline(
         .generated_dispatch_layout = slot.generated_dispatch_layout,
         .cache_entry               = slot.entry,
         .kind                      = (PipelineKind)entry.key.kind,
+        .push_block_size           = entry.push_block_size,
+        .inline_root_offset        = entry.inline_root_offset,
         .render                    = pipeline_render_compatibility(&entry.key),
         .dynamic_ray_tracing_stack_size =
             slot.ray_tracing_info.dynamic_stack_size,
@@ -2538,19 +2540,76 @@ fn void? bind_pipeline_with_injected_ops(
     return trusted_bind_pipeline_with_ops(commands, pipeline, ops);
 }
 
+<* Validate and borrow the inline payload for the next direct command. *>
+fn void? set_inline_root(
+    CommandRecord* record,
+    char[] inline_root,
+    ZString operation,
+) {
+    if (inline_root.len % 4 != 0 || inline_root.len > gpu::INLINE_ROOT_CAPACITY) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    record.inline_root = inline_root;
+    if (inline_root.len == 0) return;
+    BoundPipeline*? bound = borrow_bound_pipeline(record);
+    if (catch err = bound) return;
+    BoundPipeline* pipeline = bound;
+    uint needed = pipeline.inline_root_offset + (uint)inline_root.len;
+    if (needed > gpu::ROOT_PUSH_CAPACITY) return gpu::INVALID_ARGUMENT~;
+    if (!contract_uses_full_validation(record.device_state.validation_policy)) return;
+    if (pipeline.push_block_size < needed) {
+        report_state_diagnostic(
+            state:          record.device_state,
+            category:       { .public_contract },
+            operation:      operation,
+            rejected_field: "inline_root",
+            invariant:      "inline payload must fit the bound pipeline's push block",
+        );
+    }
+}
+
+<* One push of the header followed by the inline payload at the bound
+   pipeline's payload offset. *>
+fn void push_root_block(
+    vk::CommandBuffer command_buffer,
+    char[] inline_root,
+    uint inline_offset,
+    vk::PipelineLayout layout,
+    vk::ShaderStageFlags stages,
+    void* header,
+    uint header_size,
+) {
+    char[gpu::ROOT_PUSH_CAPACITY] block;
+    mem::copy(&block[0], header, header_size);
+    uint size = header_size;
+    if (inline_root.len > 0) {
+        mem::copy(&block[inline_offset], inline_root.ptr, inline_root.len);
+        size = inline_offset + (uint)inline_root.len;
+    }
+    vk::cmd_push_constants(
+        command_buffer: command_buffer,
+        layout:         layout,
+        stage_flags:    stages,
+        offset:         0,
+        size:           size,
+        p_values:       &block[0],
+    );
+}
+
 fn void push_compute_root(
     CommandRecord* record,
     BoundPipeline* pipeline,
     gpu::GpuAddress root,
 ) @private {
     gpu::RootPush push = { .root_gpu = root };
-    vk::cmd_push_constants(
+    push_root_block(
         command_buffer: record.command_buffer,
+        inline_root:    record.inline_root,
+        inline_offset:  pipeline.inline_root_offset,
         layout:         pipeline.layout,
-        stage_flags:    vk::ShaderStageFlagBits.COMPUTE_BIT,
-        offset:         0,
-        size:           gpu::RootPush::size,
-        p_values:       &push,
+        stages:         (vk::ShaderStageFlags)vk::ShaderStageFlagBits.COMPUTE_BIT,
+        header:         &push,
+        header_size:    gpu::RootPush::size,
     );
 }
 

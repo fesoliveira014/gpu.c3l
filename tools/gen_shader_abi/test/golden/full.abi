@@ -39,6 +39,25 @@ push GraphicsRootPush {
     GpuAddress fragment_root_gpu;
 }
 
+push compute InlineTint {
+    uint _pad0;
+    uint _pad1;
+    vec4 tint;
+    uint material;
+    uint _pad2;
+    uint _pad3;
+    uint _pad4;
+}
+
+push graphics InlineOffset {
+    vec4 offset;
+}
+
+push compute InlineScalars {
+    uint first;
+    uint second;
+}
+
 extern struct DrawIndexedIndirectCommand {
     uint index_count;
     uint instance_count;

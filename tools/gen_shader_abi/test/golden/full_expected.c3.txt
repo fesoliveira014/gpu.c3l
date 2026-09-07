@@ -79,6 +79,41 @@ $assert GraphicsRootPush::size == 16;
 $assert $reflect(GraphicsRootPush.vertex_root_gpu).offset == 0;
 $assert $reflect(GraphicsRootPush.fragment_root_gpu).offset == 8;
 
+struct InlineTint @packed {
+    uint  _pad0;
+    uint  _pad1;
+    Vec4f tint;
+    uint  material;
+    uint  _pad2;
+    uint  _pad3;
+    uint  _pad4;
+}
+$assert InlineTint::size == 40;
+$assert $reflect(InlineTint._pad0).offset == 0;
+$assert $reflect(InlineTint._pad1).offset == 4;
+$assert $reflect(InlineTint.tint).offset == 8;
+$assert $reflect(InlineTint.material).offset == 24;
+$assert $reflect(InlineTint._pad2).offset == 28;
+$assert $reflect(InlineTint._pad3).offset == 32;
+$assert $reflect(InlineTint._pad4).offset == 36;
+$assert InlineTint::size <= 120;
+
+struct InlineOffset @packed {
+    Vec4f offset;
+}
+$assert InlineOffset::size == 16;
+$assert $reflect(InlineOffset.offset).offset == 0;
+$assert InlineOffset::size <= 112;
+
+struct InlineScalars @packed {
+    uint first;
+    uint second;
+}
+$assert InlineScalars::size == 8;
+$assert $reflect(InlineScalars.first).offset == 0;
+$assert $reflect(InlineScalars.second).offset == 4;
+$assert InlineScalars::size <= 120;
+
 $assert DrawIndexedIndirectCommand::size == 20;
 $assert $reflect(DrawIndexedIndirectCommand.index_count).offset == 0;
 $assert $reflect(DrawIndexedIndirectCommand.instance_count).offset == 4;

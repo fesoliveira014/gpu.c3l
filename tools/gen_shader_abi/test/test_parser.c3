@@ -285,3 +285,108 @@ fn void non_reserved_names_still_accepted() @test {
     `, &schema, &types)!!;
     assert(schema.structs.get_ref(0).fields.get_ref(0).name == "heap_sampler");
 }
+
+fn void push_roles_parse_and_bare_push_keeps_header_meaning() @test {
+    Schema schema;
+    schema.init();
+    defer schema.free();
+    TypeTable types;
+    types.init();
+    defer types.free();
+    build_schema(`
+        abi t;
+        push compute Tint {
+            uint _pad0;
+            uint _pad1;
+            vec4 color;
+        }
+        push graphics Material {
+            uint id;
+            uint _pad0;
+            uint _pad1;
+            uint _pad2;
+            vec4 albedo;
+        }
+        push Plain {
+            GpuAddress root_gpu;
+        }
+    `, &schema, &types)!!;
+    assert(schema.structs.get_ref(0).push_role == PushRole.COMPUTE);
+    assert(schema.structs.get_ref(1).push_role == PushRole.GRAPHICS);
+    assert(schema.structs.get_ref(2).push_role == PushRole.NONE);
+    assert(schema.structs.get_ref(1).size == 32 && schema.structs.get_ref(1).payload_offset == 16);
+}
+
+fn void oversized_push_payload_rejected() @test {
+    @expect_fault(`
+        abi t;
+        push compute Big {
+            uint _pad0;
+            uint _pad1;
+            vec4 a;
+            vec4 b;
+            vec4 c;
+            vec4 d;
+            vec4 e;
+            vec4 f;
+            vec4 g;
+            vec4 h;
+        }
+    `, LAYOUT_ERROR);
+}
+
+fn void push_payload_offsets_follow_the_header() @test {
+    Schema schema;
+    schema.init();
+    defer schema.free();
+    TypeTable types;
+    types.init();
+    defer types.free();
+    build_schema(`
+        abi t;
+        push compute Scalars {
+            uint a;
+            uint b;
+        }
+        push compute Vectors {
+            uint _pad0;
+            uint _pad1;
+            vec4 v;
+        }
+        push graphics Wide {
+            vec4 a;
+        }
+    `, &schema, &types)!!;
+    StructDecl* scalars = schema.structs.get_ref(0);
+    assert(scalars.payload_offset == 8 && scalars.size == 8);
+    assert(scalars.fields.get_ref(0).offset == 8 && scalars.fields.get_ref(1).offset == 12);
+    StructDecl* vectors = schema.structs.get_ref(1);
+    assert(vectors.payload_offset == 8 && vectors.size == 24);
+    assert(vectors.fields.get_ref(2).offset == 16);
+    StructDecl* wide = schema.structs.get_ref(2);
+    assert(wide.payload_offset == 16 && wide.fields.get_ref(0).offset == 16 && wide.size == 16);
+}
+
+fn void push_payload_needs_explicit_leading_padding() @test {
+    @expect_fault(`
+        abi t;
+        push compute Vectors {
+            vec4 v;
+        }
+    `, LAYOUT_ERROR);
+}
+
+fn void push_payload_rejects_header_names() @test {
+    @expect_fault(`
+        abi t;
+        push compute Bad {
+            u64 root_gpu;
+        }
+    `, PARSE_ERROR);
+    @expect_fault(`
+        abi t;
+        push graphics Bad {
+            u64 fragment_root_gpu;
+        }
+    `, PARSE_ERROR);
+}

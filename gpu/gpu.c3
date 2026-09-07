@@ -2113,6 +2113,15 @@ fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
     return record.ops.bind_pipeline(record, pipeline);
 }
 
+<* Borrow a trivially copyable value as an inline root payload.
+   The bytes are copied during the recording call and the value need not
+   outlive it; its size must be a multiple of four and at most
+   `INLINE_ROOT_CAPACITY`.
+
+   @param value : "Pointer to the payload value."
+   @return "A borrowed byte slice over the value." *>
+macro char[] @inline_root(value) => ((char*)value)[:@sizeof(*value)];
+
 <* Dispatch with one root passed unchanged at offset 0; zero is valid.
    Preconditions: a compute pipeline is active, group counts fit DeviceCaps,
    root-reachable allocations admit the queue, and shaders branch before
@@ -2124,9 +2133,11 @@ fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
    @param commands : "Live recording token."
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param groups : "Workgroup counts in X, Y, and Z."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, pipeline, limit, or device fault." *>
-fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
+fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_dispatch")!;
     return record.ops.dispatch(record, root, groups);
 }
 
@@ -2140,9 +2151,11 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups) {
    @param commands : "Live recording token."
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param args : "Non-owning span containing one GPU-written dispatch record."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, pipeline, or device fault." *>
-fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args) {
+fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_dispatch_indirect")!;
     return record.ops.dispatch_indirect(record, root, args);
 }
 
@@ -2180,15 +2193,18 @@ fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan 
    @param root : "Root GPU address passed unchanged to all ray-tracing stages."
    @param shader_binding_table : "Borrowed caller-owned SBT regions."
    @param dimensions : "Nonzero direct trace width, height, and depth within the selected device limits."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, pipeline, SBT, range, limit, ownership, or device fault." *>
 fn void? cmd_trace_rays(
     CommandList* commands,
     GpuAddress root,
     RayTracingShaderBindingTable* shader_binding_table,
     Vec3u dimensions,
+    char[] inline_root = {},
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_trace_rays")!;
     if (shader_binding_table == null) return INVALID_ARGUMENT~;
     return record.ops.trace_rays(
         record,
@@ -2206,15 +2222,18 @@ fn void? cmd_trace_rays(
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param shader_binding_table : "Borrowed caller-owned direct shader binding table regions."
    @param args : "Span beginning with one GPU-written TraceRaysIndirectCommand; FULL retains it through completion and TRUSTED requires caller-managed lifetime."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, range, pipeline, support, or device fault." *>
 fn void? cmd_trace_rays_indirect(
     CommandList* commands,
     GpuAddress root,
     RayTracingShaderBindingTable* shader_binding_table,
     GpuSpan args,
+    char[] inline_root = {},
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_trace_rays_indirect")!;
     if (shader_binding_table == null) return INVALID_ARGUMENT~;
     return record.ops.trace_rays_indirect(
         record,
@@ -2232,10 +2251,12 @@ fn void? cmd_trace_rays_indirect(
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param args : "Span beginning with one GPU-written TraceRaysIndirectCommand2; FULL retains the span but never the raw addresses inside it, and TRUSTED retains neither, so every referenced shader binding table allocation stays caller-owned through completion."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, range, pipeline, support, or device fault." *>
-fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpan args) {
+fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_trace_rays_indirect2")!;
     return record.ops.trace_rays_indirect2(record, root, args);
 }
 
@@ -2424,9 +2445,11 @@ fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
    @param vertex_count : "Vertices drawn per instance."
    @param instance_count : "Instances to draw."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, pipeline, state, limit, or device fault." *>
-fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count) {
+fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw")!;
     return record.ops.draw(
         record:        record,
         vertex_root:    vertex_root,
@@ -2450,9 +2473,11 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    @param index_count : "Indices drawn per instance."
    @param instance_count : "Instances to draw."
    @param index_type : "Index element width; defaults to U32."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, pipeline, state, or device fault." *>
-fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32) {
+fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_indexed")!;
     return record.ops.draw_indexed(
         record:        record,
         vertex_root:    vertex_root,
@@ -2476,9 +2501,11 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
    @param args : "Non-owning array of indirect draw records retained by the command."
    @param draw_count : "Number of indirect records to execute."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, pipeline, state, or device fault." *>
-fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count) {
+fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_indirect")!;
     return record.ops.draw_indirect(
         record:       record,
         vertex_root:   vertex_root,
@@ -2502,9 +2529,11 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    @param draw_count : "Number of indirect records to execute."
    @param index_span : "Non-owning index-data range retained by the command."
    @param index_type : "Index element width; defaults to U32."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, pipeline, state, or device fault." *>
-fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
+fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_indexed_indirect")!;
     return record.ops.draw_indexed_indirect(
         record:       record,
         vertex_root:   vertex_root,
@@ -2532,9 +2561,11 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    @param max_draw_count : "Maximum records the GPU count may select."
    @param index_span : "Non-owning index-data range retained by the command."
    @param index_type : "Index element width; defaults to U32."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, support, pipeline, state, or device fault." *>
-fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
+fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_indexed_indirect_count")!;
     return record.ops.draw_indexed_indirect_count(
         record:        record,
         vertex_root:    vertex_root,
