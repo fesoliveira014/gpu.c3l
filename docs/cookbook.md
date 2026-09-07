@@ -45,17 +45,16 @@ gpu::AllocationDesc staging_desc = {
     .memory_class = gpu::MemoryClass.CPU_WRITE,
     .access       = { .compute },
 };
-gpu::GpuAllocation staging = gpu::allocate_memory(device, &staging_desc)!;
-gpu::GpuSpan staging_span = gpu::get_allocation_span(device, staging)!;
-mem::copy(gpu::get_span_mapping(device, staging_span)!.ptr, bytes.ptr, bytes.len);
-gpu::flush_mapped_span(device, staging_span)!;
+gpu::MappedGpuSpan staging = gpu::allocate_mapped_memory(device, &staging_desc)!;
+mem::copy(staging.bytes.ptr, bytes.ptr, bytes.len);
+gpu::flush_mapped_span(device, staging.span)!;
 
 gpu::AllocationDesc private_desc = staging_desc;
 private_desc.memory_class = gpu::MemoryClass.GPU_PRIVATE;
 gpu::GpuAllocation buffer = gpu::allocate_memory(device, &private_desc)!;
 gpu::GpuSpan buffer_span = gpu::get_allocation_span(device, buffer)!;
 
-gpu::BufferCopyDesc copy = { .src = staging_span, .dst = buffer_span };
+gpu::BufferCopyDesc copy = { .src = staging.span, .dst = buffer_span };
 gpu::cmd_copy_buffer(commands, &copy)!;
 gpu::Barrier copy_to_compute = {
     .before = { .transfer },
@@ -64,7 +63,8 @@ gpu::Barrier copy_to_compute = {
 gpu::cmd_barrier(commands, &copy_to_compute)!;
 ```
 
-Free `staging` only after the copy's completion point completes.
+Free `staging.span.allocation()` only after the copy's completion point
+completes.
 
 ## Upload a texture
 
@@ -89,7 +89,7 @@ gpu::TextureBarrier to_dst = gpu::texture_transition(
 )!;
 gpu::cmd_texture_barrier(commands, &to_dst)!;
 
-gpu::BufferTextureCopyDesc upload = { .src = staging_span, .texture = texture };
+gpu::BufferTextureCopyDesc upload = { .src = staging.span, .texture = texture };
 gpu::cmd_copy_buffer_to_texture(commands, &upload)!;
 
 gpu::TextureBarrier to_sampled = gpu::texture_transition(
@@ -190,6 +190,19 @@ gpu::cmd_texture_barrier(commands, &to_sampled)!;
 The texture needs both `.storage` and `.sampled` usage. One texture cannot
 be in both layouts at once; split the uses with a transition.
 
+Unified mode (`DeviceDesc.unified_layouts`): no `cmd_texture_barrier` is
+needed. The library initializes the image at the next submit, and the
+write-before-sample hazard is a global barrier:
+
+```c3
+gpu::Barrier written = { .before = { .compute }, .after = { .fragment_shader } };
+gpu::cmd_barrier(commands, &written)!;
+```
+
+The same replacement applies to every texture barrier in this cookbook:
+delete the ones that only change a layout, and turn the ones that separate
+a write from a read into a `Barrier` over the same stages.
+
 ## Sample a cube map
 
 Create a cube-compatible texture, upload the six faces in one copy, and
@@ -277,7 +290,7 @@ gpu::ColorTargetDesc[1] colors = {{
     .store_op = gpu::StoreOp.STORE,
     .clear    = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
 }};
-gpu::RenderPassDesc pass = { .colors = colors[..], .width = WIDTH, .height = HEIGHT };
+gpu::RenderPassDesc pass = { .colors = colors[..] };
 gpu::GraphicsState state = gpu::render_geometry_state(WIDTH, HEIGHT)!;
 gpu::ColorTargetState[1] color_targets = { gpu::color_blend_disabled() };
 state.color.targets = color_targets[..];
@@ -370,7 +383,58 @@ gpu::cmd_draw_indexed(
 )!;
 ```
 
-There is no stencil.
+`DepthTargetDesc`'s zero stencil ops are `LOAD` and `STORE`, so a depth-only
+pass over a combined-format texture keeps its stencil plane; set `DONT_CARE`
+explicitly when stencil is unused.
+
+## Stencil mask
+
+Write an id into the stencil plane, then draw only where it matches.
+Stencil state is part of `GraphicsState`; `stencil_face` covers the two
+common faces:
+
+```c3
+gpu::DepthTargetDesc ds_target = {
+    .view             = ds_view,
+    .load_op          = gpu::LoadOp.CLEAR,
+    .store_op         = gpu::StoreOp.STORE,
+    .stencil_load_op  = gpu::LoadOp.CLEAR,
+    .stencil_store_op = gpu::StoreOp.STORE,
+    .clear            = { .depth = 1.0f, .stencil = 0 },
+};
+gpu::GraphicsState write_id = gpu::render_geometry_state(WIDTH, HEIGHT)!;
+write_id.stencil = {
+    .test_enable = true,
+    .front = gpu::stencil_face(gpu::CompareOp.ALWAYS, gpu::StencilOp.REPLACE, 1),
+    .back  = gpu::stencil_face(gpu::CompareOp.ALWAYS, gpu::StencilOp.REPLACE, 1),
+};
+gpu::GraphicsState masked = write_id;
+masked.stencil.front = gpu::stencil_face(gpu::CompareOp.EQUAL, gpu::StencilOp.KEEP, 1);
+masked.stencil.back  = masked.stencil.front;
+```
+
+The pipeline's `depth_format` is `DeviceCaps.depth_stencil_format`; draw the
+mask with `write_id` (color write mask zero), then the content with
+`masked`.
+
+## Read back stencil
+
+Copy one aspect at a time; the stencil aspect is one byte per texel and the
+depth aspect four:
+
+```c3
+gpu::TextureBufferCopyDesc stencil_copy = {
+    .texture = ds_texture,
+    .dst     = stencil_span,
+    .aspect  = gpu::TextureAspect.STENCIL,
+};
+gpu::cmd_copy_texture_to_buffer(commands, &stencil_copy)!;
+```
+
+Size `stencil_span` with `texture_mip_aspect_bytes(&desc, 0,
+gpu::TextureAspect.STENCIL)`. To read stencil in a shader, publish a view
+with `.aspect = STENCIL` and call `gpu_fetch_uint` from
+[the shader ABI](shader_abi.md#textures-and-samplers).
 
 ## Configure blending and multiple targets
 

@@ -17,6 +17,8 @@ struct AttachmentViewSlot {
     gpu::SampleCount   sample_count;
     uint               width;
     uint               height;
+    uint               mip_level;
+    uint               array_layer;
     bool               owns_native;
     bool               swapchain_owned;
     Atomic{uint}       tracked_command_references;
@@ -156,6 +158,8 @@ fn gpu::AttachmentViewHandle? vk_create_attachment_view(
         .sample_count = texture.sample_count,
         .width        = extent.width,
         .height       = extent.height,
+        .mip_level    = desc.mip_level,
+        .array_layer  = desc.array_layer,
         .owns_native  = owns_native,
     };
     gpu::AttachmentViewHandle handle = state.attachment_views.alloc(slot)!;

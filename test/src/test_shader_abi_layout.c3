@@ -110,6 +110,7 @@ fn void vector_alias_layouts() @test {
     assert(Vec2f::size == 8);
     assert(Vec4f::size == 16);
     assert(Vec4u::size == 16);
+    assert(Mat4f::size == 64);
     Vec4f a = { 1, 2, 3, 4 };
     Vec4f b = a * 2.0f + (Vec4f){ 1, 1, 1, 1 };
     assert(b[3] == 9.0f);

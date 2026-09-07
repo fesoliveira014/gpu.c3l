@@ -90,6 +90,7 @@ gpu::DeviceDesc desc = {
     .enable_sparse_textures       = false,
     .enable_ray_queries           = false,
     .enable_ray_tracing_pipelines = false,
+    .unified_layouts              = false,   // one image layout, no app transitions
 };
 gpu::Device device = gpu::create_device(&adapter, &desc)!;
 defer (void)gpu::destroy_device(&device);
@@ -140,7 +141,11 @@ uint max_targets = caps.max_color_attachments;
 - `max_sampler_lod_bias`, `max_sampler_anisotropy` (0 means unsupported);
 - `timestamps` (`TimestampCaps`), `sparse_textures` (`SparseTextureCaps`);
 - `acceleration_structures`, `ray_queries`, `ray_tracing_pipelines`. Each
-  is all-zero when its feature was not enabled.
+  is all-zero when its feature was not enabled;
+- `unified_layouts` (the mode is active) and `unified_layouts_optimal`
+  (`VK_KHR_unified_image_layouts` is enabled, so the one layout is free).
+  The mode is satisfiable on every device; the optimal flag depends on the
+  driver.
 
 `AccelerationStructureCaps` carries `indirect_build`, heap capacity, and
 maximum geometry, primitive, and instance counts.

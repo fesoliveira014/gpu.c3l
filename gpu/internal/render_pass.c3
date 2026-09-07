@@ -43,8 +43,7 @@ fn bool graphics_state_host_safe(GraphicsState* state) @private {
 
 fn bool render_pass_desc_valid(RenderPassDesc* desc) @private {
     if (!render_pass_desc_host_safe(desc)
-        || desc.width == 0
-        || desc.height == 0
+        || (desc.width == 0) != (desc.height == 0)
         || (desc.colors.len == 0 && desc.depth == null)) return false;
 
     foreach (&target : desc.colors) {
@@ -58,7 +57,9 @@ fn bool render_pass_desc_valid(RenderPassDesc* desc) @private {
     if (desc.depth != null
         && (!desc.depth.view.is_valid()
             || !load_op_valid(desc.depth.load_op)
-            || !store_op_valid(desc.depth.store_op))) return false;
+            || !store_op_valid(desc.depth.store_op)
+            || !load_op_valid(desc.depth.stencil_load_op)
+            || !store_op_valid(desc.depth.stencil_store_op))) return false;
     if (desc.depth != null
         && desc.depth.load_op == LoadOp.CLEAR
         && (!math::is_finite(desc.depth.clear.depth)

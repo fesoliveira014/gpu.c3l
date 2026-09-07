@@ -394,6 +394,9 @@ struct VkDeviceState @public {
     uint                 allocation_flush_calls;
     uint                 allocation_invalidate_calls;
     uint                 allocation_visibility_entries;
+    uint                 abandoned_allocation_reports;
+    uint                 abandoned_allocation_index;
+    uint                 abandoned_allocation_generation;
     uint                 texture_support_queries;
     uint                 texture_requirements_calls;
     uint                 texture_create_attempts;
@@ -406,6 +409,7 @@ struct VkDeviceState @public {
     gpu::DebugResourceKind root_diagnostic_resource_kind;
     ZString              root_diagnostic_rejected_field;
     ZString              root_diagnostic_invariant;
+    ZString              abandoned_allocation_debug_name;
     Atomic{bool}         destroy_entered;
     Atomic{bool}         destroy_release;
     Atomic{bool}         check_entered;
@@ -425,6 +429,7 @@ struct VkDeviceState @public {
     bool                 destroy_busy;
     bool                 publish_child_on_check;
     bool                 allocation_block_free;
+    bool                 mapping_unavailable;
     bool                 allocation_out_of_memory;
     bool                 texture_out_of_memory;
     bool                 block_memory_stats;
@@ -1420,6 +1425,17 @@ fn void? vk_free_allocation(
     state.allocation_live = false;
 }
 
+fn void vk_report_abandoned_allocation(
+    VkDeviceState* state,
+    gpu::GpuAllocation allocation,
+    ZString debug_name,
+) {
+    state.abandoned_allocation_reports++;
+    state.abandoned_allocation_index = allocation.index;
+    state.abandoned_allocation_generation = allocation.generation;
+    state.abandoned_allocation_debug_name = debug_name;
+}
+
 fn gpu::AllocationInfo? vk_get_allocation_info(
     VkDeviceState* state,
     gpu::GpuAllocation allocation,
@@ -1476,6 +1492,7 @@ fn char[]? vk_get_span_mapping(VkDeviceState* state, gpu::GpuSpan span) {
         || state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE) {
         return gpu::INVALID_ARGUMENT~;
     }
+    if (state.mapping_unavailable) return gpu::BACKEND_ERROR~;
     if (!gpu::internal::range_fits(
         state.allocation_desc.size,
         span.offset,
@@ -1853,6 +1870,7 @@ fn gpu::Device? create_vk_device(
         .presentation_enabled = normalized.surface.is_valid(),
         .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
         .max_sampler_anisotropy = STUB_SAMPLER_ANISOTROPY_LIMIT,
+        .depth_stencil_format = gpu::Format.D24_UNORM_S8_UINT,
         .acceleration_structures = (normalized.enable_ray_queries
                 || normalized.enable_ray_tracing_pipelines)
             ? (gpu::AccelerationStructureCaps){
@@ -1867,6 +1885,7 @@ fn gpu::Device? create_vk_device(
             }
             : {},
         .ray_queries = { .enabled = normalized.enable_ray_queries },
+        .unified_layouts = normalized.unified_layouts,
         .ray_tracing_pipelines = normalized.enable_ray_tracing_pipelines
             ? (gpu::RayTracingPipelineCaps){
                 .enabled = true,

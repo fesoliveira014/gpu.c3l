@@ -27,6 +27,7 @@ fn bool texture_layout_valid(TextureLayout layout) @private {
         case TextureLayout.COLOR_ATTACHMENT:
         case TextureLayout.DEPTH_ATTACHMENT:
         case TextureLayout.PRESENT:
+        case TextureLayout.GENERAL:
             return true;
         default:
             return false;

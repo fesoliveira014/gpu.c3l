@@ -42,18 +42,18 @@ fn void? run() {
     output_desc.memory_class = gpu::MemoryClass.CPU_READ;
     output_desc.debug_name = "output";
 
-    gpu::GpuAllocation input =
-        gpu::allocate_memory(&device, &input_desc)!;
-    defer (void)gpu::free_allocation(&device, &input);
-    gpu::GpuAllocation output =
-        gpu::allocate_memory(&device, &output_desc)!;
-    defer (void)gpu::free_allocation(&device, &output);
+    gpu::MappedGpuSpan input =
+        gpu::allocate_mapped_memory(&device, &input_desc)!;
+    gpu::GpuAllocation input_allocation = input.span.allocation();
+    defer (void)gpu::free_allocation(&device, &input_allocation);
+    gpu::MappedGpuSpan output =
+        gpu::allocate_mapped_memory(&device, &output_desc)!;
+    gpu::GpuAllocation output_allocation = output.span.allocation();
+    defer (void)gpu::free_allocation(&device, &output_allocation);
 
-    gpu::GpuSpan in_span = gpu::get_allocation_span(&device, input)!;
-    gpu::GpuSpan out_span = gpu::get_allocation_span(&device, output)!;
-    float* in_data = (float*)gpu::get_span_mapping(&device, in_span)!.ptr;
+    float* in_data = (float*)input.bytes.ptr;
     for (uint i = 0; i < COUNT; i++) in_data[i] = (float)i;
-    gpu::flush_mapped_span(&device, in_span)!;
+    gpu::flush_mapped_span(&device, input.span)!;
 
     gpu::ShaderDesc shader_desc = {
         .spirv       = DOUBLER_SPIRV[..],
@@ -72,21 +72,20 @@ fn void? run() {
         .access       = { .compute },
         .debug_name   = "doubler_root",
     };
-    gpu::GpuAllocation root_allocation =
-        gpu::allocate_memory(&device, &root_desc)!;
+    gpu::MappedGpuSpan root =
+        gpu::allocate_mapped_memory(&device, &root_desc)!;
+    gpu::GpuAllocation root_allocation = root.span.allocation();
     defer (void)gpu::free_allocation(&device, &root_allocation);
-    gpu::GpuSpan root_span =
-        gpu::get_allocation_span(&device, root_allocation)!;
 
     run_compute(
         device:      &device,
         pipeline:    pipeline,
-        input_span:  in_span,
-        output_span: out_span,
-        root_span:   root_span,
+        input_span:  input.span,
+        output_span: output.span,
+        root:        root,
     )!;
-    gpu::invalidate_mapped_span(&device, out_span)!;
-    float* out_data = (float*)gpu::get_span_mapping(&device, out_span)!.ptr;
+    gpu::invalidate_mapped_span(&device, output.span)!;
+    float* out_data = (float*)output.bytes.ptr;
     for (uint i = 0; i < COUNT; i++) {
         if (out_data[i] != (float)i * 2.0f) return gpu::INVALID_ARGUMENT~;
     }
@@ -97,16 +96,13 @@ fn void? run_compute(
     gpu::PipelineHandle pipeline,
     gpu::GpuSpan input_span,
     gpu::GpuSpan output_span,
-    gpu::GpuSpan root_span,
+    gpu::MappedGpuSpan root,
 ) {
-    DoublerRoot* root =
-        (DoublerRoot*)gpu::get_span_mapping(device, root_span)!.ptr;
-    gpu::GpuAddress root_address =
-        gpu::get_span_address(device, root_span)!;
-    root.input_gpu  = gpu::get_span_address(device, input_span)!;
-    root.output_gpu = gpu::get_span_address(device, output_span)!;
-    root.count      = COUNT;
-    gpu::flush_mapped_span(device, root_span)!;
+    DoublerRoot* record = (DoublerRoot*)root.bytes.ptr;
+    record.input_gpu  = gpu::get_span_address(device, input_span)!;
+    record.output_gpu = gpu::get_span_address(device, output_span)!;
+    record.count      = COUNT;
+    gpu::flush_mapped_span(device, root.span)!;
 
     gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE)!;
     gpu::CommandAllocator allocator =
@@ -117,7 +113,7 @@ fn void? run_compute(
     gpu::cmd_bind_pipeline(&commands, pipeline)!;
     gpu::cmd_dispatch(
         commands: &commands,
-        root:     root_address,
+        root:     root.address,
         groups:   { (COUNT + 63) / 64, 1, 1 },
     )!;
     gpu::Barrier to_host = {

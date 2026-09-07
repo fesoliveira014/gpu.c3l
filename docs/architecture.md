@@ -136,8 +136,8 @@ flowchart LR
 
 Allocations are not relocated, so a `GpuAddress` is stable until the
 allocation is freed. Host writes need `flush_mapped_span` before submission;
-host reads need `invalidate_mapped_span` after completion. On coherent memory
-both are no-ops, but the calls are always required.
+host reads need `invalidate_mapped_span` after completion. Both are required
+unless `AllocationInfo.coherent` is true, in which case they are no-ops.
 
 ## Textures and shader indices
 
@@ -201,8 +201,11 @@ command units. `begin_commands` takes a unit and returns a one-shot
 `CompletionPoint`. A rejected submit leaves the lists executable.
 
 The unit returns to the allocator when its completion point retires. An
-allocator with `DEFAULT_COMMAND_ALLOCATOR_CAPACITY` (8) units can therefore
-have 8 lists in flight.
+allocator with `DEFAULT_COMMAND_ALLOCATOR_CAPACITY` (32) units can therefore
+have 32 lists in flight. When no unit is free, `begin_commands` retires the
+queue's completed work once before reporting `DEVICE_BUSY`, so an
+application that never polls still reuses units after their work completes.
+Native command buffers are allocated on a unit's first use.
 
 Direct, indirect, and generated work share this lifecycle. Generated work
 (GPU-written roots plus arguments) is capability-gated and needs a
@@ -220,6 +223,14 @@ Two barrier kinds exist:
 Within one queue, order comes from command order plus barriers. Across
 queues, a `SubmitDesc.completion_waits` entry names a prior `CompletionPoint`
 and the stages that must wait for it.
+
+`DeviceDesc.unified_layouts` selects a second mode. Every texture lives in
+one layout; a `TextureBarrier` keeps its resource scope and its stage and
+access masks, and its layouts lower to that one layout (`UNDEFINED` keeps
+its discard meaning). The library initializes new textures at the next
+submit and transitions swapchain images inside the readiness submit.
+`DeviceCaps.unified_layouts_optimal` reports that the driver guarantees the
+one layout costs nothing.
 
 ```mermaid
 sequenceDiagram
@@ -247,6 +258,10 @@ sequenceDiagram
     Q-->>App: CompletionPoint p
     App->>SC: present(&image, p)
 ```
+
+In unified mode `prior_state.layout` is `GENERAL`, the application records
+no layout transitions, and the readiness submit carries the acquire and
+present transitions around the application's lists.
 
 Acquisition is nonblocking by default and returns `WAIT_TIMEOUT` when no
 image is ready. `SWAPCHAIN_OUT_OF_DATE` from acquire or present means resize.

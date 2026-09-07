@@ -32,6 +32,13 @@ fn void? compute_struct_layout(StructDecl* decl, TypeTable* types) {
     uint struct_align = 4;
     foreach (&field : decl.fields) {
         TypeInfo info = types.lookup(field.type_name, field.type_loc)!;
+        if (decl.kind == DeclKind.PUSH
+            && (field.array_len > 0
+                || info.kind == TypeKind.MATRIX
+                || info.kind == TypeKind.STRUCT_REF)) {
+            diagnostic(field.loc, "push members must be scalars, vectors, or semantic types");
+            return LAYOUT_ERROR~;
+        }
         if (info.alignment > struct_align) struct_align = info.alignment;
         uint aligned = align_up(cursor, info.alignment);
         if (aligned != cursor) {
@@ -40,7 +47,16 @@ fn void? compute_struct_layout(StructDecl* decl, TypeTable* types) {
             return LAYOUT_ERROR~;
         }
         field.offset = cursor;
-        cursor += info.size;
+        uint? size = field_size(field, &info);
+        if (catch err = size) {
+            diagnostic(field.loc, "field '%s' makes the struct larger than 4 GiB", field.name);
+            return LAYOUT_ERROR~;
+        }
+        if (size > uint::max - cursor) {
+            diagnostic(field.loc, "field '%s' makes the struct larger than 4 GiB", field.name);
+            return LAYOUT_ERROR~;
+        }
+        cursor += size;
     }
     uint total = align_up(cursor, struct_align);
     if (total != cursor) {

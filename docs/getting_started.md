@@ -158,21 +158,23 @@ gpu::AllocationDesc output_desc = input_desc;
 output_desc.memory_class = gpu::MemoryClass.CPU_READ;
 output_desc.debug_name = "output";
 
-gpu::GpuAllocation input = gpu::allocate_memory(&device, &input_desc)!;
-defer (void)gpu::free_allocation(&device, &input);
-gpu::GpuAllocation output = gpu::allocate_memory(&device, &output_desc)!;
-defer (void)gpu::free_allocation(&device, &output);
+gpu::MappedGpuSpan input = gpu::allocate_mapped_memory(&device, &input_desc)!;
+gpu::GpuAllocation input_allocation = input.span.allocation();
+defer (void)gpu::free_allocation(&device, &input_allocation);
+gpu::MappedGpuSpan output = gpu::allocate_mapped_memory(&device, &output_desc)!;
+gpu::GpuAllocation output_allocation = output.span.allocation();
+defer (void)gpu::free_allocation(&device, &output_allocation);
 ```
 
-`access` names the queue roles that will touch the memory. Write the input
-through its mapping and flush:
+`access` names the queue roles that will touch the memory.
+`allocate_mapped_memory` returns the span, its host mapping, and its GPU
+address in one value; `span.allocation()` names the token to free. Write
+the input through its mapping and flush:
 
 ```c3
-gpu::GpuSpan in_span = gpu::get_allocation_span(&device, input)!;
-gpu::GpuSpan out_span = gpu::get_allocation_span(&device, output)!;
-float* in_data = (float*)gpu::get_span_mapping(&device, in_span)!.ptr;
+float* in_data = (float*)input.bytes.ptr;
 for (uint i = 0; i < COUNT; i++) in_data[i] = (float)i;
-gpu::flush_mapped_span(&device, in_span)!;
+gpu::flush_mapped_span(&device, input.span)!;
 ```
 
 ### Pipeline
@@ -202,16 +204,15 @@ gpu::AllocationDesc root_desc = {
     .access       = { .compute },
     .debug_name   = "doubler_root",
 };
-gpu::GpuAllocation root_allocation = gpu::allocate_memory(&device, &root_desc)!;
+gpu::MappedGpuSpan root = gpu::allocate_mapped_memory(&device, &root_desc)!;
+gpu::GpuAllocation root_allocation = root.span.allocation();
 defer (void)gpu::free_allocation(&device, &root_allocation);
-gpu::GpuSpan root_span = gpu::get_allocation_span(&device, root_allocation)!;
 
-DoublerRoot* root = (DoublerRoot*)gpu::get_span_mapping(&device, root_span)!.ptr;
-root.input_gpu  = gpu::get_span_address(&device, in_span)!;
-root.output_gpu = gpu::get_span_address(&device, out_span)!;
-root.count      = COUNT;
-gpu::flush_mapped_span(&device, root_span)!;
-gpu::GpuAddress root_address = gpu::get_span_address(&device, root_span)!;
+DoublerRoot* record = (DoublerRoot*)root.bytes.ptr;
+record.input_gpu  = gpu::get_span_address(&device, input.span)!;
+record.output_gpu = gpu::get_span_address(&device, output.span)!;
+record.count      = COUNT;
+gpu::flush_mapped_span(&device, root.span)!;
 ```
 
 ### Record, submit, wait
@@ -226,7 +227,7 @@ defer (void)gpu::discard_commands(&commands);
 gpu::cmd_bind_pipeline(&commands, pipeline)!;
 gpu::cmd_dispatch(
     commands: &commands,
-    root:     root_address,
+    root:     root.address,
     groups:   { (COUNT + 63) / 64, 1, 1 },
 )!;
 gpu::Barrier to_host = {
@@ -251,8 +252,8 @@ submit; they only run on an early fault.
 ### Read back
 
 ```c3
-gpu::invalidate_mapped_span(&device, out_span)!;
-float* out_data = (float*)gpu::get_span_mapping(&device, out_span)!.ptr;
+gpu::invalidate_mapped_span(&device, output.span)!;
+float* out_data = (float*)output.bytes.ptr;
 for (uint i = 0; i < COUNT; i++) {
     if (out_data[i] != (float)i * 2.0f) return gpu::INVALID_ARGUMENT~;
 }
@@ -450,12 +451,9 @@ gpu::ColorTargetDesc[1] colors = {{
     .store_op = gpu::StoreOp.STORE,
     .clear    = { .rgba = { 0.04f, 0.05f, 0.10f, 1.0f } },
 }};
-gpu::RenderPassDesc pass = {
-    .colors = colors[..],
-    .width  = swapchain_info.width,
-    .height = swapchain_info.height,
-};
-gpu::GraphicsState state = gpu::render_geometry_state(pass.width, pass.height)!;
+gpu::RenderPassDesc pass = { .colors = colors[..] };
+gpu::GraphicsState state =
+    gpu::render_geometry_state(swapchain_info.width, swapchain_info.height)!;
 gpu::ColorTargetState[1] color_state = { gpu::color_blend_disabled() };
 state.color.targets = color_state[..];
 

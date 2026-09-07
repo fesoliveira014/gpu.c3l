@@ -57,7 +57,10 @@ indirect-count draws, generated work, line polygon mode, sparse textures,
 anisotropy, timestamps, and workload limits. Ray queries and ray-tracing
 pipelines are requested in `DeviceDesc` and also need a nonzero
 `RuntimeDesc.acceleration_structure_heap_capacity`. A request the adapter
-cannot satisfy fails atomically.
+cannot satisfy fails atomically. `DeviceDesc.unified_layouts` keeps every
+texture in one layout and is satisfiable everywhere;
+`DeviceCaps.unified_layouts_optimal` says whether the driver makes that
+layout free.
 
 Indirect acceleration-structure builds are reported separately by
 `AccelerationStructureCaps.indirect_build`. The recording path is covered
@@ -94,14 +97,18 @@ by CPU tests but has not run on hardware that reports the capability.
   cube-array views, and no format reinterpretation.
 - Multisample textures are 2D attachments with one mip. They are resolved,
   not sampled or copied.
-- Depth format is `D32_FLOAT`. There is no stencil.
+- Depth-stencil formats are `D32_FLOAT`, `D24_UNORM_S8_UINT`,
+  `D32_FLOAT_S8_UINT`, and `S8_UINT` where the device reports them. The two
+  aspects of a combined texture share one layout and transition together;
+  a copy or sampled view of a combined texture selects one aspect.
 - Block-compressed textures are sampled-only, single-sampled 2D images.
   They are not storage images, attachments, or sparse textures, and the
   library never encodes, decodes, or generates mips.
 - Sparse textures are single-layer, single-sample color 2D or 3D images.
-- A texture is either sampled or storage within one layout interval.
+- A texture is either sampled or storage within one layout interval, except
+  under `DeviceDesc.unified_layouts`.
 - `GraphicsState` has no default. Set a complete state before drawing.
-- The ABI schema has no matrix or fixed-array type.
+- The ABI schema's only matrix type is `mat4`; arrays are fixed-length.
 - One BLAS holds only triangles or only AABBs.
 
 ## Capacities
@@ -117,7 +124,7 @@ by CPU tests but has not run on hardware that reports the capability.
 | swapchains | — | 8 |
 | color attachments | — | min(8, device limit) |
 | command allocators per device | — | 256 |
-| command units per allocator | 8 | 4,096 |
+| command units per allocator | 32 | 4,096 |
 | retained references per list | 64 | 4,096 |
 | generated-work reservations per allocator | — | 64 × command units |
 

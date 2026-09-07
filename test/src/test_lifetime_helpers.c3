@@ -11,8 +11,13 @@ struct OwnedSpan {
 
 fn gpu::Device? create_test_device(
     gpu::RuntimeDesc* desc,
+    gpu::DeviceDesc* device_desc = null,
 ) {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
+    gpu::DeviceDesc effective = device_desc == null ? (gpu::DeviceDesc){} : *device_desc;
+    $if $feature(UNIFIED_LAYOUTS):
+        effective.unified_layouts = true;
+    $endif
     gpu::Runtime runtime = gpu::create_runtime(desc)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
@@ -21,7 +26,7 @@ fn gpu::Device? create_test_device(
         gpu::DeviceSupport support =
             gpu::supports_device_desc(&adapter)!;
         if (!support.supported) continue;
-        gpu::Device? device = gpu::create_device(&adapter);
+        gpu::Device? device = gpu::create_device(&adapter, &effective);
         if (catch err = device) {
             if (err == gpu::UNSUPPORTED_FEATURE) continue;
             return err~;

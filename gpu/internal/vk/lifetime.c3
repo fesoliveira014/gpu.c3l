@@ -140,9 +140,7 @@ fn void publish_pending_commands_locked(
         }
         completion.submitted_tail = record;
         completion.submitted_count++;
-        CommandAllocatorSlot* slot = state.command_allocators.get(
-            record.allocator,
-        )!!;
+        CommandAllocatorSlot* slot = record_allocator_slot(state, record);
         // The live executable forces destroy to release its claim before this retirement-held pin proceeds.
         pin_command_allocator_slot(slot);
         slot.mutex.lock()!!;
@@ -186,9 +184,7 @@ fn CommandRecord* release_pending_command_locked(
     CommandRecord* record,
 ) {
     CommandRecord* next = record.next_submitted;
-    CommandAllocatorSlot* slot = state.command_allocators.get(
-        record.allocator,
-    )!!;
+    CommandAllocatorSlot* slot = record_allocator_slot(state, record);
     // The in-flight buffer forces destroy to release its claim before this retirement-held pin proceeds.
     pin_command_allocator_slot(slot);
     slot.mutex.lock()!!;
@@ -208,6 +204,10 @@ fn CommandRecord* release_pending_command_locked(
     unlock_command_allocator(slot);
     gpu::internal::CommandListHandle identity = record.identity;
     gpu::Device owner = record.device;
+    if (record.init_textures.len > 0) {
+        release_pending_texture_inits(state, record.init_textures, false);
+        record.init_textures = {};
+    }
     record.submitted_completion = {};
     record.next_submitted = null;
     completion.submitted_count--;
@@ -369,6 +369,27 @@ fn void? retire_observed_completion_and_drain_with_query(
         observed_queue_id:  observed_queue_id,
         observed_completed: observed_completed,
         ops:                &ops,
+    )!;
+}
+
+<* Observe the queue's timeline and retire everything it has completed. *>
+fn void? retire_queue_latest_with_query(
+    VkDeviceState* state,
+    uint queue_id,
+    SemaphoreCounterQueryFn query_fn,
+) {
+    QueueCompletionState* completion = queue_completion_state(state, queue_id)!;
+    ulong current;
+    check_backend_result(
+        state:     state,
+        operation: "begin_commands",
+        result:    query_fn(state.device, completion.timeline, &current),
+    )!;
+    retire_observed_completion_and_drain_with_query(
+        state:              state,
+        observed_queue_id:  queue_id,
+        observed_completed: current,
+        query_fn:           query_fn,
     )!;
 }
 

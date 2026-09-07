@@ -216,6 +216,8 @@ struct CommandRecord @public {
     CommandScratch*                  scratch;
     uint                             pending_acceleration_structure_head;
     char[]                           inline_root;
+    bool                             internal;
+    gpu::TextureHandle[]             init_textures;
 }
 
 struct CommandOps @public {

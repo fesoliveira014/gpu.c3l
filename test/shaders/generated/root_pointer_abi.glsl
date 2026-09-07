@@ -17,4 +17,13 @@ layout(buffer_reference, std430, buffer_reference_align = 8) buffer ComputeRoot 
     uint _pad2;
 };
 
+layout(buffer_reference, std430, buffer_reference_align = 16) buffer MatrixRoot {
+    uint64_t output_gpu;
+    uint count;
+    uint _pad0;
+    mat4 transform;
+    vec4 planes[4];
+    uint ids[8];
+};
+
 #endif

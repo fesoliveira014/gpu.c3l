@@ -42,8 +42,8 @@ fn void emit_c3(Schema* schema, TypeTable* types, String module_name, DString* o
             out.appendf(decl.push_role != PushRole.NONE ? "struct %s @packed {\n" : "struct %s {\n", decl.name);
             foreach (&field : decl.fields) {
                 TypeInfo info = types.entries.get(field.type_name)!!;
-                out.appendf("    %s", info.c3_name);
-                for (usz i = info.c3_name.len; i < width; i++) out.append(" ");
+                usz spelled = append_c3_type(&info, field, out);
+                for (usz i = spelled; i < width; i++) out.append(" ");
                 out.appendf(" %s;\n", field.name);
             }
             out.append("}\n");
@@ -129,7 +129,29 @@ fn usz c3_type_width(StructDecl* decl, TypeTable* types) {
     usz width = 0;
     foreach (&field : decl.fields) {
         TypeInfo info = types.entries.get(field.type_name)!!;
-        if (info.c3_name.len > width) width = info.c3_name.len;
+        usz spelled = c3_type_len(&info, field);
+        if (spelled > width) width = spelled;
     }
     return width;
+}
+
+fn usz c3_type_len(TypeInfo* info, Field* field) {
+    if (field.array_len == 0) return info.c3_name.len;
+    return info.c3_name.len + 2 + decimal_len(field.array_len);
+}
+
+fn usz decimal_len(uint value) {
+    usz len = 1;
+    while (value >= 10) {
+        value /= 10;
+        len++;
+    }
+    return len;
+}
+
+<* Append the C3 spelling of a field type and return its length. *>
+fn usz append_c3_type(TypeInfo* info, Field* field, DString* out) {
+    out.appendf("    %s", info.c3_name);
+    if (field.array_len > 0) out.appendf("[%d]", field.array_len);
+    return c3_type_len(info, field);
 }

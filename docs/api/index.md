@@ -103,7 +103,7 @@ Functions: `full_validation_runtime_desc`, `create_runtime`,
 
 Types: `GpuAllocation`, `GpuSpan`, `MappedGpuSpan`, `GpuAddress`,
 `MemoryClass`, `AllocationDesc`, `AllocationInfo`, `MemoryHeapBudget`,
-`MemoryStats`, `TextureCompatibility`, `Format`, `SampleCount`, `Filter`,
+`MemoryStats`, `TextureCompatibility`, `Format`, `TextureAspect`, `SampleCount`, `Filter`,
 `AddressMode`, `TextureUsage`, `TextureFormatFeatures`,
 `TextureSampleCountSupport`, `TextureFormatSupport`, `TextureRequirements`,
 `SparseTextureAspect`, `SparseTextureAspectRequirements`,
@@ -137,14 +137,15 @@ Methods: `GpuAllocation.is_valid`, `GpuAllocation.equals`,
 `AccelerationStructureHandle.is_valid`,
 `AccelerationStructureHandle.equals`, `AccelerationStructureView.is_valid`,
 `AccelerationStructureView.equals`, `AccelerationStructureIndex.is_valid`,
-`GpuSpan.unchecked_subspan`, `GpuSpan.checked_subspan`,
+`GpuSpan.unchecked_subspan`, `GpuSpan.checked_subspan`, `GpuSpan.allocation`,
 `MappedGpuSpan.checked_subspan`, `TextureCompatibility.is_valid`.
 
-Functions: `allocate_memory`, `free_allocation`, `get_allocation_info`,
-`get_allocation_span`, `get_span_mapping`, `get_span_address`,
-`flush_mapped_span`, `invalidate_mapped_span`, `mapped_gpu_span`,
+Functions: `allocate_memory`, `allocate_mapped_memory`, `free_allocation`,
+`get_allocation_info`, `get_allocation_span`, `get_span_mapping`,
+`get_span_address`, `flush_mapped_span`, `invalidate_mapped_span`,
+`mapped_gpu_span`,
 `get_memory_stats`, `build_memory_report`, `texture_mip_dimension`,
-`texture_mip_bytes`, `get_texture_format_support`,
+`texture_mip_bytes`, `texture_mip_aspect_bytes`, `get_texture_format_support`,
 `supports_texture_desc`, `get_texture_requirements`, `create_texture`,
 `create_placed_texture`, `create_dedicated_texture`, `create_sparse_texture`,
 `get_sparse_texture_requirements`, `bind_sparse_texture_memory`,
@@ -160,7 +161,8 @@ Functions: `allocate_memory`, `free_allocation`, `get_allocation_info`,
 
 Types: `RootPush`, `GraphicsRootPush`, `GeneratedDrawRecord`,
 `GeneratedDrawIndexedRecord`, `GeneratedDispatchRecord`, `PipelineHandle`,
-`PrimitiveTopology`, `CompareOp`, `CullMode`, `FrontFace`, `PolygonMode`,
+`PrimitiveTopology`, `CompareOp`, `StencilOp`, `StencilFaceState`,
+`StencilState`, `CullMode`, `FrontFace`, `PolygonMode`,
 `BlendFactor`, `BlendOp`, `ColorWriteMask`, `ShaderDesc`, `DepthState`,
 `BlendState`, `ColorTargetState`, `ColorState`, `DynamicRasterState`,
 `ComputePipelineDesc`, `GraphicsPipelineDesc`, `RayTracingHitGroupKind`,
@@ -168,7 +170,7 @@ Types: `RootPush`, `GraphicsRootPush`, `GeneratedDrawRecord`,
 `RayTracingShaderGroupRange`, `RayTracingPipelineInfo`,
 `RayTracingShaderBindingTableRegion`, `RayTracingShaderBindingTable`.
 
-Constants: `PIPELINE_HANDLE_INVALID`, `COLOR_WRITE_ALL`, `MAX_PIPELINES`,
+Constants: `PIPELINE_HANDLE_INVALID`, `COLOR_WRITE_ALL`, `STENCIL_MASK_ALL`, `MAX_PIPELINES`,
 `MAX_COLOR_ATTACHMENTS`.
 
 Methods: `PipelineHandle.is_valid`, `PipelineHandle.equals`.
@@ -226,7 +228,7 @@ Functions: `create_command_allocator`, `destroy_command_allocator`,
 `cmd_draw_indexed_indirect`, `cmd_draw_indexed_indirect_count`,
 `cmd_draw_generated`, `cmd_draw_indexed_generated`,
 `create_attachment_view`, `destroy_attachment_view`,
-`render_geometry_state`, `cmd_begin_render_pass`, `cmd_set_graphics_state`,
+`render_geometry_state`, `stencil_face`, `cmd_begin_render_pass`, `cmd_set_graphics_state`,
 `cmd_end_render_pass`.
 
 ### [Synchronization and submission](synchronization_and_submission.md)

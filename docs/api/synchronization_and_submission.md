@@ -68,8 +68,17 @@ gpu::TextureState present   = { .layout = gpu::TextureLayout.PRESENT };
 
 Layouts: `UNDEFINED` (source only), `TRANSFER_SOURCE`,
 `TRANSFER_DESTINATION`, `SAMPLED`, `STORAGE`, `COLOR_ATTACHMENT`,
-`DEPTH_ATTACHMENT`, `PRESENT`. Zero access is valid only for `UNDEFINED`
+`DEPTH_ATTACHMENT`, `PRESENT`, and `GENERAL` (unified mode only; explicit
+mode faults `INVALID_ARGUMENT`). Zero access is valid only for `UNDEFINED`
 and `PRESENT`.
+
+Under `DeviceDesc.unified_layouts` every layout except `UNDEFINED` lowers
+to one image layout. Barriers keep their stage and access meaning and their
+subresource scope; the per-layout usage and access rules do not apply, so a
+texture may be written as storage and sampled within one interval. New
+textures are initialized by the library at the next submit; a texture
+created after one submit and first used by another is initialized by the
+second.
 
 Build a transition and record it:
 

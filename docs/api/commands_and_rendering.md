@@ -17,7 +17,7 @@ stateDiagram-v2
 ```c3
 gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
 gpu::CommandAllocatorDesc desc = {
-    .command_buffer_capacity          = 8,    // 0 selects 8
+    .command_buffer_capacity          = 8,    // 0 selects 32
     .max_resource_references_per_list = 64,   // 0 selects 64; FULL validation only
     .debug_name                       = "frame_allocator",
     .max_acceleration_structure_geometries_per_build = 0,  // >0 enables AS builds
@@ -46,8 +46,9 @@ gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
 defer (void)gpu::discard_executable_commands(&executable);
 ```
 
-`begin_commands` returns `DEVICE_BUSY` when no unit is free; wait on an
-older completion point and retry. `end_commands` consumes the recording
+`begin_commands` retires the queue's completed work when no unit is free
+and returns `DEVICE_BUSY` only if none retired; wait on an older
+completion point and retry. `end_commands` consumes the recording
 token. `submit` consumes the executable token. The deferred discards are
 no-ops after a successful consume and free the unit on an early fault.
 
@@ -115,7 +116,7 @@ gpu::ColorTargetDesc[1] colors = {{
     .store_op = gpu::StoreOp.STORE,
     .clear    = { .rgba = { 0, 0, 0, 1 } },
 }};
-gpu::DepthTargetDesc depth = {
+gpu::DepthTargetDesc depth = {          // stencil ops default to LOAD / STORE
     .view     = depth_view,
     .load_op  = gpu::LoadOp.CLEAR,
     .store_op = gpu::StoreOp.DONT_CARE,
@@ -124,8 +125,6 @@ gpu::DepthTargetDesc depth = {
 gpu::RenderPassDesc pass = {
     .colors = colors[..],
     .depth  = &depth,          // null for no depth
-    .width  = width,
-    .height = height,
 };
 
 gpu::cmd_begin_render_pass(&commands, &pass)!;
@@ -134,6 +133,11 @@ gpu::cmd_set_graphics_state(&commands, &state)!;
 // draws ...
 gpu::cmd_end_render_pass(&commands)!;
 ```
+
+A zero `width` and `height` select the first color attachment's extent, or
+the depth attachment's when there is no color target. Explicit values must
+fit every attachment. `render_geometry_state` still takes explicit
+dimensions.
 
 The required order inside a pass: bind a compatible pipeline, set a
 complete `GraphicsState`, draw. Pass begin does not bind, set, or
@@ -154,6 +158,11 @@ views after their last submitted use retires.
 ```c3
 gpu::GraphicsState state = gpu::render_geometry_state(width, height)!;
 state.color.targets = targets[..];
+state.stencil = {
+    .test_enable = true,
+    .front = gpu::stencil_face(gpu::CompareOp.EQUAL, gpu::StencilOp.KEEP, 1),
+    .back  = gpu::stencil_face(gpu::CompareOp.EQUAL, gpu::StencilOp.KEEP, 1),
+};
 gpu::cmd_set_graphics_state(&commands, &state)!;
 
 gpu::Viewport half = { .width = width / 2.0f, .height = (float)height, .max_depth = 1.0f };
@@ -163,7 +172,12 @@ gpu::cmd_set_scissor(&commands, &clip)!;
 ```
 
 `cmd_set_graphics_state` applies the whole packet. `cmd_set_viewport` and
-`cmd_set_scissor` override one field each after a complete state exists.
+`cmd_set_scissor` override one field each after a complete state exists. An
+enabled stencil test with an undefined `CompareOp` or `StencilOp` faults
+`INVALID_ARGUMENT` under every policy. Under `FULL`, an enabled stencil
+test on a pipeline without a stencil aspect reports a `performance`
+diagnostic, and a stencil `LOAD` after a `DONT_CARE` stencil store on the
+same texture reports a `public_contract` diagnostic; neither faults.
 Binding a pipeline or beginning a pass does not reset state. Fields are
 described in [shaders and pipelines](shaders_and_pipelines.md#graphics-pipelines).
 
