@@ -7,6 +7,12 @@ recipes are at the [end](#ray-tracing).
 
 ## Select a device
 
+[`DeviceContext`](util/device_context.md) selects the highest-ranked supported
+adapter and creates the runtime, device, and command allocator together. Override
+its `select_adapter` callback for application selection policy, or use the manual
+recipe below. Its [shutdown sequence](util/device_context.md#shutdown) also covers
+presentation completion and resources added by these recipes.
+
 Iterate adapters and take the first that supports the description:
 
 ```c3

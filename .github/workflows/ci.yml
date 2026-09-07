@@ -98,6 +98,7 @@ jobs:
           c3c build span_data_operations --path test/cpu
           c3c build sampler_operations --path test/cpu
           c3c build texture_view_operations --path test/cpu
+          c3c build device_context_operations --path test/cpu
           c3c build command_wrapper_bench --path test/cpu -O1
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
@@ -117,6 +118,11 @@ jobs:
         run: |
           c3c build hello_gpu --path examples/getting_started
           ./examples/getting_started/build/hello_gpu
+
+      - name: Run device-context consumer
+        run: |
+          c3c build device_context --path examples/device_context
+          ./examples/device_context/build/device_context
 
       - name: Run combined distribution consumer
         run: |
@@ -326,6 +332,7 @@ jobs:
           c3c build span_data_operations --path test/cpu
           c3c build sampler_operations --path test/cpu
           c3c build texture_view_operations --path test/cpu
+          c3c build device_context_operations --path test/cpu
           c3c build command_wrapper_bench --path test/cpu -O1
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
@@ -356,6 +363,11 @@ jobs:
         run: |
           c3c build hello_gpu --path examples/getting_started
           ./examples/getting_started/build/hello_gpu.exe
+
+      - name: Run device-context consumer
+        run: |
+          c3c build device_context --path examples/device_context
+          ./examples/device_context/build/device_context.exe
 
       - name: Run combined distribution consumer
         run: |

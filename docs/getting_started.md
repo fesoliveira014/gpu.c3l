@@ -64,6 +64,12 @@ a runtime bug.
 
 ## Step 1: double an array on the GPU
 
+The examples below show manual setup. For a shorter bootstrap, use the bundled
+[`DeviceContext`](util/device_context.md#headless-use) helper: it supplies a
+runtime, supported device, queue, and command allocator for the same resource
+and command calls. A [surface factory](util/device_context.md#presentation-use)
+adds windowed presentation. Work submission and shutdown remain explicit.
+
 Complete source:
 [`examples/getting_started/src/main.c3`](https://github.com/fesoliveira014/gpu.c3l/blob/main/examples/getting_started/src/main.c3).
 Shader:

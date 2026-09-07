@@ -211,6 +211,7 @@ const uint  STUB_SAMPLER_CAPACITY       @private = 16;
 const float STUB_SAMPLER_LOD_BIAS_LIMIT @private = 16.0f;
 const float STUB_SAMPLER_ANISOTROPY_LIMIT @private = 16.0f;
 const uint STUB_COMMAND_CAPACITY @private = 64;
+const uint STUB_ADAPTER_CAPACITY @private = 16;
 
 struct CommandRecord @public {
     CommandOps*                      ops;
@@ -460,6 +461,7 @@ struct VkDeviceState @public {
     bool                 free_on_destroy;
     bool                 reject_allocator_create;
     bool                 reject_allocator_destroy;
+    bool                 reject_swapchain_destroy;
     bool                 return_invalid_allocator;
     bool                 return_foreign_allocator;
     bool[STUB_COMMAND_CAPACITY] command_used;
@@ -484,6 +486,16 @@ fn void stub_set_acceleration_structure(
 }
 
 uint configured_adapter_count @private = 1;
+gpu::AdapterClass[STUB_ADAPTER_CAPACITY] configured_adapter_classes @private;
+bool[STUB_ADAPTER_CAPACITY] configured_adapter_class_overrides @private;
+bool[STUB_ADAPTER_CAPACITY] configured_adapter_unsupported @private;
+bool configured_allocator_create_failure @private;
+bool configured_swapchain_create_failure @private;
+bool configured_device_destroy_failure @private;
+gpu::Device last_created_device @private;
+uint allocator_destroy_attempts @private;
+uint swapchain_destroy_attempts @private;
+uint context_wait_calls @private;
 bool configured_device_baseline_support @private = true;
 bool configured_ray_query_support @private = true;
 bool configured_ray_tracing_pipeline_support @private = true;
@@ -633,6 +645,7 @@ fn void? vk_wait_completion(
     ulong sequence,
     ulong timeout_ns,
 ) {
+    context_wait_calls++;
     if (state == null) return gpu::INVALID_HANDLE~;
     state.completion_wait_calls++;
     state.completion_last_queue_id = queue_id;
@@ -702,6 +715,7 @@ fn gpu::CommandAllocatorHandle? vk_create_command_allocator(
     state.allocator_creates++;
     state.allocator_queue = queue;
     state.allocator_desc = *desc;
+    if (configured_allocator_create_failure) return gpu::DEVICE_BUSY~;
     if (state.reject_allocator_create) return gpu::DEVICE_BUSY~;
     if (state.return_invalid_allocator) return {};
     gpu::CommandAllocatorHandle handle = {
@@ -722,6 +736,7 @@ fn void? vk_destroy_command_allocator(
 ) {
     if (state == null) return gpu::INVALID_HANDLE~;
     state.allocator_destroy_calls++;
+    allocator_destroy_attempts++;
     if (!handle.is_valid()) return gpu::INVALID_HANDLE~;
     if (state.reject_allocator_destroy) return gpu::RESOURCE_IN_USE~;
 }
@@ -992,7 +1007,9 @@ fn gpu::AdapterInfo? vk_get_adapter_info(VkRuntimeState* state, uint index) {
     if (state == null || index >= state.adapter_count) return gpu::INVALID_HANDLE~;
     return {
         .name             = index == 0 ? "stub adapter 0" : "stub adapter 1",
-        .device_class     = gpu::AdapterClass.SOFTWARE,
+        .device_class     = index < configured_adapter_classes.len
+            && configured_adapter_class_overrides[index]
+            ? configured_adapter_classes[index] : gpu::AdapterClass.SOFTWARE,
         .memory           = {
             .device_local_bytes = 1024,
             .host_visible_bytes = 1024,
@@ -1015,7 +1032,9 @@ fn bool? vk_adapter_supports_device_baseline(
     if (state == null || adapter_index >= state.adapter_count) {
         return gpu::INVALID_ARGUMENT~;
     }
-    return configured_device_baseline_support;
+    return configured_device_baseline_support
+        && !(adapter_index < configured_adapter_unsupported.len
+            && configured_adapter_unsupported[adapter_index]);
 }
 
 fn bool? vk_adapter_supports_ray_queries(
@@ -1213,6 +1232,8 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
 
 fn void stub_set_adapter_count(uint count) {
     configured_adapter_count = count;
+    configured_adapter_class_overrides = {};
+    configured_adapter_unsupported = {};
     configured_device_baseline_support = true;
     configured_ray_query_support = true;
     configured_ray_tracing_pipeline_support = true;
@@ -1223,6 +1244,37 @@ fn void stub_set_adapter_count(uint count) {
     configured_single_queue_support = true;
     configured_single_queue_presentation_support = true;
 }
+
+fn void stub_set_adapter_class(uint index, gpu::AdapterClass device_class) {
+    assert(index < configured_adapter_classes.len);
+    configured_adapter_classes[index] = device_class;
+    configured_adapter_class_overrides[index] = true;
+}
+
+fn void stub_set_adapter_supported(uint index, bool supported) {
+    assert(index < configured_adapter_unsupported.len);
+    configured_adapter_unsupported[index] = !supported;
+}
+
+fn void stub_set_context_creation_failures(bool allocator, bool swapchain, bool device_destroy = false) {
+    configured_allocator_create_failure = allocator;
+    configured_swapchain_create_failure = swapchain;
+    configured_device_destroy_failure = device_destroy;
+}
+
+fn gpu::Device stub_last_created_device() => last_created_device;
+
+fn void stub_reset_context_counts() {
+    allocator_destroy_attempts = 0;
+    swapchain_destroy_attempts = 0;
+    context_wait_calls = 0;
+}
+
+fn uint stub_allocator_destroy_attempt_count() => allocator_destroy_attempts;
+
+fn uint stub_swapchain_destroy_attempt_count() => swapchain_destroy_attempts;
+
+fn uint stub_context_wait_count() => context_wait_calls;
 
 fn void stub_set_device_baseline_support(bool supported) {
     configured_device_baseline_support = supported;
@@ -1783,6 +1835,7 @@ fn gpu::SwapchainHandle? vk_create_swapchain(
     swapchain_create_attempts++;
     if (state == null || surface == null || desc == null) return gpu::INVALID_ARGUMENT~;
     if (state.swapchain_live) return gpu::INVALID_RESOURCE_STATE~;
+    if (configured_swapchain_create_failure) return gpu::BACKEND_ERROR~;
 
     gpu::internal::surface_retain_swapchain(surface)!;
     state.surface = *surface;
@@ -1810,6 +1863,7 @@ fn void? vk_wait_swapchain_presentations(
     gpu::SwapchainHandle handle,
     ulong timeout_ns,
 ) {
+    context_wait_calls++;
     if (state == null || !state.swapchain_live || state.swapchain != handle) {
         return gpu::INVALID_HANDLE~;
     }
@@ -1827,8 +1881,10 @@ fn void? vk_destroy_swapchain(
     VkDeviceState* state,
     gpu::SwapchainHandle handle,
 ) {
+    swapchain_destroy_attempts++;
     if (state == null || !state.swapchain_live) return gpu::INVALID_HANDLE~;
     if (state.swapchain != handle) return gpu::INVALID_HANDLE~;
+    if (state.reject_swapchain_destroy) return gpu::RESOURCE_IN_USE~;
 
     gpu::internal::surface_release_swapchain(&state.surface)!;
     state.surface = {};
@@ -1937,6 +1993,7 @@ fn gpu::Device? create_vk_device(
     if (fail_device_after_temporary_allocation) return gpu::BACKEND_ERROR~;
 
     state.adapter = *adapter;
+    state.destroy_busy = configured_device_destroy_failure;
     last_device_adapter = *adapter;
     gpu::internal::QueueSelection queues = gpu::internal::queue_selection_for_request(
         request:                    normalized.queues,
@@ -1997,7 +2054,7 @@ fn gpu::Device? create_vk_device(
             }
             : {},
     };
-    return gpu::internal::register_device(
+    gpu::Device device = gpu::internal::register_device(
         state:                state,
         caps:                 caps,
         resource_owner:       state.resource_owner,
@@ -2008,5 +2065,7 @@ fn gpu::Device? create_vk_device(
             : null,
         queues: queues,
         owner:  &state.owner,
-    );
+    )!;
+    last_created_device = device;
+    return device;
 }

@@ -10,6 +10,7 @@
     "../../gpu/gpu.c3i",
     "../../gpu/gpu.c3",
     "../../gpu/surface/**",
+    "../../gpu/util/**",
     "../../gpu/internal/runtime.c3",
     "../../gpu/internal/adapter.c3",
     "../../gpu/internal/acceleration_structure.c3",
@@ -67,6 +68,12 @@
         "sampler_operations.c3"
       ]
     },
+    "device_context_operations": {
+      "type": "object-files",
+      "sources": [
+        "device_context_operations.c3"
+      ]
+    },
     "texture_view_operations": {
       "type": "object-files",
       "sources": [
@@ -85,6 +92,7 @@
         "../src/test_timestamp_values.c3",
         "../src/test_sampler_identity.c3",
         "../src/test_runtime.c3",
+        "../src/test_device_context.c3",
         "../src/test_device_desc.c3",
         "../src/test_device_support.c3",
         "../src/test_device_creation.c3",

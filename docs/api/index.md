@@ -1,7 +1,8 @@
 # Public API
 
 The public module is `gpu`. Surface creation is in `gpu::surface::wayland`,
-`gpu::surface::x11`, and `gpu::surface::win32`. Everything under
+`gpu::surface::x11`, and `gpu::surface::win32`. Optional setup helpers are in
+[`gpu::util`](../util/index.md). Everything under
 `gpu::internal` is private.
 
 Each domain page walks through setup and use of its objects, then lists
@@ -36,6 +37,10 @@ descriptor.
 handle valid on `RESOURCE_IN_USE` or `DEVICE_BUSY`. One-shot tokens
 (`CommandList`, `ExecutableCommandList`, `SwapchainReadiness`,
 `AcquiredImage`) are consumed only by the documented successful call.
+
+The optional [device context utility](../util/device_context.md#shutdown)
+groups these lifecycle calls with best-effort cleanup: teardown reports faults
+and clears the context, so it cannot be retried.
 
 **Concurrency.** The [threading table](../architecture.md#threading) defines
 external synchronization, thread-safe operations, and recording confinement.
@@ -76,6 +81,15 @@ lifecycle are always checked. `FULL` validation adds semantic diagnostics.
 Runtime faults can occur under any policy.
 
 ## Symbol map
+
+### [Device context utilities](../util/device_context.md)
+
+Module: `gpu::util`.
+
+Types: `SurfaceFactory`, `AdapterSelector`, `DeviceContextDesc`, `DeviceContext`.
+
+Functions: `default_device_context_desc`, `create_device_context`,
+`destroy_device_context`.
 
 ### [Runtime and devices](runtime_and_devices.md)
 
