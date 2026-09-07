@@ -11,7 +11,7 @@ permissions:
 
 env:
   C3C_VERSION: "0.8.3"
-  VULKAN_SDK_VERSION: "1.3.290.0"
+  VULKAN_SDK_VERSION: "1.4.357.0"
   MESA_DIST_WIN_VERSION: "25.1.5"
 
 jobs:
@@ -73,10 +73,30 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Install shader tools and lavapipe
+      - name: Install lavapipe and SDK dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y glslc mesa-vulkan-drivers spirv-tools vulkan-validationlayers vulkan-tools
+          sudo apt-get install -y mesa-vulkan-drivers vulkan-tools xz-utils libxcb-xinput0 libxcb-xinerama0 libxcb-cursor0
+
+      - name: Cache Vulkan SDK
+        uses: actions/cache@v4
+        with:
+          path: ~/tools/vulkan
+          key: vulkan-linux-${{ env.VULKAN_SDK_VERSION }}
+
+      - name: Install Vulkan SDK
+        run: |
+          if [ ! -f ~/tools/vulkan/x86_64/lib/libVkLayer_khronos_validation.so ]; then
+            mkdir -p ~/tools/vulkan
+            curl -fsSL -o /tmp/vulkan-sdk.tar.xz \
+              "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/linux/vulkan_sdk.tar.xz"
+            tar -xJf /tmp/vulkan-sdk.tar.xz -C ~/tools/vulkan --strip-components=1
+          fi
+          SDK_ROOT="$HOME/tools/vulkan/x86_64"
+          echo "VULKAN_SDK=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "VK_LAYER_PATH=$SDK_ROOT/share/vulkan/explicit_layer.d" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$SDK_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/bin" >> "$GITHUB_PATH"
 
       - name: Select lavapipe and validation
         run: |
@@ -226,7 +246,7 @@ jobs:
         run: |
           if [ ! -d ~/tools/VulkanSDK/Include ]; then
             curl -fsSL -o /tmp/vulkan-sdk.exe \
-              "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/windows/VulkanSDK-${VULKAN_SDK_VERSION}-Installer.exe"
+              "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/windows/vulkan_sdk.exe"
             /tmp/vulkan-sdk.exe --root "$(cygpath -w "$HOME/tools/VulkanSDK")" \
               --accept-licenses --default-answer --confirm-command install
           fi
@@ -240,7 +260,7 @@ jobs:
         run: |
           if [ ! -f ~/tools/VulkanRT/x64/vulkan-1.dll ]; then
             curl -fsSL -o /tmp/vulkanrt.zip \
-              "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/windows/VulkanRT-${VULKAN_SDK_VERSION}-Components.zip"
+              "https://sdk.lunarg.com/sdk/download/${VULKAN_SDK_VERSION}/windows/VulkanRT-X64-${VULKAN_SDK_VERSION}-Components.zip"
             mkdir -p ~/tools/VulkanRT
             unzip -q -j /tmp/vulkanrt.zip -d ~/tools/VulkanRT/x64 "*/x64/vulkan-1.dll" || unzip -q /tmp/vulkanrt.zip -d ~/tools/VulkanRT
             find ~/tools/VulkanRT -iname vulkan-1.dll

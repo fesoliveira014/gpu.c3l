@@ -40,6 +40,7 @@ All symbols below are in `gpu::util`.
 | `queue` | `gpu::Queue` borrowed from `device`; no separate destruction. |
 | `command_allocator` | Owned `gpu::CommandAllocator`. |
 | `swapchain` | Owned `gpu::SwapchainHandle`, invalid for headless contexts. |
+| `swapchain_info` | `gpu::SwapchainInfo` snapshot of the actual created swapchain; zero for headless contexts. |
 | `debug_callback`, `debug_user_data` | Saved `gpu::DebugMessageCallback` and borrowed user data for teardown diagnostics. |
 
 Pass a context by pointer. Copies do not create independent owners: do not
@@ -145,6 +146,11 @@ fn util::DeviceContext? create_window_context(NativeWindow* window, uint width, 
 Use `context.device`, `context.queue`, and `context.swapchain` with the ordinary
 [acquire, submit, and present sequence](../api/presentation_and_diagnostics.md).
 Resize, event processing, and frame scheduling remain application-controlled.
+`context.swapchain_info` contains the selected format, extent, image count,
+presentation mode, and dormant state, as returned by `get_swapchain_info` during
+creation. It is not a copy of the requested description. After a successful
+resize, assign a fresh `get_swapchain_info` result to the field; direct GPU calls
+do not update the cached snapshot. Ignore this field when `swapchain` is invalid.
 
 The factory runs synchronously once, after successful adapter enumeration and
 before selection. It must return one fresh surface owned by the supplied runtime,
@@ -176,6 +182,7 @@ validation, allocation, capacity, and device faults also propagate.
 Creation performs no submissions, acquisitions, waits, or background work. If a
 stage fails, it attempts reverse cleanup of acquired objects, discards secondary
 cleanup faults, and returns the original fault without publishing a context.
+This includes destroying the new swapchain if its initial info query faults.
 Treat creation failure as fatal at application level: report it and terminate.
 The utility itself does not abort, exit, retry, or retain recovery state.
 
