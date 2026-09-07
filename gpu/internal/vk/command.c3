@@ -129,9 +129,20 @@ struct CommandRecordingOps @private {
     EndCommandBufferFn   end;
 }
 
+
+<* One stencil subresource whose last recorded store in this list was
+   DONT_CARE. *>
+struct StencilDiscardKey {
+    gpu::TextureHandle texture;
+    uint               mip_level;
+    uint               array_layer;
+}
+
 struct CommandScratch {
     CommandResourceReference[] references;
     uint                       reference_count;
+    StencilDiscardKey[] stencil_discards;
+    uint                stencil_discard_count;
     uint[]                     generated_preprocess_indices;
     uint                       generated_preprocess_count;
     vk::AccelerationStructureGeometryKHR[]
@@ -149,6 +160,7 @@ struct CommandAllocatorSlot {
     vk::CommandBuffer[]          command_buffers;
     CommandScratch[]             scratch;
     CommandResourceReference[]   reference_storage;
+    StencilDiscardKey[]          stencil_discard_storage;
     uint[]                       preprocess_index_storage;
     vk::AccelerationStructureGeometryKHR[]
         acceleration_structure_geometry_storage;
@@ -307,6 +319,9 @@ fn void destroy_command_allocator_slot_with_ops(
     if (slot.reference_storage.ptr != null) {
         alloc::free(state.host_allocator, slot.reference_storage.ptr);
     }
+    if (slot.stencil_discard_storage.ptr != null) {
+        alloc::free(state.host_allocator, slot.stencil_discard_storage.ptr);
+    }
     if (slot.preprocess_index_storage.ptr != null) {
         alloc::free(state.host_allocator, slot.preprocess_index_storage.ptr);
     }
@@ -392,6 +407,13 @@ fn void? initialize_command_allocator_slot_with_ops(
             return gpu::OUT_OF_HOST_MEMORY~;
         }
         slot.reference_storage = reference_storage;
+        StencilDiscardKey[]? stencil_storage = alloc::new_array_try(
+            state.host_allocator,
+            StencilDiscardKey,
+            (usz)capacity * (usz)reference_capacity,
+        );
+        if (catch err = stencil_storage) return gpu::OUT_OF_HOST_MEMORY~;
+        slot.stencil_discard_storage = stencil_storage;
     }
     uint acceleration_structure_geometry_capacity =
         desc.max_acceleration_structure_geometries_per_build;
@@ -427,6 +449,9 @@ fn void? initialize_command_allocator_slot_with_ops(
         if (reference_capacity > 0) {
             usz start = (usz)i * (usz)reference_capacity;
             slot.scratch[i].references = slot.reference_storage[
+                start:reference_capacity
+            ];
+            slot.scratch[i].stencil_discards = slot.stencil_discard_storage[
                 start:reference_capacity
             ];
         }
@@ -928,6 +953,7 @@ fn void return_allocator_buffer_locked(
 ) {
     CommandScratch* scratch = &slot.scratch[buffer_index];
     scratch.reference_count = 0;
+    scratch.stencil_discard_count = 0;
     scratch.generated_preprocess_count = 0;
     scratch.acceleration_structure_geometry_count = 0;
     scratch.in_use = false;
@@ -1014,6 +1040,7 @@ fn void? vk_begin_commands_with_ops(
     CommandScratch* scratch = &slot.scratch[buffer_index];
     scratch.in_use = true;
     scratch.reference_count = 0;
+    scratch.stencil_discard_count = 0;
     scratch.generated_preprocess_count = 0;
     scratch.acceleration_structure_geometry_count = 0;
     slot.live_recordings++;
@@ -1563,8 +1590,11 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
     uint width,
     uint height,
     uint depth,
+    gpu::TextureAspect aspect = gpu::TextureAspect.AUTO,
 ) @private {
     if (mip >= slot.mip_levels) return gpu::INVALID_ARGUMENT~;
+    if (!gpu::internal::texture_aspect_valid(aspect)) return gpu::INVALID_ARGUMENT~;
+    vk::ImageAspectFlags aspect_mask = resolve_aspect(slot.format, aspect)!;
     MipExtent extent = texture_mip_extent(slot, mip);
     bool is_3d = texture_slot_is_3d(slot);
     if (x > extent.width || y > extent.height) {
@@ -1602,7 +1632,7 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
         return gpu::INVALID_ARGUMENT~;
     }
 
-    gpu::internal::FormatBlock block = gpu::internal::format_block(slot.format);
+    gpu::internal::FormatBlock block = gpu::internal::format_aspect_block(slot.format, aspect);
     if (block.bytes == 0) return gpu::INVALID_ARGUMENT~;
     if (x % block.width != 0 || y % block.height != 0) {
         return gpu::INVALID_ARGUMENT~;
@@ -1635,7 +1665,7 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
         .buffer_row_length   = row_length_texels,
         .buffer_image_height = 0,
         .image_subresource   = {
-            .aspect_mask      = format_aspect(slot.format),
+            .aspect_mask      = aspect_mask,
             .mip_level        = mip,
             .base_array_layer = is_3d ? 0 : base_layer,
             .layer_count      = is_3d ? 1 : layers,
@@ -1689,6 +1719,7 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
             width:             desc.width,
             height:            desc.height,
             depth:             desc.depth,
+            aspect:            desc.aspect,
         )!,
     };
 }
@@ -1762,6 +1793,7 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
             width:             desc.width,
             height:            desc.height,
             depth:             desc.depth,
+            aspect:            desc.aspect,
         )!,
     };
 }

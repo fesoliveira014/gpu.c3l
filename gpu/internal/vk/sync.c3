@@ -72,7 +72,7 @@ struct BarrierEmitOps {
 }
 
 fn bool texture_format_is_depth_stencil(gpu::Format format) @private {
-    return format == gpu::Format.D32_FLOAT;
+    return gpu::internal::format_is_depth_stencil(format);
 }
 
 fn bool texture_layout_known(gpu::TextureLayout layout) @private {
@@ -430,10 +430,10 @@ fn TextureBarrierRejection texture_state_rejection(
                     .invariant = "storage textures require read, write, or read-write access",
                 };
             }
-            if (!slot.usage.storage) {
+            if (depth_stencil || !slot.usage.storage) {
                 return {
                     .field     = texture_state_field(side, TextureStateMember.LAYOUT),
-                    .invariant = "texture usage must include storage",
+                    .invariant = "storage requires a non-depth texture with storage usage",
                 };
             }
         case gpu::TextureLayout.COLOR_ATTACHMENT:
@@ -505,7 +505,8 @@ fn vk::ImageSubresourceRange? resolve_texture_barrier_range(
     gpu::TextureViewDesc view,
     TextureSlot* slot,
 ) @private {
-    if (view.base_mip >= slot.mip_levels
+    if (view.aspect != gpu::TextureAspect.AUTO
+        || view.base_mip >= slot.mip_levels
         || view.base_layer >= slot.array_layers) {
         return gpu::INVALID_ARGUMENT~;
     }

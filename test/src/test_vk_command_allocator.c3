@@ -490,7 +490,7 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
     };
     gpu::Queue queue = { .id = 0 };
 
-    for (uint fail_on = 1; fail_on <= 7; fail_on++) {
+    for (uint fail_on = 1; fail_on <= 8; fail_on++) {
         FailOnNAllocator fail_allocator = { .fail_on = fail_on };
         gpu::internal::vk::VkDeviceState state = {
             .host_allocator = &fail_allocator,
@@ -527,6 +527,7 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
         assert(slot.command_buffers.ptr == null
             && slot.scratch.ptr == null
             && slot.reference_storage.ptr == null
+            && slot.stencil_discard_storage.ptr == null
             && slot.preprocess_index_storage.ptr == null
             && slot.acceleration_structure_max_primitive_count_storage.ptr
                 == null
@@ -536,7 +537,7 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
             "host rollback leaves no owned allocator state");
     }
 
-    FailOnNAllocator success_allocator = { .fail_on = 8 };
+    FailOnNAllocator success_allocator = { .fail_on = 9 };
     gpu::internal::vk::VkDeviceState state = {
         .host_allocator = &success_allocator,
         .queue_completions = completions[..],
@@ -559,13 +560,13 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
         slot:  &slot,
         ops:   &ops,
     )!!;
-    assert(success_allocator.attempts == 7
-        && success_allocator.acquires == 7
+    assert(success_allocator.attempts == 8
+        && success_allocator.acquires == 8
         && success_allocator.releases == 0
-        && success_allocator.outstanding == 7,
+        && success_allocator.outstanding == 8,
         "successful creation performs the exact fixed host allocation set");
     gpu::internal::vk::destroy_command_allocator_slot_with_ops(&state, &slot, &ops);
-    assert(success_allocator.releases == 7
+    assert(success_allocator.releases == 8
         && success_allocator.outstanding == 0
         && probe.pool_creates == 1 && probe.pool_destroys == 1
         && probe.buffer_allocations == 0,

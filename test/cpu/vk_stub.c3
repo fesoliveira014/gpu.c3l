@@ -1861,6 +1861,7 @@ fn gpu::Device? create_vk_device(
         .presentation_enabled = normalized.surface.is_valid(),
         .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
         .max_sampler_anisotropy = STUB_SAMPLER_ANISOTROPY_LIMIT,
+        .depth_stencil_format = gpu::Format.D24_UNORM_S8_UINT,
         .acceleration_structures = (normalized.enable_ray_queries
                 || normalized.enable_ray_tracing_pipelines)
             ? (gpu::AccelerationStructureCaps){

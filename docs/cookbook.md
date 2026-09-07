@@ -370,7 +370,58 @@ gpu::cmd_draw_indexed(
 )!;
 ```
 
-There is no stencil.
+`DepthTargetDesc`'s zero stencil ops are `LOAD` and `STORE`, so a depth-only
+pass over a combined-format texture keeps its stencil plane; set `DONT_CARE`
+explicitly when stencil is unused.
+
+## Stencil mask
+
+Write an id into the stencil plane, then draw only where it matches.
+Stencil state is part of `GraphicsState`; `stencil_face` covers the two
+common faces:
+
+```c3
+gpu::DepthTargetDesc ds_target = {
+    .view             = ds_view,
+    .load_op          = gpu::LoadOp.CLEAR,
+    .store_op         = gpu::StoreOp.STORE,
+    .stencil_load_op  = gpu::LoadOp.CLEAR,
+    .stencil_store_op = gpu::StoreOp.STORE,
+    .clear            = { .depth = 1.0f, .stencil = 0 },
+};
+gpu::GraphicsState write_id = gpu::render_geometry_state(WIDTH, HEIGHT)!;
+write_id.stencil = {
+    .test_enable = true,
+    .front = gpu::stencil_face(gpu::CompareOp.ALWAYS, gpu::StencilOp.REPLACE, 1),
+    .back  = gpu::stencil_face(gpu::CompareOp.ALWAYS, gpu::StencilOp.REPLACE, 1),
+};
+gpu::GraphicsState masked = write_id;
+masked.stencil.front = gpu::stencil_face(gpu::CompareOp.EQUAL, gpu::StencilOp.KEEP, 1);
+masked.stencil.back  = masked.stencil.front;
+```
+
+The pipeline's `depth_format` is `DeviceCaps.depth_stencil_format`; draw the
+mask with `write_id` (color write mask zero), then the content with
+`masked`.
+
+## Read back stencil
+
+Copy one aspect at a time; the stencil aspect is one byte per texel and the
+depth aspect four:
+
+```c3
+gpu::TextureBufferCopyDesc stencil_copy = {
+    .texture = ds_texture,
+    .dst     = stencil_span,
+    .aspect  = gpu::TextureAspect.STENCIL,
+};
+gpu::cmd_copy_texture_to_buffer(commands, &stencil_copy)!;
+```
+
+Size `stencil_span` with `texture_mip_aspect_bytes(&desc, 0,
+gpu::TextureAspect.STENCIL)`. To read stencil in a shader, publish a view
+with `.aspect = STENCIL` and call `gpu_fetch_uint` from
+[the shader ABI](shader_abi.md#textures-and-samplers).
 
 ## Configure blending and multiple targets
 
