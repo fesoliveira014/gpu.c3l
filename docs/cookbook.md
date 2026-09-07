@@ -45,17 +45,16 @@ gpu::AllocationDesc staging_desc = {
     .memory_class = gpu::MemoryClass.CPU_WRITE,
     .access       = { .compute },
 };
-gpu::GpuAllocation staging = gpu::allocate_memory(device, &staging_desc)!;
-gpu::GpuSpan staging_span = gpu::get_allocation_span(device, staging)!;
-mem::copy(gpu::get_span_mapping(device, staging_span)!.ptr, bytes.ptr, bytes.len);
-gpu::flush_mapped_span(device, staging_span)!;
+gpu::MappedGpuSpan staging = gpu::allocate_mapped_memory(device, &staging_desc)!;
+mem::copy(staging.bytes.ptr, bytes.ptr, bytes.len);
+gpu::flush_mapped_span(device, staging.span)!;
 
 gpu::AllocationDesc private_desc = staging_desc;
 private_desc.memory_class = gpu::MemoryClass.GPU_PRIVATE;
 gpu::GpuAllocation buffer = gpu::allocate_memory(device, &private_desc)!;
 gpu::GpuSpan buffer_span = gpu::get_allocation_span(device, buffer)!;
 
-gpu::BufferCopyDesc copy = { .src = staging_span, .dst = buffer_span };
+gpu::BufferCopyDesc copy = { .src = staging.span, .dst = buffer_span };
 gpu::cmd_copy_buffer(commands, &copy)!;
 gpu::Barrier copy_to_compute = {
     .before = { .transfer },
@@ -64,7 +63,8 @@ gpu::Barrier copy_to_compute = {
 gpu::cmd_barrier(commands, &copy_to_compute)!;
 ```
 
-Free `staging` only after the copy's completion point completes.
+Free `staging.span.allocation()` only after the copy's completion point
+completes.
 
 ## Upload a texture
 
@@ -89,7 +89,7 @@ gpu::TextureBarrier to_dst = gpu::texture_transition(
 )!;
 gpu::cmd_texture_barrier(commands, &to_dst)!;
 
-gpu::BufferTextureCopyDesc upload = { .src = staging_span, .texture = texture };
+gpu::BufferTextureCopyDesc upload = { .src = staging.span, .texture = texture };
 gpu::cmd_copy_buffer_to_texture(commands, &upload)!;
 
 gpu::TextureBarrier to_sampled = gpu::texture_transition(

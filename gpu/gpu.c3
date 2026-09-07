@@ -544,6 +544,14 @@ fn GpuSpan? GpuSpan.checked_subspan(self, usz offset, usz size) {
     return self.unchecked_subspan(offset, size);
 }
 
+<* Owning identity of the allocation this span was carved from. Not validated
+   for liveness.
+
+   @return "The allocation token whose range contains this span." *>
+fn GpuAllocation GpuSpan.allocation(self) {
+    return { .owner = self.owner, .index = self.index, .generation = self.generation };
+}
+
 <* Derive a non-empty exact-sized mapped range within this immediate parent.
    The returned views inherit the owning allocation's lifetime and perform no
    synchronization. The derived byte pointer has no alignment guarantee beyond
@@ -586,12 +594,7 @@ fn bool TextureCompatibility.is_valid(self) {
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null || desc.size == 0) return INVALID_ARGUMENT~;
-    if (!gpu::internal::memory_class_is_known(desc.memory_class)) return INVALID_ARGUMENT~;
-    gpu::internal::validate_queue_access(&operation, desc.access)!;
-    AllocationDesc normalized = *desc;
-    normalized.alignment = gpu::internal::normalized_allocation_alignment(desc.alignment)!;
-    gpu::internal::validate_texture_allocation(&operation, desc, &normalized.alignment)!;
+    AllocationDesc normalized = gpu::internal::validated_allocation_desc(&operation, desc)!;
     GpuAllocation allocation =
         gpu::internal::vk::vk_allocate_memory(operation.state, &normalized)!;
     gpu::internal::retain_device_children(&operation);
@@ -696,8 +699,25 @@ fn MappedGpuSpan? mapped_gpu_span(Device* device, GpuSpan span) {
     };
 }
 
+<* Allocate a mapped class and borrow its complete span, mapping, and address.
+   A class without a host mapping faults before any allocation. Free with
+   `free_allocation` on `span.allocation()`.
+
+   @param device : "Live device that will own the allocation."
+   @param desc : "Borrowed allocation description with a mapped memory class."
+   @return "Consistent borrowed views of the new allocation, or a recoverable invalid-argument, access, allocation, or device fault. A failed view frees the allocation and returns the view fault; a rollback that cannot free the allocation is unrecoverable and panics after reporting the allocation as abandoned." *>
+fn MappedGpuSpan? allocate_mapped_memory(Device* device, AllocationDesc* desc) {
+    if (desc == null) return INVALID_ARGUMENT~;
+    if (desc.memory_class == MemoryClass.GPU_PRIVATE
+        || desc.memory_class == MemoryClass.TEXTURE) {
+        return INVALID_ARGUMENT~;
+    }
+    return gpu::internal::allocate_mapped_allocation(device, desc);
+}
+
 <* Make CPU writes to a live mapped allocation range visible to the GPU.
-   Coherent ranges are no-ops; this call does not submit or wait.
+   Required unless `AllocationInfo.coherent` is true; coherent ranges are
+   no-ops. This call does not submit or wait.
 
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose CPU writes become visible."
@@ -714,7 +734,8 @@ fn void? flush_mapped_span(Device* device, GpuSpan span) {
 }
 
 <* After the relevant GPU completion point, make its writes visible to CPU
-   reads. This call does not wait; coherent ranges are no-ops.
+   reads. Required unless `AllocationInfo.coherent` is true; coherent ranges
+   are no-ops. This call does not wait.
 
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose GPU writes become visible."
