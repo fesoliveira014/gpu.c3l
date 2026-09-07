@@ -20,6 +20,8 @@ alias ShaderModuleCreateFn @private = fn vk::Result (
 const ShaderId SHADER_ID_INVALID = (ShaderId)uint::max;
 const uint SHADER_FREE_NONE = 0;
 const uint SHADER_STORE_MAX_PIPELINE_CAPACITY = 0x20000000;
+const spvreflect::ShaderStage SPV_SHADER_STAGE_TASK_EXT = (spvreflect::ShaderStage)0x40;
+const spvreflect::ShaderStage SPV_SHADER_STAGE_MESH_EXT = (spvreflect::ShaderStage)0x80;
 
 struct ShaderIdentityInput {
     char[]                    spirv;
@@ -285,7 +287,7 @@ fn void? create_shader_store(VkDeviceState* state, uint pipeline_capacity) {
         || pipeline_capacity > SHADER_STORE_MAX_PIPELINE_CAPACITY) {
         return gpu::INVALID_ARGUMENT~;
     }
-    uint entry_capacity = pipeline_capacity * 2;
+    uint entry_capacity = pipeline_capacity * 3;
     state.shader_store.entries = mem::new_array(
         ShaderStoreEntry,
         entry_capacity,
@@ -376,8 +378,6 @@ fn void? check_heap_convention(
     };
 }
 
-const spvreflect::ShaderStage SPV_SHADER_STAGE_TASK_EXT = (spvreflect::ShaderStage)0x40;
-const spvreflect::ShaderStage SPV_SHADER_STAGE_MESH_EXT = (spvreflect::ShaderStage)0x80;
 
 fn gpu::internal::ShaderRole? shader_role_from_spv(
     spvreflect::ShaderStage stage,

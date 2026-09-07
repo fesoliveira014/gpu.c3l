@@ -422,6 +422,8 @@ fn gpu::MeshShaderCaps query_mesh_shader_caps(vk::PhysicalDevice physical_device
             properties.max_mesh_work_group_count[1],
             properties.max_mesh_work_group_count[2],
         },
+        .max_task_work_group_total_count = properties.max_task_work_group_total_count,
+        .max_mesh_work_group_total_count = properties.max_mesh_work_group_total_count,
         .max_mesh_output_vertices   = properties.max_mesh_output_vertices,
         .max_mesh_output_primitives = properties.max_mesh_output_primitives,
     };

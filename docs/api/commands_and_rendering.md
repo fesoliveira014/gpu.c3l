@@ -259,7 +259,8 @@ gpu::cmd_draw_mesh_tasks_indirect_count(
 
 Mesh draws need a bound mesh pipeline, a render pass, and a complete
 graphics state. `groups` are task work groups when the pipeline has a task
-shader, else mesh work groups, and must fit `DeviceCaps.mesh_shaders`.
+shader, else mesh work groups; each axis and the product must fit the
+`DeviceCaps.mesh_shaders` limits in every validation mode.
 Indirect records are 12-byte `DrawMeshTasksIndirectCommand` values made
 visible with a barrier to `.indirect`; the count form needs
 `DeviceCaps.draw_indirect_count`.

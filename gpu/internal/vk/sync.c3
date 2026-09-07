@@ -291,10 +291,12 @@ fn bool texture_shader_stages_supported(
     gpu::StageMask stages,
     vk::QueueFlags flags,
     bool           ray_tracing_pipelines,
+    bool           mesh_shaders,
 ) @private {
     bool graphics = queue_flags_include(flags, vk::QueueFlagBits.GRAPHICS_BIT);
     bool compute = queue_flags_include(flags, vk::QueueFlagBits.COMPUTE_BIT);
     if (stages.compute && !compute) return false;
+    if (stages.mesh_shader && !mesh_shaders) return false;
     if ((stages.vertex_shader || stages.fragment_shader || stages.mesh_shader) && !graphics) {
         return false;
     }
@@ -314,6 +316,7 @@ fn TextureBarrierRejection texture_state_rejection(
     bool ray_tracing_pipelines,
     bool before,
     bool unified = false,
+    bool mesh_shaders = false,
 ) @private {
     TextureStateSide side = before
         ? TextureStateSide.BEFORE
@@ -370,9 +373,10 @@ fn TextureBarrierRejection texture_state_rejection(
             || ((!texture_state.stages.transfer || transfer)
                 && (!shader_stages || (shader_queue
                     && texture_shader_stages_supported(
-                        texture_state.stages,
-                        flags,
-                        ray_tracing_pipelines,
+                        stages:                texture_state.stages,
+                        flags:                 flags,
+                        ray_tracing_pipelines: ray_tracing_pipelines,
+                        mesh_shaders:          mesh_shaders,
                     )))
                 && (!(texture_state.stages.color_output
                         || texture_state.stages.depth_output)
@@ -453,9 +457,10 @@ fn TextureBarrierRejection texture_state_rejection(
                     && (stages & ~(uint)TEXTURE_SHADER_STAGE_MASK) == 0))
                 || !shader_queue
                 || !texture_shader_stages_supported(
-                    texture_state.stages,
-                    flags,
-                    ray_tracing_pipelines,
+                    stages:                texture_state.stages,
+                    flags:                 flags,
+                    ray_tracing_pipelines: ray_tracing_pipelines,
+                    mesh_shaders:          mesh_shaders,
                 )) {
                 return {
                     .field     = texture_state_field(side, TextureStateMember.STAGES),
@@ -479,9 +484,10 @@ fn TextureBarrierRejection texture_state_rejection(
                     && (stages & ~(uint)TEXTURE_SHADER_STAGE_MASK) == 0))
                 || !shader_queue
                 || !texture_shader_stages_supported(
-                    texture_state.stages,
-                    flags,
-                    ray_tracing_pipelines,
+                    stages:                texture_state.stages,
+                    flags:                 flags,
+                    ray_tracing_pipelines: ray_tracing_pipelines,
+                    mesh_shaders:          mesh_shaders,
                 )) {
                 return {
                     .field     = texture_state_field(side, TextureStateMember.STAGES),
@@ -664,6 +670,7 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
         before:        true,
         unified:       state.unified_layouts,
+        mesh_shaders:  state.mesh_shaders_enabled,
     );
     if (rejection.field != null) {
         return report_texture_barrier_rejection(
@@ -689,6 +696,7 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
         ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
         before:        false,
         unified:       state.unified_layouts,
+        mesh_shaders:  state.mesh_shaders_enabled,
     );
     if (rejection.field != null) {
         return report_texture_barrier_rejection(

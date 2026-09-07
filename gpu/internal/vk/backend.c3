@@ -93,10 +93,33 @@ struct VkRayTracingPipelineDispatch {
     vk::PFN_vkCmdTraceRaysIndirect2KHR             cmd_trace_rays_indirect2;
 }
 
+alias CmdDrawMeshTasksNativeFn = fn void (
+    vk::CommandBuffer command_buffer,
+    uint group_count_x,
+    uint group_count_y,
+    uint group_count_z,
+);
+alias CmdDrawMeshTasksIndirectNativeFn = fn void (
+    vk::CommandBuffer command_buffer,
+    vk::Buffer buffer,
+    vk::DeviceSize offset,
+    uint draw_count,
+    uint stride,
+);
+alias CmdDrawMeshTasksIndirectCountNativeFn = fn void (
+    vk::CommandBuffer command_buffer,
+    vk::Buffer buffer,
+    vk::DeviceSize offset,
+    vk::Buffer count_buffer,
+    vk::DeviceSize count_buffer_offset,
+    uint max_draw_count,
+    uint stride,
+);
+
 struct VkMeshShaderDispatch {
-    vk::PFN_vkCmdDrawMeshTasksEXT              cmd_draw_mesh_tasks;
-    vk::PFN_vkCmdDrawMeshTasksIndirectEXT      cmd_draw_mesh_tasks_indirect;
-    vk::PFN_vkCmdDrawMeshTasksIndirectCountEXT cmd_draw_mesh_tasks_indirect_count;
+    CmdDrawMeshTasksNativeFn              cmd_draw_mesh_tasks;
+    CmdDrawMeshTasksIndirectNativeFn      cmd_draw_mesh_tasks_indirect;
+    CmdDrawMeshTasksIndirectCountNativeFn cmd_draw_mesh_tasks_indirect_count;
 }
 
 struct VkDeviceDispatch {
@@ -319,17 +342,17 @@ fn VkDeviceDispatch load_vk_device_dispatch(
     }
     if (plan.mesh_shaders) {
         dispatch.mesh_shaders = {
-            .cmd_draw_mesh_tasks = (vk::PFN_vkCmdDrawMeshTasksEXT)loader(
+            .cmd_draw_mesh_tasks = (CmdDrawMeshTasksNativeFn)loader(
                 device,
                 "vkCmdDrawMeshTasksEXT",
             ),
             .cmd_draw_mesh_tasks_indirect =
-                (vk::PFN_vkCmdDrawMeshTasksIndirectEXT)loader(
+                (CmdDrawMeshTasksIndirectNativeFn)loader(
                     device,
                     "vkCmdDrawMeshTasksIndirectEXT",
                 ),
             .cmd_draw_mesh_tasks_indirect_count =
-                (vk::PFN_vkCmdDrawMeshTasksIndirectCountEXT)loader(
+                (CmdDrawMeshTasksIndirectCountNativeFn)loader(
                     device,
                     "vkCmdDrawMeshTasksIndirectCountEXT",
                 ),

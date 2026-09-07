@@ -368,6 +368,7 @@ fn PipelineKey build_graphics_key(
     PipelineKey key = {
         .vertex_shader      = vertex_shader,
         .fragment_shader    = fragment_shader,
+        .task_shader        = SHADER_ID_INVALID,
         .color_target_count = (uint)desc.color_formats.len,
         .depth_format       = desc.depth_format,
         .sample_count       = desc.sample_count,
@@ -384,6 +385,7 @@ fn PipelineKey build_compute_key(ShaderId shader) @private {
     return {
         .vertex_shader   = shader,
         .fragment_shader = SHADER_ID_INVALID,
+        .task_shader     = SHADER_ID_INVALID,
         .kind            = (int)PipelineKind.COMPUTE,
     };
 }
@@ -530,6 +532,10 @@ fn void release_entry(VkDeviceState* state, uint entry_index) {
                 state,
                 entry.key.fragment_shader,
             )!!;
+        }
+        if (entry.key.kind == (int)PipelineKind.MESH
+            && entry.key.task_shader != SHADER_ID_INVALID) {
+            release_shader_identity_locked(state, entry.key.task_shader)!!;
         }
     }
     unlink_entry(&state.pipeline_cache, entry_index);

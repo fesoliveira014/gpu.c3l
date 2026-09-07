@@ -436,6 +436,8 @@ struct MeshShaderCaps {
     bool  task_shaders;
     Vec3u max_task_work_group_count;
     Vec3u max_mesh_work_group_count;
+    uint  max_task_work_group_total_count;
+    uint  max_mesh_work_group_total_count;
     uint  max_mesh_output_vertices;
     uint  max_mesh_output_primitives;
 }

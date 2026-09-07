@@ -1972,6 +1972,8 @@ fn gpu::Device? create_vk_device(
                 .task_shaders               = true,
                 .max_task_work_group_count  = { 65535, 65535, 65535 },
                 .max_mesh_work_group_count  = { 65535, 65535, 65535 },
+                .max_task_work_group_total_count = 4194304,
+                .max_mesh_work_group_total_count = 4194304,
                 .max_mesh_output_vertices   = 256,
                 .max_mesh_output_primitives = 256,
             }

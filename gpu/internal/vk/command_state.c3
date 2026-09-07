@@ -208,6 +208,7 @@ struct NativePipelineBinding {
 
 struct DescriptorHeapCommandBinding {
     bool graphics_set_bound;
+    vk::PipelineLayout graphics_layout;
     bool compute_set_bound;
     bool ray_tracing_set_bound;
 }
@@ -227,6 +228,8 @@ struct CommandRecord @public {
     CommandRecord*                   next_submitted;
     RenderCompatibility              active_render;
     bool                             graphics_state_initialized;
+    gpu::PrimitiveTopology           raster_topology;
+    bool                             raster_topology_emitted;
     bool                             color_state_initialized;
     ColorCompatibility               color_state;
     BoundPipeline                    logical_pipeline;

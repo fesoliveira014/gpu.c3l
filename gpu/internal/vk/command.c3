@@ -2270,6 +2270,17 @@ fn BoundPipeline*? borrow_bound_pipeline(CommandRecord* record) @private {
     return pipeline;
 }
 
+<* TRUSTED: the bound pipeline, faulting INVALID_ARGUMENT when its kind is
+   not the one the command needs. *>
+fn BoundPipeline*? borrow_bound_pipeline_of_kind(
+    CommandRecord* record,
+    PipelineKind kind,
+) @private {
+    BoundPipeline* pipeline = borrow_bound_pipeline(record)!;
+    if (pipeline.kind != kind) return gpu::INVALID_ARGUMENT~;
+    return pipeline;
+}
+
 fn bool pipeline_kind_rasterizes(PipelineKind kind) {
     return kind == PipelineKind.GRAPHICS || kind == PipelineKind.MESH;
 }
@@ -2467,6 +2478,15 @@ fn void? record_bound_pipeline_with_ops(
         layout:     bound.layout,
         bind_point: bind_point,
     )!;
+    if (bound.kind == PipelineKind.GRAPHICS
+        && record.graphics_state_initialized
+        && !record.raster_topology_emitted) {
+        vk::cmd_set_primitive_topology(
+            record.command_buffer,
+            topology_to_vk(record.raster_topology),
+        );
+        record.raster_topology_emitted = true;
+    }
     if (bound.kind == PipelineKind.RAY_TRACING
         && !bound.dynamic_ray_tracing_stack_size) {
         record.ray_tracing_stack_size_set = false;

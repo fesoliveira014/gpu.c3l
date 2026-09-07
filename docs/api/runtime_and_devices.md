@@ -143,10 +143,8 @@ uint max_targets = caps.max_color_attachments;
 - `timestamps` (`TimestampCaps`), `sparse_textures` (`SparseTextureCaps`);
 - `acceleration_structures`, `ray_queries`, `ray_tracing_pipelines`,
   `mesh_shaders` (`MeshShaderCaps`: `enabled`, `task_shaders`, task and mesh
-  work-group count limits, mesh output limits). Each is all-zero when its
-  feature was not enabled.
-- `acceleration_structures`, `ray_queries`, `ray_tracing_pipelines`. Each
-  is all-zero when its feature was not enabled;
+  per-axis and total work-group count limits, mesh output limits). Each is
+  all-zero when its feature was not enabled;
 - `unified_layouts` (the mode is active) and `unified_layouts_optimal`
   (`VK_KHR_unified_image_layouts` is enabled, so the one layout is free).
   The mode is satisfiable on every device; the optimal flag depends on the

@@ -776,7 +776,7 @@ fn gpu::PipelineHandle? vk_create_mesh_pipeline_with_ops(
     }
     PipelineKey key = build_mesh_key(
         desc:            desc,
-        task_shader:     has_task ? prepared[0].id : (ShaderId){},
+        task_shader:     has_task ? prepared[0].id : SHADER_ID_INVALID,
         mesh_shader:     prepared[shader_count - 2].id,
         fragment_shader: prepared[shader_count - 1].id,
     );

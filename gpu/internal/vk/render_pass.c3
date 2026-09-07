@@ -110,6 +110,25 @@ struct PreparedGeneratedIndexedDraw {
     gpu::IndexType                 index_type;
 }
 
+struct PreparedMeshDraw {
+    BoundPipeline*  pipeline;
+    gpu::GpuAddress mesh_root;
+    gpu::GpuAddress fragment_root;
+    gpu::Vec3u      groups;
+}
+
+struct PreparedMeshIndirectDraw {
+    BoundPipeline*  pipeline;
+    ResolvedSpan    args;
+    ResolvedSpan    count;
+    gpu::GpuSpan    args_span;
+    gpu::GpuSpan    count_span;
+    gpu::GpuAddress mesh_root;
+    gpu::GpuAddress fragment_root;
+    uint            draw_count;
+    bool            counted;
+}
+
 struct DynamicStateRejection {
     ZString field;
     ZString invariant;
@@ -164,7 +183,9 @@ fn void emit_raster_state(
     gpu::DynamicRasterState* raster,
 ) @private {
     CommandRecord* record = commands;
-    if (record.logical_pipeline.kind != PipelineKind.MESH) {
+    record.raster_topology = raster.topology;
+    record.raster_topology_emitted = record.logical_pipeline.kind != PipelineKind.MESH;
+    if (record.raster_topology_emitted) {
         vk::cmd_set_primitive_topology(
             record.command_buffer,
             topology_to_vk(raster.topology),
@@ -1568,7 +1589,12 @@ fn void record_draw(
     uint instance_count,
 ) {
     CommandRecord* record = commands;
-    push_graphics_roots(record, pipeline, vertex_root, fragment_root);
+    push_graphics_roots(
+        record:        record,
+        pipeline:      pipeline,
+        vertex_root:   vertex_root,
+        fragment_root: fragment_root,
+    );
     vk::cmd_draw(
         command_buffer: record.command_buffer,
         vertex_count:   vertex_count,
@@ -1589,7 +1615,7 @@ fn void? trusted_draw(
     if (record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    BoundPipeline* pipeline = borrow_bound_pipeline(record)!;
+    BoundPipeline* pipeline = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!;
     record_draw(
         commands:      commands,
         pipeline:      pipeline,
@@ -1650,7 +1676,7 @@ fn PreparedIndexedDraw? lower_indexed_draw(
         max_count:     uint::max,
     )!;
     return {
-        .pipeline      = borrow_bound_pipeline(record)!,
+        .pipeline      = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
         .index         = lower_index_span(
             state:      state,
             span:       &index_span,
@@ -1800,7 +1826,7 @@ fn PreparedIndirectDraw? lower_indirect_draw(
     }
     VkDeviceState* state = commands.device_state;
     return {
-        .pipeline = borrow_bound_pipeline(record)!,
+        .pipeline = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
         .args = lower_indirect_span(
             state:    state,
             span:     &args,
@@ -1948,7 +1974,7 @@ fn PreparedIndexedIndirectDraw? lower_indexed_indirect_draw(
     }
     VkDeviceState* state = commands.device_state;
     return {
-        .pipeline = borrow_bound_pipeline(record)!,
+        .pipeline = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
         .args = lower_indirect_span(
             state:    state,
             span:     &args,
@@ -2137,7 +2163,7 @@ fn PreparedIndexedIndirectCountDraw? lower_indexed_indirect_count_draw(
     VkDeviceState* state = commands.device_state;
     if (!state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
     return {
-        .pipeline = borrow_bound_pipeline(record)!,
+        .pipeline = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
         .args = lower_indirect_span(
             state:    state,
             span:     &args,
@@ -2394,7 +2420,7 @@ fn PreparedGeneratedDraw? lower_generated_draw(
     }
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedDraw draw = {
-        .pipeline     = borrow_bound_pipeline(record)!,
+        .pipeline     = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
         .records_span = records,
         .count_span   = count_span,
         .layout       = state.generated_draw_layout,
@@ -2557,7 +2583,7 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
     }
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedIndexedDraw draw = {
-        .pipeline     = borrow_bound_pipeline(record)!,
+        .pipeline     = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
         .records_span = records,
         .count_span   = count_span,
         .index_span   = index_span,
@@ -2745,24 +2771,6 @@ fn void? full_draw_indexed_generated(
     record_generated_indexed_draw(commands, &draw)!;
 }
 
-struct PreparedMeshDraw {
-    BoundPipeline*  pipeline;
-    gpu::GpuAddress mesh_root;
-    gpu::GpuAddress fragment_root;
-    gpu::Vec3u      groups;
-}
-
-struct PreparedMeshIndirectDraw {
-    BoundPipeline*  pipeline;
-    ResolvedSpan    args;
-    ResolvedSpan    count;
-    gpu::GpuSpan    args_span;
-    gpu::GpuSpan    count_span;
-    gpu::GpuAddress mesh_root;
-    gpu::GpuAddress fragment_root;
-    uint            draw_count;
-    bool            counted;
-}
 
 fn BoundPipeline*? validate_mesh_execution_state(
     VkDeviceState* state,
@@ -2782,16 +2790,32 @@ fn BoundPipeline*? validate_mesh_execution_state(
     return pipeline;
 }
 
+<* Always checked: each axis within the per-axis limit and the product
+   within the total limit of the stage that launches the groups. *>
+fn bool mesh_groups_within_caps(
+    VkDeviceState* state,
+    BoundPipeline* pipeline,
+    gpu::Vec3u groups,
+) @private {
+    gpu::MeshShaderCaps* caps = &state.mesh_shader_caps;
+    gpu::Vec3u limit = pipeline.mesh_task_stage
+        ? caps.max_task_work_group_count
+        : caps.max_mesh_work_group_count;
+    uint total = pipeline.mesh_task_stage
+        ? caps.max_task_work_group_total_count
+        : caps.max_mesh_work_group_total_count;
+    if (groups.x > limit.x || groups.y > limit.y || groups.z > limit.z) return false;
+    ulong plane = (ulong)groups.x * groups.y;
+    return plane <= total && plane * groups.z <= total;
+}
+
 fn void? validate_mesh_groups(
     VkDeviceState* state,
     BoundPipeline* pipeline,
     gpu::Vec3u groups,
     ZString operation,
 ) @private {
-    gpu::Vec3u limit = pipeline.mesh_task_stage
-        ? state.mesh_shader_caps.max_task_work_group_count
-        : state.mesh_shader_caps.max_mesh_work_group_count;
-    if (groups.x <= limit.x && groups.y <= limit.y && groups.z <= limit.z) return;
+    if (mesh_groups_within_caps(state, pipeline, groups)) return;
     return report_contract_failure(
         state:               state,
         operation:           operation,
@@ -2802,18 +2826,23 @@ fn void? validate_mesh_groups(
         generation:          pipeline.handle.generation,
         debug_name:          null,
         rejected_field:      "groups",
-        invariant:           "work-group counts must fit DeviceCaps.mesh_shaders",
+        invariant:           "work-group counts must fit the DeviceCaps.mesh_shaders axis and total limits",
         backend_text:        null,
     )~;
 }
 
 fn void record_mesh_draw(CommandRecord* record, PreparedMeshDraw* draw) @private {
-    push_graphics_roots(record, draw.pipeline, draw.mesh_root, draw.fragment_root);
+    push_graphics_roots(
+        record:        record,
+        pipeline:      draw.pipeline,
+        vertex_root:   draw.mesh_root,
+        fragment_root: draw.fragment_root,
+    );
     record.device_state.device_dispatch.mesh_shaders.cmd_draw_mesh_tasks(
-        record.command_buffer,
-        draw.groups.x,
-        draw.groups.y,
-        draw.groups.z,
+        command_buffer: record.command_buffer,
+        group_count_x:  draw.groups.x,
+        group_count_y:  draw.groups.y,
+        group_count_z:  draw.groups.z,
     );
 }
 
@@ -2821,26 +2850,31 @@ fn void record_mesh_indirect_draw(
     CommandRecord* record,
     PreparedMeshIndirectDraw* draw,
 ) @private {
-    push_graphics_roots(record, draw.pipeline, draw.mesh_root, draw.fragment_root);
+    push_graphics_roots(
+        record:        record,
+        pipeline:      draw.pipeline,
+        vertex_root:   draw.mesh_root,
+        fragment_root: draw.fragment_root,
+    );
     VkMeshShaderDispatch* dispatch = &record.device_state.device_dispatch.mesh_shaders;
     if (draw.counted) {
         dispatch.cmd_draw_mesh_tasks_indirect_count(
-            record.command_buffer,
-            draw.args.slot.buffer,
-            (vk::DeviceSize)draw.args.offset,
-            draw.count.slot.buffer,
-            (vk::DeviceSize)draw.count.offset,
-            draw.draw_count,
-            gpu::DrawMeshTasksIndirectCommand::size,
+            command_buffer:      record.command_buffer,
+            buffer:              draw.args.slot.buffer,
+            offset:              (vk::DeviceSize)draw.args.offset,
+            count_buffer:        draw.count.slot.buffer,
+            count_buffer_offset: (vk::DeviceSize)draw.count.offset,
+            max_draw_count:      draw.draw_count,
+            stride:              gpu::DrawMeshTasksIndirectCommand::size,
         );
         return;
     }
     dispatch.cmd_draw_mesh_tasks_indirect(
-        record.command_buffer,
-        draw.args.slot.buffer,
-        (vk::DeviceSize)draw.args.offset,
-        draw.draw_count,
-        gpu::DrawMeshTasksIndirectCommand::size,
+        command_buffer: record.command_buffer,
+        buffer:         draw.args.slot.buffer,
+        offset:         (vk::DeviceSize)draw.args.offset,
+        draw_count:     draw.draw_count,
+        stride:         gpu::DrawMeshTasksIndirectCommand::size,
     );
 }
 
@@ -2854,13 +2888,15 @@ fn void? trusted_draw_mesh_tasks(
     if (record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    if (!record.device_state.mesh_shaders_enabled) return gpu::UNSUPPORTED_FEATURE~;
+    VkDeviceState* state = record.device_state;
+    if (!state.mesh_shaders_enabled) return gpu::UNSUPPORTED_FEATURE~;
     PreparedMeshDraw draw = {
-        .pipeline      = borrow_bound_pipeline(record)!,
+        .pipeline      = borrow_bound_pipeline_of_kind(record, PipelineKind.MESH)!,
         .mesh_root     = mesh_root,
         .fragment_root = fragment_root,
         .groups        = groups,
     };
+    if (!mesh_groups_within_caps(state, draw.pipeline, groups)) return gpu::INVALID_ARGUMENT~;
     record_mesh_draw(record, &draw);
 }
 
@@ -2909,7 +2945,7 @@ fn PreparedMeshIndirectDraw? lower_mesh_indirect_draw(
     if (!state.mesh_shaders_enabled) return gpu::UNSUPPORTED_FEATURE~;
     if (counted && !state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
     PreparedMeshIndirectDraw draw = {
-        .pipeline = borrow_bound_pipeline(record)!,
+        .pipeline = borrow_bound_pipeline_of_kind(record, PipelineKind.MESH)!,
         .args = lower_indirect_span(
             state:    state,
             span:     &args,
@@ -3031,6 +3067,12 @@ fn void? full_draw_mesh_tasks_indirect(
         counted:       false,
         operation:     "cmd_draw_mesh_tasks_indirect",
     )!;
+    CommandRecord* record = commands;
+    uint checkpoint = record.scratch.reference_count;
+    defer catch rollback_command_references(
+        record,
+        checkpoint,
+    );
     track_mesh_indirect_draw(commands, &draw)!;
     record_mesh_indirect_draw(commands, &draw);
 }
@@ -3073,6 +3115,12 @@ fn void? full_draw_mesh_tasks_indirect_count(
         counted:       true,
         operation:     "cmd_draw_mesh_tasks_indirect_count",
     )!;
+    CommandRecord* record = commands;
+    uint checkpoint = record.scratch.reference_count;
+    defer catch rollback_command_references(
+        record,
+        checkpoint,
+    );
     track_mesh_indirect_draw(commands, &draw)!;
     record_mesh_indirect_draw(commands, &draw);
 }

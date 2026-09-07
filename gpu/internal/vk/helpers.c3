@@ -542,11 +542,11 @@ fn vk::PipelineStageFlags2? submit_wait_stages_to_vk(
         || stages.host
         || stages.present
         || !barrier_stage_mask_supported(
-            stages,
-            flags,
-            ray_queries,
-            ray_tracing_pipelines,
-            mesh_shaders,
+            stages:                stages,
+            flags:                 flags,
+            ray_queries:           ray_queries,
+            ray_tracing_pipelines: ray_tracing_pipelines,
+            mesh_shaders:          mesh_shaders,
         )) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -561,20 +561,20 @@ fn ZString barrier_queue_rejected_field(
     bool mesh_shaders = false,
 ) {
     if (!barrier_stage_mask_supported(
-        barrier.before,
-        flags,
-        ray_queries,
-        ray_tracing_pipelines,
-        mesh_shaders,
+        stages:                barrier.before,
+        flags:                 flags,
+        ray_queries:           ray_queries,
+        ray_tracing_pipelines: ray_tracing_pipelines,
+        mesh_shaders:          mesh_shaders,
     )) {
         return "Barrier.before";
     }
     if (!barrier_stage_mask_supported(
-        barrier.after,
-        flags,
-        ray_queries,
-        ray_tracing_pipelines,
-        mesh_shaders,
+        stages:                barrier.after,
+        flags:                 flags,
+        ray_queries:           ray_queries,
+        ray_tracing_pipelines: ray_tracing_pipelines,
+        mesh_shaders:          mesh_shaders,
     )) {
         return "Barrier.after";
     }
