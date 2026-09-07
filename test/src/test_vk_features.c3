@@ -1401,12 +1401,23 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
             true,
         )) == gpu::INVALID_ARGUMENT,
         "transfer-only queues reject ray tracing waits");
-    gpu::StageMask unknown = (gpu::StageMask)(1u << 12);
+    gpu::StageMask reserved = { .mesh_shader };
     assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            unknown,
+            reserved,
             graphics_only,
         )) == gpu::INVALID_ARGUMENT,
-        "unknown submission wait stage bits are invalid");
+        "reserved submission wait stage bits are invalid");
+    assert(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .index_input },
+            graphics_only,
+        )!! == (vk::PipelineStageFlags2)
+            vk::PipelineStageFlagBits2.STAGE_2_INDEX_INPUT_BIT,
+        "index input waits lower to the index-input stage");
+    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
+            { .index_input },
+            compute_only,
+        )) == gpu::INVALID_ARGUMENT,
+        "compute-only queues reject index input waits");
 }
 
 fn void semantic_barrier_access_masks_map_exactly() @test {

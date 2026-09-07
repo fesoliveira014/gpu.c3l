@@ -916,6 +916,7 @@ fn gpu::AdapterInfo? vk_get_adapter_info(VkRuntimeState* state, uint index) {
         .memory           = {
             .device_local_bytes = 1024,
             .host_visible_bytes = 1024,
+            .device_local_host_visible_bytes = 1024,
         },
         .queues           = {
             .available = {
@@ -1444,6 +1445,11 @@ fn gpu::AllocationInfo? vk_get_allocation_info(
             != gpu::MemoryClass.GPU_PRIVATE
             && !texture_memory,
         .coherent     = false,
+        .device_local = state.allocation_desc.memory_class
+            == gpu::MemoryClass.GPU_PRIVATE
+            || state.allocation_desc.memory_class
+            == gpu::MemoryClass.CPU_WRITE_GPU_LOCAL
+            || texture_memory,
         .addressable  = !texture_memory,
     };
 }

@@ -18,6 +18,7 @@ struct DedicatedTextureProbe {
     uint       destroy_image_calls;
     uint       destroy_view_calls;
     uint       free_calls;
+    uint       properties_calls;
 }
 
 struct DedicatedTextureFixture {
@@ -130,18 +131,33 @@ fn void dedicated_probe_free_memory(
     probe.free_calls++;
 }
 
+fn void dedicated_probe_get_memory_properties(
+    void* user_data,
+    vma::Allocator allocator,
+    vma::Allocation allocation,
+    vk::MemoryPropertyFlags* out_properties,
+) {
+    (void)allocator;
+    (void)allocation;
+    DedicatedTextureProbe* probe = (DedicatedTextureProbe*)user_data;
+    probe.properties_calls++;
+    *out_properties =
+        (vk::MemoryPropertyFlags)vk::MemoryPropertyFlagBits.DEVICE_LOCAL_BIT;
+}
+
 fn vk::DedicatedTextureNativeOps dedicated_probe_ops(
     DedicatedTextureProbe* probe,
 ) {
     return {
-        .user_data       = probe,
-        .create_image    = &dedicated_probe_create_image,
-        .allocate_memory = &dedicated_probe_allocate_memory,
-        .bind_memory     = &dedicated_probe_bind_memory,
-        .create_view     = &dedicated_probe_create_view,
-        .destroy_image   = &dedicated_probe_destroy_image,
-        .destroy_view    = &dedicated_probe_destroy_view,
-        .free_memory     = &dedicated_probe_free_memory,
+        .user_data             = probe,
+        .create_image          = &dedicated_probe_create_image,
+        .allocate_memory       = &dedicated_probe_allocate_memory,
+        .bind_memory           = &dedicated_probe_bind_memory,
+        .create_view           = &dedicated_probe_create_view,
+        .destroy_image         = &dedicated_probe_destroy_image,
+        .destroy_view          = &dedicated_probe_destroy_view,
+        .free_memory           = &dedicated_probe_free_memory,
+        .get_memory_properties = &dedicated_probe_get_memory_properties,
     };
 }
 
@@ -484,4 +500,51 @@ fn void dedicated_texture_native_lifetime_is_independently_owned() @test {
         "failed early release preserves dedicated allocation ownership");
     gpu::destroy_texture(&device, created.texture)!!;
     gpu::free_allocation(&device, &created.allocation)!!;
+}
+
+fn void dedicated_texture_reports_device_local_memory() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc texture_desc = {
+        .access    = { .graphics, .compute },
+        .width     = 16,
+        .height    = 16,
+        .format    = gpu::Format.RGBA8_UNORM,
+        .usage     = { .sampled, .storage },
+    };
+    gpu::TextureRequirements requirements =
+        gpu::get_texture_requirements(&device, &texture_desc)!!;
+    gpu::TextureRequirements[1] queried = { requirements };
+    gpu::AllocationDesc allocation_desc = {
+        .size                 = requirements.size,
+        .alignment            = requirements.alignment,
+        .memory_class         = gpu::MemoryClass.TEXTURE,
+        .access               = texture_desc.access,
+        .texture_requirements = queried[..],
+    };
+
+    gpu::DedicatedTexture created = gpu::create_dedicated_texture(
+        &device,
+        &texture_desc,
+        &allocation_desc,
+    )!!;
+    defer {
+        gpu::destroy_texture(&device, created.texture)!!;
+        gpu::free_allocation(&device, &created.allocation)!!;
+    }
+
+    gpu::AllocationInfo info =
+        gpu::get_allocation_info(&device, created.allocation)!!;
+
+    vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    vk::AllocationSlot* slot = state.allocations.get(created.allocation)!!;
+    vk::MemoryPropertyFlags properties;
+    state.allocator.get_allocation_memory_properties(
+        slot.raw_allocation,
+        &properties,
+    );
+    assert(info.device_local
+            == (((uint)properties & (uint)vk::MemoryPropertyFlagBits.DEVICE_LOCAL_BIT) != 0),
+        "device_local reports the selected memory type for dedicated textures");
 }

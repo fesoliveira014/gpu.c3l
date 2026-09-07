@@ -18,8 +18,12 @@ flowchart LR
 
 `StageMask` bits: `all`, `host`, `transfer`, `compute`, `vertex_shader`,
 `fragment_shader`, `color_output`, `depth_output`, `present`, `indirect`,
-`acceleration_structure_build`, `ray_tracing`. `all` and `present` cannot
-be combined with others.
+`acceleration_structure_build`, `ray_tracing`, `index_input`,
+`mesh_shader`. `all` and `present` cannot be combined with others.
+`index_input` is destination-only: valid in `Barrier.after` and
+`CompletionWait.before`, rejected in `Barrier.before`, texture states, and
+`SubmitDesc.readiness_before`. `mesh_shader` is reserved and rejected
+everywhere.
 
 ## Global barriers
 
@@ -38,6 +42,7 @@ no resource. Common pairs:
 |---|---|---|
 | `.transfer` | `.compute` or `.vertex_shader` | after an upload copy |
 | `.compute` | `.indirect` | compute wrote indirect arguments |
+| `.compute` | `.index_input` | compute wrote an index buffer |
 | `.compute` | `.host` | before host readback of compute output |
 | `.transfer` | `.host` | before host readback of a copy |
 | `.acceleration_structure_build` | `.compute`, `.ray_tracing` | before a query or trace |

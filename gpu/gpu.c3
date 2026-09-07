@@ -2574,7 +2574,8 @@ fn TextureBarrier? texture_transition(TextureHandle texture, TextureState before
 
 <* Record a global semantic execution and memory barrier.
    Preconditions: stages are known, consistent, and queue-supported.
-   Always checked: token identity, authoritative phase, and required pointer.
+   Always checked: token identity, authoritative phase, required pointer, and
+   `index_input` on the source side.
    FULL diagnostics: stage and queue-support misuse.
 
    @param commands : "Live recording token."
@@ -2814,7 +2815,8 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
         }
         if (!queue.roles.graphics) return INVALID_ARGUMENT~;
         if (!gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)
-            || desc.readiness_before.indirect) {
+            || desc.readiness_before.indirect
+            || desc.readiness_before.index_input) {
             return INVALID_ARGUMENT~;
         }
     } else if ((uint)desc.readiness_before != 0) {

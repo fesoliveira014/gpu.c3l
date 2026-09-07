@@ -200,7 +200,7 @@ addresses, and flush:
 gpu::AllocationDesc root_desc = {
     .size         = DoublerRoot::size,
     .alignment    = DoublerRoot::alignment,
-    .memory_class = gpu::MemoryClass.CPU_WRITE,
+    .memory_class = gpu::MemoryClass.CPU_WRITE_GPU_LOCAL,
     .access       = { .compute },
     .debug_name   = "doubler_root",
 };

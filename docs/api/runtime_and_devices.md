@@ -61,9 +61,10 @@ for (uint i = 0; i < adapters.count; i++) {
 
 `AdapterList` and `Adapter` are borrowed from the runtime and cost nothing
 to copy. Strings in `AdapterInfo` and `AdapterDiagnostics` are valid until
-the runtime is destroyed. `AdapterInfo` reports class, memory totals,
-available queue roles, and limits. `AdapterDiagnostics` reports backend and
-driver identity for logs.
+the runtime is destroyed. `AdapterInfo` reports class, memory totals
+(including `device_local_host_visible_bytes`, the size of the heaps that
+back `CPU_WRITE_GPU_LOCAL` placement), available queue roles, and limits.
+`AdapterDiagnostics` reports backend and driver identity for logs.
 
 Preflight a description before creating:
 

@@ -252,6 +252,79 @@ fn void pipeline_only_compute_to_indirect_barrier_omits_ray_query_access() @test
         "indirect consumption includes indirect-command read access");
 }
 
+fn void compute_to_index_input_barrier_lowers_index_read() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+
+    BarrierEmitCapture capture = {};
+    vk::BarrierEmitOps ops = { .user_data = &capture, .emit = &capture_barrier_emit };
+    gpu::Barrier dependency = { .before = { .compute }, .after = { .index_input } };
+    vk::barrier_with_injected_ops(record, &dependency, &ops)!!;
+
+    assert(capture.calls == 1, "compute to index input emits one barrier");
+    assert((ulong)capture.memory_barrier.src_stage_mask
+            == (ulong)vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT,
+        "source stage is compute shader");
+    assert((ulong)capture.memory_barrier.src_access_mask
+            == (ulong)vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT,
+        "source access is shader write");
+    assert((ulong)capture.memory_barrier.dst_stage_mask
+            == (ulong)vk::PipelineStageFlagBits2.STAGE_2_INDEX_INPUT_BIT,
+        "destination stage is index input");
+    assert((ulong)capture.memory_barrier.dst_access_mask
+            == (ulong)vk::AccessFlagBits2.ACCESS_2_INDEX_READ_BIT,
+        "destination access is index read");
+}
+
+fn void index_input_source_barrier_faults() @test {
+    SyncDiagnosticCapture capture = {
+        .expected_operation      = "cmd_barrier",
+        .expected_rejected_field = "Barrier.before",
+        .expected_invariant      = "index_input is a destination-only stage",
+    };
+    gpu::Device device = make_sync_diagnostic_device(&capture);
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::Barrier barrier = { .before = { .index_input }, .after = { .compute } };
+    assert(@catch(gpu::cmd_barrier(&commands, &barrier)) == gpu::INVALID_ARGUMENT,
+        "index_input on the source side faults INVALID_ARGUMENT");
+    assert(capture.calls == 1 && capture.operation_matches
+        && capture.rejected_field_matches && capture.invariant_matches,
+        "diagnostic names Barrier.before and the destination-only invariant");
+    gpu::Barrier reversed = { .before = { .compute }, .after = { .index_input } };
+    gpu::cmd_barrier(&commands, &reversed)!!;
+}
+
+fn void index_input_source_barrier_faults_under_trusted() @test {
+    gpu::RuntimeDesc desc = {
+        .contract_validation      = gpu::ContractValidation.TRUSTED,
+        .enable_vulkan_validation = true,
+        .application_name  = "gpu_trusted_index_input_test",
+    };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+    gpu::Barrier barrier = { .before = { .index_input }, .after = { .compute } };
+    assert(@catch(gpu::cmd_barrier(&commands, &barrier)) == gpu::INVALID_ARGUMENT,
+        "trusted recording rejects index_input on the source side");
+    gpu::Barrier reversed = { .before = { .compute }, .after = { .index_input } };
+    gpu::cmd_barrier(&commands, &reversed)!!;
+}
+
 fn void pipeline_only_build_to_trace_barrier_keeps_acceleration_read() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
@@ -2608,7 +2681,7 @@ fn void barrier_unknown_stage_bit_faults() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::Barrier barrier = {
-        .before = (gpu::StageMask)(1u << 12),
+        .before = { .mesh_shader },
         .after  = { .compute = true },
     };
 

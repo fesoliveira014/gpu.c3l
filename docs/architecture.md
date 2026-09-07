@@ -128,7 +128,8 @@ flowchart LR
 
 | Memory class | Mapped | Use |
 |---|---|---|
-| `CPU_WRITE` | yes | uploads, root data, per-frame data |
+| `CPU_WRITE` | yes | upload staging read once by a copy |
+| `CPU_WRITE_GPU_LOCAL` | yes | root records, per-frame constants, CPU-written indirect arguments |
 | `CPU_READ` | yes | readback |
 | `GPU_PRIVATE` | no | device-local buffers |
 | `TEXTURE` | no | backing for placed and sparse textures |

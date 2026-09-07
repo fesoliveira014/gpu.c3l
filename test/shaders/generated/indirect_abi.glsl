@@ -17,4 +17,10 @@ layout(buffer_reference, std430, buffer_reference_align = 8) buffer BuildRoot {
     uint count_value;
 };
 
+layout(buffer_reference, std430, buffer_reference_align = 8) buffer IndexWriteRoot {
+    uint64_t indices_gpu;
+    uint index_count;
+    uint _pad0;
+};
+
 #endif
