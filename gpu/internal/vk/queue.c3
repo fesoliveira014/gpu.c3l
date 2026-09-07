@@ -70,6 +70,7 @@ struct QueueCompletionState {
     Atomic{ulong}                 published_sequence;
     Atomic{ulong}                 retired_sequence;
     ulong                         pending_sparse_sequence;
+    CommandAllocatorSlot*         internal_allocator;
     bool                          bound;
 }
 
@@ -84,7 +85,9 @@ struct QueueSubmitScratch {
         completion_waits;
     CommandRecord*[gpu::internal::MAX_SUBMIT_COMMAND_LISTS]
         records;
-    vk::CommandBufferSubmitInfo[gpu::internal::MAX_SUBMIT_COMMAND_LISTS]
+    CommandRecord*[gpu::internal::MAX_SUBMIT_COMMAND_LISTS + 2]
+        batch;
+    vk::CommandBufferSubmitInfo[gpu::internal::MAX_SUBMIT_COMMAND_LISTS + 2]
         command_buffer_infos;
     vk::SemaphoreSubmitInfo[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS + 2]
         wait_infos;
@@ -956,6 +959,47 @@ fn void? create_queue_completions(
     }
 }
 
+<* Unified mode: one library-owned allocator per bound queue for the
+   initialization and swapchain transition lists. *>
+fn void? create_internal_command_allocators(VkDeviceState* state) {
+    gpu::CommandAllocatorDesc desc = {
+        .command_buffer_capacity = gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY,
+        .debug_name              = "gpu.c3l unified layouts",
+    };
+    foreach (i, &completion : state.queue_completions) {
+        if (!completion.bound) continue;
+        gpu::Queue queue = { .id = (uint)i, .roles = completion.roles };
+        CommandAllocatorSlot* slot = mem::new(CommandAllocatorSlot);
+        if (catch err = initialize_command_allocator_slot(
+            state: state,
+            queue: queue,
+            desc:  &desc,
+            slot:  slot,
+        )) {
+            mem::free(slot);
+            return err~;
+        }
+        if (catch err = slot.mutex.init()) {
+            destroy_command_allocator_slot(state, slot);
+            mem::free(slot);
+            return gpu::BACKEND_ERROR~;
+        }
+        completion.internal_allocator = slot;
+    }
+}
+
+fn void destroy_internal_command_allocators(VkDeviceState* state) {
+    if (state.queue_completions.ptr == null) return;
+    foreach (&completion : state.queue_completions) {
+        CommandAllocatorSlot* slot = completion.internal_allocator;
+        if (slot == null) continue;
+        destroy_command_allocator_slot(state, slot);
+        if (slot.mutex.is_initialized()) (void)slot.mutex.destroy();
+        mem::free(slot);
+        completion.internal_allocator = null;
+    }
+}
+
 fn void destroy_queue_completions(VkDeviceState* state) @private {
     if (state == null || state.queue_completions.ptr == null) return;
     foreach (&completion : state.queue_completions) {
@@ -1265,14 +1309,75 @@ fn void rollback_submit_claim(
     VkDeviceState* state,
     CommandRecord*[] records,
 ) @private {
-    state.command_mutex.lock()!!;
-    defer state.command_mutex.unlock();
-    foreach (record : records) {
-        if (record.state == gpu::internal::CommandState.SUBMITTING) {
-            record.state = gpu::internal::CommandState.EXECUTABLE;
+    {
+        state.command_mutex.lock()!!;
+        defer state.command_mutex.unlock();
+        foreach (record : records) {
+            if (record.state == gpu::internal::CommandState.SUBMITTING) {
+                record.state = gpu::internal::CommandState.EXECUTABLE;
+            }
+            abandon_pending_acceleration_structure_builds(record, false);
         }
-        abandon_pending_acceleration_structure_builds(record, false);
     }
+    foreach (record : records) {
+        if (!record.internal) continue;
+        record.init_textures = {};
+        discard_internal_commands(state, record);
+    }
+}
+
+<* Unified mode: prepend the initialization and acquire transitions and
+   append the present transition as library-recorded lists. `pending` holds
+   retained textures; the prologue record takes ownership of the array on
+   success and every created list is discarded on failure. *>
+fn CommandRecord*[]? record_unified_batch(
+    VkDeviceState* state,
+    QueueCompletionState* completion,
+    gpu::Queue queue,
+    CommandRecord*[] records,
+    SwapchainSlot* swapchain,
+    gpu::TextureHandle[] pending,
+) @private {
+    QueueSubmitScratch* scratch = completion.submit_scratch;
+    CommandRecord*[2] created;
+    usz created_count = 0;
+    defer catch {
+        for (usz i = 0; i < created_count; i++) {
+            created[i].init_textures = {};
+            discard_internal_commands(state, created[i]);
+        }
+    }
+    usz count = 0;
+    if (pending.len > 0 || swapchain != null) {
+        CommandRecord* prologue = begin_internal_commands(state, completion, queue)!;
+        created[created_count++] = prologue;
+        record_texture_init_barriers(state, prologue, pending);
+        if (swapchain != null) {
+            record_swapchain_transition(
+                state:   state,
+                record:  prologue,
+                texture: swapchain.textures[swapchain.pending_image],
+                acquire: true,
+            );
+        }
+        end_internal_commands(state, prologue)!;
+        scratch.batch[count++] = prologue;
+    }
+    foreach (record : records) scratch.batch[count++] = record;
+    if (swapchain != null) {
+        CommandRecord* epilogue = begin_internal_commands(state, completion, queue)!;
+        created[created_count++] = epilogue;
+        record_swapchain_transition(
+            state:   state,
+            record:  epilogue,
+            texture: swapchain.textures[swapchain.pending_image],
+            acquire: false,
+        );
+        end_internal_commands(state, epilogue)!;
+        scratch.batch[count++] = epilogue;
+    }
+    if (pending.len > 0) created[0].init_textures = pending;
+    return scratch.batch[:count];
 }
 
 fn SubmitInputs? resolve_and_claim_submit_inputs(
@@ -1286,7 +1391,10 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
     SubmitInputs inputs;
     gpu::Device device = queue.device;
     bool has_readiness = desc.readiness != gpu::SWAPCHAIN_READINESS_INVALID;
-    if (has_readiness != ((uint)desc.readiness_before != 0)) {
+    bool has_readiness_stages = (uint)desc.readiness_before != 0;
+    if (state.unified_layouts
+        ? (has_readiness_stages && !has_readiness)
+        : (has_readiness != has_readiness_stages)) {
         return gpu::INVALID_ARGUMENT~;
     }
 
@@ -1295,16 +1403,21 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
             || desc.readiness.device != device) {
             return gpu::INVALID_HANDLE~;
         }
-        if (desc.readiness_before.indirect || desc.readiness_before.index_input) {
-            return gpu::INVALID_ARGUMENT~;
+        if (state.unified_layouts) {
+            inputs.readiness_stages =
+                vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT;
+        } else {
+            if (desc.readiness_before.indirect || desc.readiness_before.index_input) {
+                return gpu::INVALID_ARGUMENT~;
+            }
+            inputs.readiness_stages = submit_wait_stages_to_vk(
+                stages:         desc.readiness_before,
+                flags:          target.queue_flags,
+                generated_work: false,
+                ray_queries:    state.acceleration_structures_enabled,
+                ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
+            )!;
         }
-        inputs.readiness_stages = submit_wait_stages_to_vk(
-            stages:         desc.readiness_before,
-            flags:          target.queue_flags,
-            generated_work: false,
-            ray_queries:    state.acceleration_structures_enabled,
-            ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
-        )!;
         gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
             state,
             desc.readiness,
@@ -1402,6 +1515,13 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     )!;
     QueueSubmitScratch* scratch = completion.submit_scratch;
     if (scratch == null) unreachable();
+    gpu::TextureHandle[] pending = state.unified_layouts
+        ? retain_pending_texture_inits(state)
+        : (gpu::TextureHandle[]){};
+    bool pending_owned = pending.len > 0;
+    defer catch {
+        if (pending_owned) release_pending_texture_inits(state, pending, true);
+    }
     completion.submission_mutex.lock()!!;
     defer completion.submission_mutex.unlock();
 
@@ -1418,6 +1538,17 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     bool claimed = records.len > 0;
     defer catch {
         if (claimed) rollback_submit_claim(state, records);
+    }
+    if (state.unified_layouts) {
+        records = record_unified_batch(
+            state:      state,
+            completion: completion,
+            queue:      queue,
+            records:    records,
+            swapchain:  inputs.swapchain,
+            pending:    pending,
+        )!;
+        claimed = records.len > 0;
     }
 
     if (records.len > 0) {
@@ -1555,6 +1686,7 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     $endif
     submitted = point;
     claimed = false;
+    pending_owned = false;
     return submitted;
 }
 

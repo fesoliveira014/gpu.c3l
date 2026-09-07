@@ -311,6 +311,7 @@ fn PreparedRenderPass? lower_render_pass(
         attachment.image_layout = texture_layout_to_vk(
             gpu::TextureLayout.COLOR_ATTACHMENT,
             view.format,
+            state.unified_layouts,
         );
         attachment.load_op = load_op_to_vk(target.load_op);
         attachment.store_op = store_op_to_vk(target.store_op);
@@ -331,6 +332,7 @@ fn PreparedRenderPass? lower_render_pass(
             attachment.resolve_image_layout = texture_layout_to_vk(
                 gpu::TextureLayout.COLOR_ATTACHMENT,
                 resolve.format,
+                state.unified_layouts,
             );
         }
     }
@@ -349,6 +351,7 @@ fn PreparedRenderPass? lower_render_pass(
         vk::ImageLayout layout = texture_layout_to_vk(
             gpu::TextureLayout.DEPTH_ATTACHMENT,
             depth.format,
+            state.unified_layouts,
         );
         vk::ClearDepthStencilValue clear = {
             .depth   = desc.depth.clear.depth,

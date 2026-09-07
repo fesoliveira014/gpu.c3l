@@ -13,6 +13,9 @@ const uint PRESENT_WAIT_CAPTURE_CAPACITY =
 const ulong ACQUIRE_FINITE_TIMEOUT_NS = 2_000_000;
 const ulong ACQUIRE_FIXTURE_OWNER = 101;
 
+uint unified_submit_buffer_count;
+vk::PipelineStageFlags2 unified_submit_wait_stage;
+
 struct AcquisitionStateSnapshot {
     bool                                              acquire_pending;
     bool                                              readiness_consumed;
@@ -1361,28 +1364,28 @@ fn void swapchain_release_detects_live_views_across_images() @test {
     )!!, "a live view on the first wrapped image blocks release");
 }
 
-fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
-    gpu::RuntimeDesc runtime_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
-        .enable_vulkan_validation = true,
-        .application_name  = "borrowed_swapchain_view_lifecycle_test",
-    };
-    gpu::Device device = create_test_device(&runtime_desc)!!;
-    defer destroy_test_device(&device)!!;
-    gpu::internal::vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
+struct BorrowedSwapchainFixture {
+    gpu::internal::vk::VkDeviceState*                state;
+    gpu::internal::vk::VkInstanceSurfaceDispatch     original_surface_dispatch;
+    gpu::internal::vk::VkDevicePresentationDispatch  original_presentation_dispatch;
+    gpu::internal::vk::SwapchainTable                original_swapchains;
+    gpu::internal::vk::SwapchainCell[1]              swapchain_cells;
+    vma::ImageAllocation                             backing;
+    gpu::SwapchainHandle                             swapchain;
+    gpu::internal::vk::SwapchainSlot*                live_slot;
+}
 
-    gpu::internal::vk::VkInstanceSurfaceDispatch original_surface_dispatch =
-        state.instance_dispatch.surface;
-    gpu::internal::vk::VkDevicePresentationDispatch original_presentation_dispatch =
-        state.device_dispatch.presentation;
-    gpu::internal::vk::SwapchainTable original_swapchains =
-        state.presentation.swapchains;
-    defer {
-        state.instance_dispatch.surface = original_surface_dispatch;
-        state.device_dispatch.presentation = original_presentation_dispatch;
-        state.presentation.swapchains = original_swapchains;
-    }
+<* Install a one-image swapchain over an application image through injected
+   WSI ops; `restore_borrowed_swapchain` undoes it. *>
+fn void install_borrowed_swapchain(
+    gpu::internal::vk::VkDeviceState* state,
+    BorrowedSwapchainFixture* fixture,
+) {
+
+    fixture.state = state;
+    fixture.original_surface_dispatch = state.instance_dispatch.surface;
+    fixture.original_presentation_dispatch = state.device_dispatch.presentation;
+    fixture.original_swapchains = state.presentation.swapchains;
 
     gpu::TextureDesc backing_desc = {
         .access    = { .graphics },
@@ -1399,12 +1402,11 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     vma::AllocationCreateInfo allocation_info = {
         .usage = vma::MemoryUsage.AUTO_PREFER_DEVICE,
     };
-    vma::ImageAllocation backing = state.allocator.try_create_image(
+    fixture.backing = state.allocator.try_create_image(
         &image_info,
         &allocation_info,
     )!!;
-    defer state.allocator.destroy_image(backing.image, backing.allocation);
-    borrowed_view_backing_image = backing.image;
+    borrowed_view_backing_image = fixture.backing.image;
     borrowed_view_swapchain_creates = 0;
     borrowed_view_swapchain_destroys = 0;
     borrowed_view_acquires = 0;
@@ -1422,9 +1424,8 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
         .acquire_next_image   = &borrowed_view_acquire,
     };
 
-    gpu::internal::vk::SwapchainCell[1] swapchain_cells;
     state.presentation.swapchains = {
-        .slots = swapchain_cells[..],
+        .slots = fixture.swapchain_cells[..],
         .owner = gpu::internal::resource_owner_tag(
             state.resource_owner,
             gpu::internal::ResourceOwnerKind.SWAPCHAIN,
@@ -1469,10 +1470,33 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
         old:     (vk::SwapchainKHR)null,
         context: &context,
     )!!;
-    gpu::SwapchainHandle swapchain =
-        state.presentation.swapchains.alloc(slot)!!;
-    gpu::internal::vk::SwapchainSlot* live_slot =
-        state.presentation.swapchains.get(swapchain)!!;
+    fixture.swapchain = state.presentation.swapchains.alloc(slot)!!;
+    fixture.live_slot = state.presentation.swapchains.get(fixture.swapchain)!!;
+}
+
+fn void restore_borrowed_swapchain(BorrowedSwapchainFixture* fixture) {
+    gpu::internal::vk::VkDeviceState* state = fixture.state;
+    state.instance_dispatch.surface = fixture.original_surface_dispatch;
+    state.device_dispatch.presentation = fixture.original_presentation_dispatch;
+    state.presentation.swapchains = fixture.original_swapchains;
+    state.allocator.destroy_image(fixture.backing.image, fixture.backing.allocation);
+}
+
+fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .enable_vulkan_validation = true,
+        .application_name  = "borrowed_swapchain_view_lifecycle_test",
+    };
+    gpu::Device device = create_test_device(&runtime_desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::internal::vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    BorrowedSwapchainFixture fixture;
+    install_borrowed_swapchain(state, &fixture);
+    defer restore_borrowed_swapchain(&fixture);
+    gpu::SwapchainHandle swapchain = fixture.swapchain;
+    gpu::internal::vk::SwapchainSlot* live_slot = fixture.live_slot;
 
     gpu::AcquiredImage acquired = gpu::internal::vk::vk_acquire_next_image(
         state,
@@ -2136,4 +2160,110 @@ fn void swapchain_info_query_rejects_invalid_handle() @test {
     gpu::SwapchainHandle bogus = { .index = 3, .generation = 7 };
     fault query_fault = @catch(gpu::get_swapchain_info(&device, bogus));
     assert(query_fault == gpu::INVALID_HANDLE, "query on a bogus swapchain faults INVALID_HANDLE");
+}
+
+fn vk::Result capture_unified_submit(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) {
+    assert(submit_count == 1, "one native submission");
+    unified_submit_buffer_count = submits[0].command_buffer_info_count;
+    unified_submit_wait_stage = submits[0].wait_semaphore_info_count > 0
+        ? submits[0].p_wait_semaphore_infos[0].stage_mask
+        : (vk::PipelineStageFlags2)0;
+    if (submits[0].wait_semaphore_info_count > 0) {
+        vk::SemaphoreSubmitInfo signal = vk::semaphore_submit_info()
+            .set_semaphore(submits[0].p_wait_semaphore_infos[0].semaphore)
+            .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
+        vk::SubmitInfo2 release = vk::submit_info2()
+            .set_signal_semaphore_infos((&signal)[:1]);
+        vk::Result released = vk::queue_submit2(queue, 1, &release, (vk::Fence)null);
+        if (released != vk::Result.SUCCESS) return released;
+    }
+    return vk::queue_submit2(queue, submit_count, submits, fence);
+}
+
+fn void unified_swapchain_submit_wraps_application_lists() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .contract_validation      = gpu::ContractValidation.FULL,
+        .enable_vulkan_validation = true,
+        .application_name         = "unified_swapchain_submit_test",
+    };
+    gpu::DeviceDesc device_desc = { .unified_layouts = true };
+    gpu::Device device = create_test_device(&runtime_desc, &device_desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::internal::vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    BorrowedSwapchainFixture fixture;
+    install_borrowed_swapchain(state, &fixture);
+    defer restore_borrowed_swapchain(&fixture);
+
+    gpu::AcquiredImage acquired = gpu::internal::vk::vk_acquire_next_image(
+        state,
+        fixture.swapchain,
+        0,
+    )!!;
+    assert(acquired.prior_state.layout == gpu::TextureLayout.GENERAL,
+        "unified mode reports the image in GENERAL");
+
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    gpu::ColorTargetDesc[1] colors = {{ .view = acquired.attachment_view }};
+    gpu::RenderPassDesc pass = { .colors = colors[..], .width = 4, .height = 4 };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+    gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)!! };
+
+    gpu::SubmitDesc wrong = {
+        .command_lists    = lists[..],
+        .readiness_before = { .compute },
+    };
+    assert(@catch(gpu::internal::vk::vk_submit_with(state, queue, &wrong, &capture_unified_submit))
+        == gpu::INVALID_ARGUMENT,
+        "readiness stages without readiness stay rejected");
+
+    unified_submit_buffer_count = 0;
+    gpu::SubmitDesc desc = {
+        .command_lists    = lists[..],
+        .readiness        = acquired.readiness,
+        .readiness_before = { .compute },
+    };
+    gpu::CompletionPoint point =
+        gpu::internal::vk::vk_submit_with(state, queue, &desc, &capture_unified_submit)!!;
+    assert(unified_submit_buffer_count == 3,
+        "the batch holds the acquire list, the application list, and the present list");
+    assert(unified_submit_wait_stage
+        == (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+        "the acquire wait ignores readiness_before");
+    gpu::wait_completion(point)!!;
+    gpu::internal::vk::commit_present_result(fixture.live_slot, &acquired, vk::Result.SUCCESS);
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::begin_device_operation(&device)!!;
+    release_submitted_executables(&operation, lists[..]);
+    gpu::internal::end_device_operation(&operation);
+
+    gpu::AcquiredImage second = gpu::internal::vk::vk_acquire_next_image(
+        state,
+        fixture.swapchain,
+        0,
+    )!!;
+    vk::SemaphoreSubmitInfo signal = vk::semaphore_submit_info()
+        .set_semaphore(fixture.live_slot.pending_acquire_semaphore)
+        .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
+    vk::SubmitInfo2 release = vk::submit_info2().set_signal_semaphore_infos((&signal)[:1]);
+    assert(vk::queue_submit2(state.queue_completions[queue.id].queue, 1, &release, (vk::Fence)null)
+        == vk::Result.SUCCESS, "the fixture signals the acquisition");
+    gpu::CommandList again = gpu::begin_commands(&allocator)!!;
+    gpu::cmd_begin_render_pass(&again, &pass)!!;
+    gpu::cmd_end_render_pass(&again)!!;
+    gpu::ExecutableCommandList[1] again_lists = { gpu::end_commands(&again)!! };
+    gpu::SubmitDesc omitted = { .command_lists = again_lists[..], .readiness = second.readiness };
+    gpu::CompletionPoint public_point = gpu::submit(queue, &omitted)!!;
+    gpu::wait_completion(public_point)!!;
+    gpu::internal::vk::commit_present_result(fixture.live_slot, &second, vk::Result.SUCCESS);
+    gpu::internal::vk::vk_destroy_swapchain(state, fixture.swapchain)!!;
 }

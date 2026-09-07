@@ -224,6 +224,14 @@ Within one queue, order comes from command order plus barriers. Across
 queues, a `SubmitDesc.completion_waits` entry names a prior `CompletionPoint`
 and the stages that must wait for it.
 
+`DeviceDesc.unified_layouts` selects a second mode. Every texture lives in
+one layout; a `TextureBarrier` keeps its resource scope and its stage and
+access masks, and its layouts lower to that one layout (`UNDEFINED` keeps
+its discard meaning). The library initializes new textures at the next
+submit and transitions swapchain images inside the readiness submit.
+`DeviceCaps.unified_layouts_optimal` reports that the driver guarantees the
+one layout costs nothing.
+
 ```mermaid
 sequenceDiagram
     participant C as Compute queue
@@ -250,6 +258,10 @@ sequenceDiagram
     Q-->>App: CompletionPoint p
     App->>SC: present(&image, p)
 ```
+
+In unified mode `prior_state.layout` is `GENERAL`, the application records
+no layout transitions, and the readiness submit carries the acquire and
+present transitions around the application's lists.
 
 Acquisition is nonblocking by default and returns `WAIT_TIMEOUT` when no
 image is ready. `SWAPCHAIN_OUT_OF_DATE` from acquire or present means resize.

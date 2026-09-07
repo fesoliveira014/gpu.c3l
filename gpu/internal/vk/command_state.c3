@@ -213,6 +213,8 @@ struct CommandRecord @public {
     bool                             ray_tracing_stack_size_set;
     CommandScratch*                  scratch;
     uint                             pending_acceleration_structure_head;
+    bool                             internal;
+    gpu::TextureHandle[]             init_textures;
 }
 
 struct CommandOps @public {
