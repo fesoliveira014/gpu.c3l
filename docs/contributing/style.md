@@ -1,5 +1,7 @@
 # Style
 
+[Documentation](../index.md) › Contributing › Style
+
 ## 1. Language target
 
 C3 0.8.3. C3 is pre-1.0; check syntax against the installed compiler, not

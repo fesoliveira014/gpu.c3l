@@ -1,5 +1,7 @@
 # Features and limitations
 
+[Documentation](index.md) › Features and limitations
+
 What the library does, what it deliberately does not do, and the fixed
 limits an application must design around.
 

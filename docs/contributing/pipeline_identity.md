@@ -1,5 +1,7 @@
 # Graphics pipeline identity
 
+[Documentation](../index.md) › Contributing › Graphics pipeline identity
+
 **Question.** Should `polygon_mode` and `sample_count` move out of
 `GraphicsPipelineDesc` into command-time state?
 

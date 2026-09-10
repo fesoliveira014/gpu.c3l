@@ -104,6 +104,7 @@ class PackageReleaseTests(unittest.TestCase):
             "gpu.c3l/gpu/gpu.c3",
             "gpu.c3l/gpu/gpu.c3i",
             "gpu.c3l/gpu/util/device_context.c3",
+            "gpu.c3l/docs/concepts.md",
             "gpu.c3l/docs/api/index.md",
             "gpu.c3l/docs/util/index.md",
             "gpu.c3l/docs/util/device_context.md",

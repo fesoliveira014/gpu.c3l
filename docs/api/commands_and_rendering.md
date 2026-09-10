@@ -1,5 +1,7 @@
 # Commands and rendering
 
+[Documentation](../index.md) › [Public API](index.md) › Commands and rendering
+
 Command allocators, the command-list lifecycle, and every `cmd_*` call.
 
 ```mermaid

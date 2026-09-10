@@ -1,5 +1,7 @@
 # Runtime and devices
 
+[Documentation](../index.md) › [Public API](index.md) › Runtime and devices
+
 Everything an application does starts with a `Runtime`, picks an `Adapter`,
 creates a `Device`, and fetches `Queue` values from it.
 

@@ -1,5 +1,7 @@
 # Root-pointer data vs a dynamic-uniform path
 
+[Documentation](../index.md) › Contributing › Root-pointer data vs a dynamic-uniform path
+
 **Question.** Should small per-command shader data get a library-owned
 dynamic-uniform path (one fixed binding, one mapped ring, one dynamic offset
 per command) beside the root-pointer path?

@@ -1,5 +1,7 @@
 # Unified image layouts
 
+[Documentation](../index.md) › Contributing › Unified image layouts
+
 **Question.** Should the library keep every texture in one image layout and
 own the transitions, instead of requiring an application-authored
 `TextureBarrier` for every layout change?

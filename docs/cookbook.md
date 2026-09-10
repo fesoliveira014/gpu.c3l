@@ -1,5 +1,7 @@
 # Cookbook
 
+[Documentation](index.md) › Cookbook
+
 Short recipes for common operations. Each assumes a live device, a queue,
 and a recording `CommandList` named `commands` unless it says otherwise.
 Exact signatures are in the [API reference](api/index.md). Ray-tracing

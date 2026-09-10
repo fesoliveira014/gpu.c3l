@@ -1,5 +1,7 @@
 # Shaders and pipelines
 
+[Documentation](../index.md) › [Public API](index.md) › Shaders and pipelines
+
 Pipelines are created from SPIR-V. Their layout is fixed by the
 [shader ABI](../shader_abi.md): one global heap set plus a root push block.
 There is nothing to declare on the C3 side except the shader bytes.

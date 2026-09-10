@@ -1,5 +1,7 @@
 # Contiguous texture-index ranges
 
+[Documentation](../index.md) › Contributing › Contiguous texture-index ranges
+
 **Question.** Should the descriptor heap offer contiguous index ranges so
 material data can store one base `TextureIndex` plus offsets, and so
 row-addressed layouts (a double-buffered G-buffer at

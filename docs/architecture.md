@@ -1,5 +1,7 @@
 # Architecture
 
+[Documentation](index.md) › Architecture
+
 `gpu.c3l` is a thin, explicit GPU API for C3. The public model has six kinds
 of thing: devices, queues, memory, resources, commands, and completion. The
 backend is Vulkan 1.3 and is private.

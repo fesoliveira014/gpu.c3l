@@ -1,5 +1,7 @@
 # Public API
 
+[Documentation](../index.md) › Public API
+
 The public module is `gpu`. Surface creation is in `gpu::surface::wayland`,
 `gpu::surface::x11`, and `gpu::surface::win32`. Optional setup helpers are in
 [`gpu::util`](../util/index.md). Everything under

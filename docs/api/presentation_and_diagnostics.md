@@ -1,5 +1,7 @@
 # Presentation and diagnostics
 
+[Documentation](../index.md) › [Public API](index.md) › Presentation and diagnostics
+
 Surfaces, swapchains, the acquire-render-present loop, and the debug
 callback.
 
