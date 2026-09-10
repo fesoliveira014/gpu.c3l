@@ -51,9 +51,10 @@ python3 -B -m unittest scripts.test_package_release -v
 python3 scripts/package_release.py --version 0.0.0-ci --target linux-x64 --output-dir dist
 ```
 
-CI builds both target archives, assembles them into a throwaway `lib/gpu.c3l`
-consumer layout, and builds and runs the getting-started program from
-`project.release.json` without touching the repository checkout.
+CI builds both target archives, extracts the one for its platform into a
+throwaway consumer as `lib/gpu.c3l`, builds `gpu_shaders` from the extracted
+tool, compiles the getting-started shader with it, and builds and runs the
+program from `project.release.json` without touching the repository checkout.
 
 CPU targets under `test/cpu` compile the public module against a stub backend
 with no native libraries:

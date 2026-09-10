@@ -20,7 +20,7 @@ Lay the application out like this:
 ```text
 hello_gpu/
 ├── lib/
-│   └── gpu.c3l/          release bundle or recursive clone
+│   └── gpu.c3l/          git submodule or extracted release archive
 ├── shaders/
 │   └── doubler.comp.glsl
 ├── src/
@@ -28,17 +28,20 @@ hello_gpu/
 └── project.json
 ```
 
-Either extract the
-[latest release](https://github.com/fesoliveira014/gpu.c3l/releases/latest)
-for your target into `lib/gpu.c3l`, or clone:
+Add the library as a submodule pinned to a release tag:
 
 ```sh
-git clone --recurse-submodules \
-  https://github.com/fesoliveira014/gpu.c3l.git lib/gpu.c3l
+git submodule add https://github.com/fesoliveira014/gpu.c3l lib/gpu.c3l
+git -C lib/gpu.c3l checkout v0.4.2
+git submodule update --init --recursive lib/gpu.c3l
+git config -f .gitmodules submodule.lib/gpu.c3l.shallow true
 ```
 
-Both forms ship `gpu` plus its three binding packages. `project.json`
-resolves all four:
+Without git, extract the archive for your target from the
+[latest release](https://github.com/fesoliveira014/gpu.c3l/releases/latest)
+into `lib/`; it unpacks as `lib/gpu.c3l`. Both forms ship `gpu`, its three
+binding packages, and the `gpu_shaders` tool. `project.json` resolves all four
+packages:
 
 ```json
 {

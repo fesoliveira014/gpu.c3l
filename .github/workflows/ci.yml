@@ -55,7 +55,6 @@ jobs:
       - name: Build Linux release bundle
         run: |
           python3 -B -m unittest scripts.test_package_release -v
-          python3 -B -m unittest scripts.test_build_distribution -v
           python3 scripts/package_release.py \
             --version "$BUNDLE_VERSION" \
             --target linux-x64 \
@@ -134,17 +133,17 @@ jobs:
           c3c build device_context --path examples/device_context
           ./examples/device_context/build/device_context
 
-      - name: Run combined distribution consumer
+      - name: Run release archive consumer
         run: |
-          CONSUMER="$RUNNER_TEMP/distribution-consumer"
-          python3 scripts/build_distribution.py \
-            --tag "v${BUNDLE_VERSION}" \
-            --linux-archive "dist/gpu.c3l-v${BUNDLE_VERSION}-linux-x64.tar.gz" \
-            --windows-archive "dist/gpu.c3l-v${BUNDLE_VERSION}-windows-x64.zip" \
-            --output-dir "$CONSUMER/lib/gpu.c3l"
+          CONSUMER="$RUNNER_TEMP/archive-consumer"
+          mkdir -p "$CONSUMER/lib"
+          tar -xzf "dist/gpu.c3l-v${BUNDLE_VERSION}-linux-x64.tar.gz" -C "$CONSUMER/lib"
           cp -R examples/getting_started/src "$CONSUMER/src"
           cp -R examples/getting_started/shaders "$CONSUMER/shaders"
+          rm -f "$CONSUMER"/shaders/*.spv
           cp examples/getting_started/project.release.json "$CONSUMER/project.json"
+          c3c build gpu_shaders --path "$CONSUMER/lib/gpu.c3l/tools/gpu_shaders"
+          "$CONSUMER/lib/gpu.c3l/tools/gpu_shaders/build/gpu_shaders" --shader-dir "$CONSUMER/shaders"
           c3c build hello_gpu --path "$CONSUMER"
           "$CONSUMER/build/hello_gpu"
 
@@ -283,7 +282,6 @@ jobs:
       - name: Build Windows release bundle
         run: |
           python -B -m unittest scripts.test_package_release -v
-          python -B -m unittest scripts.test_build_distribution -v
           python scripts/package_release.py \
             --version "$BUNDLE_VERSION" \
             --target windows-x64 \
@@ -373,17 +371,18 @@ jobs:
           c3c build device_context --path examples/device_context
           ./examples/device_context/build/device_context.exe
 
-      - name: Run combined distribution consumer
+      - name: Run release archive consumer
         run: |
-          CONSUMER="$RUNNER_TEMP/distribution-consumer"
-          python scripts/build_distribution.py \
-            --tag "v${BUNDLE_VERSION}" \
-            --linux-archive "dist/gpu.c3l-v${BUNDLE_VERSION}-linux-x64.tar.gz" \
-            --windows-archive "dist/gpu.c3l-v${BUNDLE_VERSION}-windows-x64.zip" \
-            --output-dir "$CONSUMER/lib/gpu.c3l"
+          CONSUMER="$RUNNER_TEMP/archive-consumer"
+          mkdir -p "$CONSUMER/lib"
+          python -m zipfile -e "dist/gpu.c3l-v${BUNDLE_VERSION}-windows-x64.zip" "$CONSUMER/lib"
           cp -R examples/getting_started/src "$CONSUMER/src"
           cp -R examples/getting_started/shaders "$CONSUMER/shaders"
+          rm -f "$CONSUMER"/shaders/*.spv
           cp examples/getting_started/project.release.json "$CONSUMER/project.json"
+          c3c build gpu_shaders --path "$CONSUMER/lib/gpu.c3l/tools/gpu_shaders"
+          GLSLC="$(cygpath -w "$(command -v glslc)")" \
+            "$CONSUMER/lib/gpu.c3l/tools/gpu_shaders/build/gpu_shaders.exe" --shader-dir "$CONSUMER/shaders"
           c3c build hello_gpu --path "$CONSUMER"
           "$CONSUMER/build/hello_gpu.exe"
 
@@ -413,16 +412,6 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Verify cross-job distribution
-        run: |
-          OUTPUT_DIR="$RUNNER_TEMP/release-distribution"
-          test ! -e "$OUTPUT_DIR"
-          python3 scripts/build_distribution.py \
-            --tag "$GITHUB_REF_NAME" \
-            --linux-archive "dist/gpu.c3l-${GITHUB_REF_NAME}-linux-x64.tar.gz" \
-            --windows-archive "dist/gpu.c3l-${GITHUB_REF_NAME}-windows-x64.zip" \
-            --output-dir "$OUTPUT_DIR"
-
       - name: Create checksums
         run: |
           cd dist
@@ -440,12 +429,3 @@ jobs:
             --verify-tag \
             --generate-notes \
             --title "gpu.c3l $GITHUB_REF_NAME"
-
-  distribution:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: release
-    uses: ./.github/workflows/sync-distribution.yml
-    with:
-      tag: ${{ github.ref_name }}
-    secrets:
-      DIST_REPO_TOKEN: ${{ secrets.DIST_REPO_TOKEN }}

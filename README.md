@@ -56,15 +56,22 @@ it for a platform or workload.
 
 ## Install
 
-Download the matching archive from the
-[latest release](https://github.com/fesoliveira014/gpu.c3l/releases/latest), then
-extract it as `lib/gpu.c3l` in your application. Release archives contain the
-library, its three runtime binding dependencies, native libraries for one
-target, licenses, and consumer documentation.
-
-To track the Git repository instead, clone recursively. The recursive checkout
-contains only the three runtime bindings (`vk`, `vma`, and `spvreflect`):
+Add the repository as a submodule at `lib/gpu.c3l`, pinned to a release tag.
+The checkout brings its three binding packages (`vk`, `vma`, `spvreflect`)
+with vendored native libraries for `linux-x64` and `windows-x64`:
 
 ```sh
-git clone --recurse-submodules https://github.com/fesoliveira014/gpu.c3l.git
+git submodule add https://github.com/fesoliveira014/gpu.c3l lib/gpu.c3l
+git -C lib/gpu.c3l checkout v0.4.2
+git submodule update --init --recursive lib/gpu.c3l
+git config -f .gitmodules submodule.lib/gpu.c3l.shallow true
 ```
+
+Without git, download the archive for your target from the
+[latest release](https://github.com/fesoliveira014/gpu.c3l/releases/latest)
+and extract it into `lib/`; it unpacks to the same `lib/gpu.c3l` layout with
+the library, bindings, native libraries for that target, the `gpu_shaders`
+tool, shader include files, licenses, and consumer documentation.
+
+[Getting started](docs/getting_started.md#install) shows the `project.json`
+that resolves the four packages and the shader build.
