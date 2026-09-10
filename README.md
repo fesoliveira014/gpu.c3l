@@ -14,17 +14,17 @@ management, or a compatibility descriptor path.
 
 ## Highlights
 
-- one `gpu` module plus platform-specific surface modules;
-- root pointers (`GpuAddress`) for per-dispatch and per-draw shader data;
-- bindless texture and sampler indices;
-- VMA-backed allocations, checked spans, mapping, and explicit visibility;
-- compute, graphics, and explicitly opted-in direct ray-tracing pipelines;
-- dynamic rendering, indirect and generated work, acceleration structures,
-  ray queries, sparse textures, timestamp queries, and swapchains;
-- caller-owned command allocators with explicit completion-based reuse;
-- optional `gpu::util` device context for setup and grouped ownership;
-- optional full contract validation and structured diagnostics; and
-- a schema generator for matching C3 and GLSL shader ABI declarations.
+- one `gpu` module plus one surface module per window system;
+- root pointers (`GpuAddress`) and bindless texture and sampler indices
+  instead of descriptor sets;
+- explicit memory classes, checked spans, mapping, and visibility;
+- compute, graphics, mesh, and opt-in ray-tracing pipelines; indirect and
+  generated work; sparse textures; timestamp queries; swapchains;
+- caller-owned command allocators and completion points; no hidden waits;
+- optional `gpu::util` device context, full contract validation, and
+  structured diagnostics; and
+- `gpu_shaders`: one tool that generates matching C3 and GLSL ABI declarations
+  and compiles shaders.
 
 `TextureIndex`, `SamplerIndex`, `AccelerationStructureIndex`, and `GpuAddress`
 are raw shader values, not ownership tokens. Applications must keep their
@@ -45,6 +45,8 @@ it for a platform or workload.
 
 ## Start here
 
+- [Concepts](docs/concepts.md) — explicit GPU programming as this library
+  exposes it, for readers who have not used Vulkan or D3D12.
 - [Getting started](docs/getting_started.md) — run a minimal compute program,
   then build an SDL3 triangle.
 - [Documentation](docs/index.md) — concepts, recipes, and API reference.

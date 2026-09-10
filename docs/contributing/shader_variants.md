@@ -1,5 +1,7 @@
 # Shader variants
 
+[Documentation](../index.md) › Contributing › Shader variants
+
 **Question.** Does the repository need SPIR-V specialization constants in
 `ShaderDesc`?
 

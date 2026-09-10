@@ -1,8 +1,11 @@
 # Getting started
 
+[Documentation](index.md) › Getting started
+
 Two programs. The first doubles an array on the GPU with no window. The
 second draws a triangle in an SDL3 window. Each is walked through in
-sections; the complete sources are linked.
+sections; the complete sources are linked. Terms link to
+[concepts](concepts.md) at their first use.
 
 Targets: C3 0.8.3, `linux-x64` or `windows-x64`, Vulkan 1.3.
 
@@ -80,8 +83,9 @@ Shader:
 
 ### The shader
 
-The compute shader receives one 64-bit root address by push constant, reads
-a root struct through it, and follows two more addresses to the arrays:
+The compute shader receives one 64-bit
+[root address](concepts.md#gpu-addresses-and-root-pointers) by push constant,
+reads a root struct through it, and follows two more addresses to the arrays:
 
 ```glsl
 #version 460
@@ -148,18 +152,21 @@ gpu::Device device = gpu::create_device(&adapter)!;
 defer (void)gpu::destroy_device(&device);
 ```
 
-`full_validation_runtime_desc` turns on contract validation and the Vulkan
+`full_validation_runtime_desc` turns on
+[contract validation](concepts.md#validation-and-diagnostics) and the Vulkan
 validation layer. Use it during development. A zero `RuntimeDesc` turns both
 off.
 
-`create_device` with no descriptor selects default queues and no
-presentation. The `defer` lines destroy in reverse order, which is the
-required order: children before parents.
+`create_device` with no descriptor selects default
+[queues](concepts.md#queues) and no presentation. The `defer` lines destroy
+in reverse order, which is the required order for
+[handles](concepts.md#handles-and-ownership): children before parents.
 
 ### Memory
 
-Three allocations: input the CPU writes, output the CPU reads, and the root
-record.
+Three [allocations](concepts.md#memory-spans-and-mapping): input the CPU
+writes, output the CPU reads, and the root record. The memory class of each
+says who reads and writes it.
 
 ```c3
 gpu::AllocationDesc input_desc = {
@@ -182,9 +189,10 @@ defer (void)gpu::free_allocation(&device, &output_allocation);
 ```
 
 `access` names the queue roles that will touch the memory.
-`allocate_mapped_memory` returns the span, its host mapping, and its GPU
-address in one value; `span.allocation()` names the token to free. Write
-the input through its mapping and flush:
+`allocate_mapped_memory` returns the span, its host mapping, and its
+[GPU address](concepts.md#gpu-addresses-and-root-pointers) in one value;
+`span.allocation()` names the token to free. Write the input through its
+mapping and flush so the GPU sees it:
 
 ```c3
 float* in_data = (float*)input.bytes.ptr;
@@ -231,6 +239,11 @@ gpu::flush_mapped_span(&device, root.span)!;
 ```
 
 ### Record, submit, wait
+
+A [command list](concepts.md#commands) records the dispatch and a
+[barrier](concepts.md#barriers-and-texture-state); `submit` hands it to the
+queue and returns the [completion point](concepts.md#completion-points) to
+wait on.
 
 ```c3
 gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!;
@@ -442,8 +455,8 @@ pump events. `SWAPCHAIN_OUT_OF_DATE` means the window changed.
 
 ### Frame: record
 
-Transition the image from whatever state it was in to color attachment,
-render, then transition it to present:
+Transition the image from whatever [state](concepts.md#barriers-and-texture-state)
+it was in to color attachment, render, then transition it to present:
 
 ```c3
 gpu::CommandList commands = gpu::begin_commands(&allocator)!;
@@ -492,8 +505,8 @@ gpu::TextureBarrier to_present = gpu::texture_transition(
 gpu::cmd_texture_barrier(&commands, &to_present)!;
 ```
 
-`render_geometry_state` gives a full-area viewport and scissor with no
-culling and no depth. The color packet must match the pipeline's color
+[`render_geometry_state`](concepts.md#render-passes-and-graphics-state)
+gives a full-area viewport and scissor with no culling and no depth. The color packet must match the pipeline's color
 formats, one entry each. A zero root address is legal; these shaders never
 dereference it.
 
@@ -559,6 +572,8 @@ comes back.
 
 ## Next
 
+- [Concepts](concepts.md): every term above, explained for readers new to
+  explicit GPU APIs.
 - [Architecture](architecture.md): the ownership, memory, and sync model.
 - [Shader ABI](shader_abi.md): root structs, buffer references, heap
   indices, and the schema generator.

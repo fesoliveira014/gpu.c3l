@@ -1,5 +1,7 @@
 # Shader ABI
 
+[Documentation](index.md) › Shader ABI
+
 The shader ABI is the byte contract between C3 code, SPIR-V, and the
 backend. It has three parts:
 

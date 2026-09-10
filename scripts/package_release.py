@@ -37,6 +37,7 @@ COMPONENTS = (
 
 CONSUMER_DOCS = (
     "docs/index.md",
+    "docs/concepts.md",
     "docs/getting_started.md",
     "docs/architecture.md",
     "docs/features_and_limitations.md",

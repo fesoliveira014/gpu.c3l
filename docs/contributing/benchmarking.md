@@ -1,5 +1,7 @@
 # Benchmarking
 
+[Documentation](../index.md) › Contributing › Benchmarking
+
 Benchmarks are manual evidence, not CI gates. Run the correctness tests
 first. Record enough environment detail that someone else can explain the
 number.

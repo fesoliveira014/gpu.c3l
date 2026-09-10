@@ -1,5 +1,7 @@
 # Device context
 
+[Documentation](../index.md) › [Utilities](index.md) › Device context
+
 `gpu::util::DeviceContext` groups setup and ownership of a runtime, device,
 command allocator, and optional surface and swapchain. It ships in the existing
 bundle. Importing `gpu::util` creates nothing; calling `create_device_context`

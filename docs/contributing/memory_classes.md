@@ -1,5 +1,7 @@
 # Memory classes
 
+[Documentation](../index.md) › Contributing › Memory classes
+
 Decision record for the placement each `MemoryClass` requests from VMA and
 why `CPU_WRITE_GPU_LOCAL` exists beside `CPU_WRITE`.
 

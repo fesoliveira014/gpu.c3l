@@ -1,5 +1,7 @@
 # Synchronization and submission
 
+[Documentation](../index.md) › [Public API](index.md) › Synchronization and submission
+
 Barriers order work inside one command list. Completion points order work
 across submissions, queues, and the host. Timestamps measure it.
 

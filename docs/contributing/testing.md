@@ -1,5 +1,7 @@
 # Testing
 
+[Documentation](../index.md) › Contributing › Testing
+
 Tests are ordinary C3 programs and `@test` targets. Nothing parses source
 text, generated docs, CI configuration, or benchmark output as a policy.
 

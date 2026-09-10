@@ -1,5 +1,7 @@
 # Utilities
 
+[Documentation](../index.md) › Utilities
+
 `gpu::util` provides optional helpers over the public `gpu` API. They ship in
 the same `gpu.c3l` bundle, require no extra dependency, and create nothing on
 import. Opt in by calling the helper; use its objects with ordinary GPU calls.

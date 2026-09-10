@@ -1,5 +1,7 @@
 # Memory and resources
 
+[Documentation](../index.md) › [Public API](index.md) › Memory and resources
+
 Allocations, spans, addresses, textures, views, samplers, and acceleration
 structures.
 

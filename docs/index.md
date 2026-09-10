@@ -5,15 +5,20 @@ and `gpu/util/device_context.c3` are the authority for exact signatures.
 
 ## Learn
 
-1. [Getting started](getting_started.md): install, a compute program, a
-   windowed triangle. Read this first.
-2. [Architecture](architecture.md): objects, ownership, memory, commands,
-   synchronization, threading. Read this before designing around the API.
-3. [Shader ABI](shader_abi.md): root pointers, std430 records, heap indices,
+1. [Concepts](concepts.md): handles, memory, root pointers, indices,
+   commands, completion, barriers, queues, presentation, validation. For
+   readers new to explicit GPU APIs; skip it if you have used Vulkan or
+   D3D12.
+2. [Getting started](getting_started.md): install, a compute program, a
+   windowed triangle.
+3. [Architecture](architecture.md): the contract for objects, ownership,
+   memory, commands, synchronization, threading. Read this before designing
+   around the API.
+4. [Shader ABI](shader_abi.md): root pointers, std430 records, heap indices,
    the schema generator. Read this before writing shaders.
-4. [Cookbook](cookbook.md): recipes for uploads, readback, depth, indirect
+5. [Cookbook](cookbook.md): recipes for uploads, readback, depth, indirect
    draws, multiple queues, threads, timestamps, resize, ray tracing.
-5. [Features and limitations](features_and_limitations.md): what is and is
+6. [Features and limitations](features_and_limitations.md): what is and is
    not provided, required device profile, fixed limits.
 
 ## Reference
