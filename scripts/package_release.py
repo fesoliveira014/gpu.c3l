@@ -170,11 +170,12 @@ def collect_release_files(root: Path, target: str) -> dict[str, Path]:
             relative = source.relative_to(root).as_posix()
             files[f"gpu.c3l/{relative}"] = source
 
-    for directory in ("docs/api", "docs/util"):
+    for directory in ("docs/api", "docs/util", "include/shaders", "tools/gpu_shaders/src"):
         for source in sorted((root / directory).rglob("*")):
-            if source.is_file():
+            if source.is_file() and source.name != ".gitkeep":
                 relative = source.relative_to(root).as_posix()
                 files[f"gpu.c3l/{relative}"] = source
+    add_file(files, root, "tools/gpu_shaders/project.json")
 
     for component in COMPONENTS:
         component_root = root / component["path"]
@@ -315,7 +316,7 @@ def create_release(root: Path, version: str, target: str, output_dir: Path) -> P
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build a runtime-only gpu.c3l release archive")
+    parser = argparse.ArgumentParser(description="Build a gpu.c3l release archive for one target")
     parser.add_argument("--version", required=True)
     parser.add_argument("--target", required=True, choices=sorted(NATIVE_FILES))
     parser.add_argument("--output-dir", type=Path, default=Path("dist"))
