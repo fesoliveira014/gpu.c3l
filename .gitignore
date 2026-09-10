@@ -26,6 +26,13 @@ CLAUDE.local.md
 # OpenSpec working dir
 openspec/
 
+# Local working trees, stale sample checkouts, agent scratch, release output
+worktrees/
+samples/
+.agents/
+.superpowers/
+dist/
+
 # Editor / OS
 .DS_Store
 *.swp

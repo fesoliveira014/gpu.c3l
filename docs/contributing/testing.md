@@ -59,16 +59,13 @@ CPU targets under `test/cpu` compile the public module against a stub backend
 with no native libraries:
 
 ```sh
-c3c run import_gpu --path test/cpu
-c3c build import_surface_win32 --path test/cpu
-c3c build import_surface_wayland --path test/cpu
-c3c build import_surface_x11 --path test/cpu
-c3c build span_data_operations --path test/cpu
-c3c build sampler_operations --path test/cpu
-c3c build texture_view_operations --path test/cpu
+c3c test consumer_compile --path test/cpu
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
 ```
+
+`consumer_compile` imports `gpu` and every `gpu::surface::*` module from
+consumer modules and compiles one file per operation set.
 
 Compiler visibility and type checking define the public surface; there is no
 symbol inventory.
@@ -104,17 +101,22 @@ c3c build smoke --path test
 
 ## Vulkan tests
 
+Every `test` target in `test/project.json` runs in CI; the list here, the
+project file, and the workflow change together.
+
 ```sh
-c3c test vk_sparse_texture --path test --test-show-output
-c3c test vk_sparse_bind --path test --test-show-output
 c3c test vk_core --path test --test-show-output
+c3c test vk_unified_layouts --path test --test-show-output
 c3c test vk_wsi --path test --test-show-output
 c3c test vk_optional_generated_work --path test --test-show-output
 c3c test vk_ray_tracing --path test --test-show-output
+c3c test vk_sparse_texture --path test --test-show-output
+c3c test vk_sparse_bind --path test --test-show-output
 ```
 
 | Target | Covers |
 |---|---|
+| `vk_unified_layouts` | the `vk_core` sources built with `UNIFIED_LAYOUTS`: one image layout per texture, barriers and render passes through the unified path |
 | `vk_sparse_texture` | sparse descriptor validation, flags, requirement translation, transaction rollback, cached queries, capability-gated image lifecycle |
 | `vk_sparse_bind` | tile and tail geometry, unbind, allocation compatibility and overlap, allocation-failure rollback, timeline chaining, result mapping, retention and retirement, cross-thread lock boundaries, capability-gated bind/use/unbind with readback |
 | `vk_core` | device selection, allocations, spans, textures, views, samplers, reflection and root ABI, pipelines and cache, command lifecycle, graphics/compute/transfer output, depth, threading, queues, submission and completion, timestamps, diagnostics, rollback, validation policy |
@@ -158,13 +160,7 @@ informational artifact.
 ## Full local sweep
 
 ```sh
-c3c run import_gpu --path test/cpu
-c3c build import_surface_win32 --path test/cpu
-c3c build import_surface_wayland --path test/cpu
-c3c build import_surface_x11 --path test/cpu
-c3c build span_data_operations --path test/cpu
-c3c build sampler_operations --path test/cpu
-c3c build texture_view_operations --path test/cpu
+c3c test consumer_compile --path test/cpu
 c3c build command_wrapper_bench --path test/cpu -O1
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
@@ -178,11 +174,12 @@ for target in resource_create_bench upload_throughput_bench command_path_baselin
 done
 c3c build smoke --path test
 ./test/build/smoke
-c3c test vk_sparse_texture --path test --test-show-output
-c3c test vk_sparse_bind --path test --test-show-output
 c3c test vk_core --path test --test-show-output
+c3c test vk_unified_layouts --path test --test-show-output
 c3c test vk_wsi --path test --test-show-output
 c3c test vk_optional_generated_work --path test --test-show-output
 c3c test vk_ray_tracing --path test --test-show-output
+c3c test vk_sparse_texture --path test --test-show-output
+c3c test vk_sparse_bind --path test --test-show-output
 git diff --check
 ```

@@ -111,14 +111,7 @@ jobs:
 
       - name: CPU-only tests (no native libs)
         run: |
-          c3c run import_gpu --path test/cpu
-          c3c build import_surface_win32 --path test/cpu
-          c3c build import_surface_wayland --path test/cpu
-          c3c build import_surface_x11 --path test/cpu
-          c3c build span_data_operations --path test/cpu
-          c3c build sampler_operations --path test/cpu
-          c3c build texture_view_operations --path test/cpu
-          c3c build device_context_operations --path test/cpu
+          c3c test consumer_compile --path test/cpu
           c3c build command_wrapper_bench --path test/cpu -O1
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
@@ -169,9 +162,12 @@ jobs:
       - name: Test sweep (lavapipe)
         run: |
           c3c test vk_core --path test --test-show-output
+          c3c test vk_unified_layouts --path test --test-show-output
           c3c test vk_wsi --path test --test-show-output
           c3c test vk_optional_generated_work --path test --test-show-output
           c3c test vk_ray_tracing --path test --test-show-output
+          c3c test vk_sparse_texture --path test --test-show-output
+          c3c test vk_sparse_bind --path test --test-show-output
 
       # Whole-compile reference (public module gpu + gpu::internal::vk; a
       # scoped docgen needs a closed source set, which only the whitebox test
@@ -340,14 +336,7 @@ jobs:
 
       - name: CPU test targets
         run: |
-          c3c run import_gpu --path test/cpu
-          c3c build import_surface_win32 --path test/cpu
-          c3c build import_surface_wayland --path test/cpu
-          c3c build import_surface_x11 --path test/cpu
-          c3c build span_data_operations --path test/cpu
-          c3c build sampler_operations --path test/cpu
-          c3c build texture_view_operations --path test/cpu
-          c3c build device_context_operations --path test/cpu
+          c3c test consumer_compile --path test/cpu
           c3c build command_wrapper_bench --path test/cpu -O1
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
