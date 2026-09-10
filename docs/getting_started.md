@@ -10,7 +10,7 @@ Targets: C3 0.8.3, `linux-x64` or `windows-x64`, Vulkan 1.3.
 
 - `c3c --version` reports 0.8.3.
 - A Vulkan 1.3 loader and driver. On a headless Linux box, lavapipe works.
-- `glslangValidator` or `glslc` to compile GLSL to SPIR-V.
+- `glslc` (Vulkan SDK or shaderc) to compile GLSL to SPIR-V.
 - Git with submodule support, if cloning instead of using a release.
 
 ## Install
@@ -110,13 +110,16 @@ void main() {
 }
 ```
 
-Compile it with the library's include directory on the path:
+Compile it with the library's shader tool, which adds the library include
+directory and writes `shaders/doubler.comp.spv`:
 
 ```sh
-glslangValidator -V --target-env vulkan1.3 \
-  -I lib/gpu.c3l/include/shaders \
-  shaders/doubler.comp.glsl -o shaders/doubler.comp.spv
+c3c build gpu_shaders --path lib/gpu.c3l/tools/gpu_shaders
+lib/gpu.c3l/tools/gpu_shaders/build/gpu_shaders --shader-dir shaders
 ```
+
+The same tool generates matching C3 and GLSL declarations from a schema; see
+[Shader ABI](shader_abi.md#schema-generator).
 
 The C3 side declares the same root struct:
 

@@ -1,4 +1,4 @@
-module gen_shader_abi;
+module gpu_shaders;
 
 fn void compute_root_matches_doc_example() @test {
     Schema schema;

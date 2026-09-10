@@ -1,4 +1,4 @@
-module gen_shader_abi;
+module gpu_shaders;
 
 faultdef
     PARSE_ERROR,
@@ -7,4 +7,7 @@ faultdef
     UNKNOWN_TYPE,
     IO_ERROR,
     USAGE_ERROR,
-    DRIFT_DETECTED;
+    DRIFT_DETECTED,
+    SHADER_STAGE_ERROR,
+    SHADER_COMPILE_ERROR,
+    TOOL_NOT_FOUND;

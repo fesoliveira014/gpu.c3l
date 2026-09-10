@@ -2,7 +2,7 @@
   "langrev": "1",
   "output": "build",
   "targets": {
-    "gen_shader_abi": {
+    "gpu_shaders": {
       "type": "executable",
       "sources": [ "src/**" ]
     },
@@ -11,7 +11,7 @@
       "sources": [
         "src/token.c3", "src/lexer.c3", "src/ast.c3", "src/parser.c3", "src/glsl_names.c3",
         "src/layout.c3", "src/emit_c3.c3", "src/emit_glsl.c3", "src/faults.c3",
-        "src/cli.c3", "test/**"
+        "src/shaders.c3", "src/cli.c3", "test/**"
       ]
     }
   }

@@ -1,4 +1,4 @@
-module gen_shader_abi;
+module gpu_shaders;
 
 // GLSL 4.60 reserved words and builtin type names. Schema identifiers are
 // emitted into GLSL verbatim, so any collision breaks every consumer shader
