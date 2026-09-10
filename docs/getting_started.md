@@ -35,7 +35,7 @@ Add the library as a submodule pinned to a release tag:
 
 ```sh
 git submodule add https://github.com/fesoliveira014/gpu.c3l lib/gpu.c3l
-git -C lib/gpu.c3l checkout v0.4.2
+git -C lib/gpu.c3l checkout v0.5.0
 git submodule update --init --recursive lib/gpu.c3l
 git config -f .gitmodules submodule.lib/gpu.c3l.shallow true
 ```
