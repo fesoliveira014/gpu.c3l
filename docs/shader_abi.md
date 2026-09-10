@@ -347,18 +347,42 @@ existing C3 record). Field types: `uint`, `int`, `float`, `u64`, `vec2`,
 any of those (`uint[8] ids;`). `push` members, header or payload, stay
 scalar, vector, or semantic.
 
-Build and run the generator:
+Build the `gpu_shaders` tool once, then run it per project. It generates the
+ABI files and compiles the project's shaders in one call:
 
 ```sh
-c3c build gen_shader_abi --path lib/gpu.c3l/tools/gen_shader_abi
-lib/gpu.c3l/tools/gen_shader_abi/build/gen_shader_abi \
+c3c build gpu_shaders --path lib/gpu.c3l/tools/gpu_shaders
+lib/gpu.c3l/tools/gpu_shaders/build/gpu_shaders \
+  --abi-dir abi \
+  --module my_app \
+  --c3-out src \
+  --glsl-out shaders/generated \
+  --shader-dir shaders
+```
+
+`--abi-dir` reads every `.abi` file in the directory as its own schema and
+writes `src/<name>_abi.c3` and `shaders/generated/<name>_abi.glsl` for each
+one. `--shader-dir` compiles every `<stem>.<stage>.glsl` in the directory to
+`<stem>.spv` beside it (`--spv-out` selects another directory); the stage is
+the inner suffix (`.comp`, `.vert`, `.frag`, `.mesh`, `.task`, `.rgen`,
+`.rmiss`, `.rchit`, `.rahit`, `.rint`, `.rcall`). The library's
+`include/shaders` directory is located from the tool's own path; pass
+`--include <dir>` for additional include directories, or when the tool runs
+from somewhere other than its build directory.
+
+To merge several schema files into one namespace, list them instead of
+`--abi-dir`; `--c3-out` and `--glsl-out` are then file paths:
+
+```sh
+lib/gpu.c3l/tools/gpu_shaders/build/gpu_shaders \
   --module my_app \
   --c3-out src/shader_abi.c3 \
   --glsl-out shaders/generated/my_app_abi.glsl \
-  abi/my_app.abi
+  abi/materials.abi abi/lights.abi
 ```
 
-Add `--check` in CI to fail on drift. The generator rejects implicit padding
+Add `--check` in CI to fail on drift; shaders still compile in that mode.
+`GLSLC` selects the compiler binary. The generator rejects implicit padding
 and names the `_padN` fields to add. Generated C3 carries size and offset
 assertions; generated GLSL emits `root` types as
 `buffer_reference` blocks and `struct` types as plain structs.

@@ -37,7 +37,7 @@ declared dependencies. Build its shader, then build and run it from a checkout
 named `gpu.c3l`:
 
 ```sh
-python3 scripts/build_shaders.py
+python3 scripts/build_shaders.py --check
 c3c build hello_gpu --path examples/getting_started
 ./examples/getting_started/build/hello_gpu
 ```
@@ -73,23 +73,24 @@ c3c test shader_abi --path test/cpu
 Compiler visibility and type checking define the public surface; there is no
 symbol inventory.
 
-## Shader ABI
+## Shader ABI and shaders
 
 ```sh
-c3c test unit --path tools/gen_shader_abi
-python3 -B -m unittest scripts.test_gen_abi
-python3 scripts/gen_abi.py --check
+c3c test unit --path tools/gpu_shaders
+python3 -B -m unittest scripts.test_build_shaders
+python3 scripts/build_shaders.py --check
 ```
 
-After changing a schema:
+After changing a schema or a shader:
 
 ```sh
-python3 scripts/gen_abi.py
 python3 scripts/build_shaders.py
 ```
 
-`build_shaders.py` compiles test shaders, assembles SPIR-V fixtures, and
-builds the getting-started shader. `.spv` outputs are git-ignored.
+`build_shaders.py` builds `tools/gpu_shaders`, regenerates the library and
+test ABI outputs, compiles test and getting-started shaders, and assembles
+SPIR-V fixtures. `--check` reports stale ABI outputs instead of rewriting
+them; shaders compile either way. `.spv` outputs are git-ignored.
 
 ## Link proof
 
@@ -167,10 +168,9 @@ c3c build texture_view_operations --path test/cpu
 c3c build command_wrapper_bench --path test/cpu -O1
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
-c3c test unit --path tools/gen_shader_abi
-python3 -B -m unittest scripts.test_gen_abi
-python3 scripts/gen_abi.py --check
-python3 scripts/build_shaders.py
+c3c test unit --path tools/gpu_shaders
+python3 -B -m unittest scripts.test_build_shaders
+python3 scripts/build_shaders.py --check
 c3c build hello_gpu --path examples/getting_started
 ./examples/getting_started/build/hello_gpu
 for target in resource_create_bench upload_throughput_bench command_path_baseline_bench lifecycle_bench pipeline_cache_bench async_overlap_bench; do

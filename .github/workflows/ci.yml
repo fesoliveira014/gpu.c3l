@@ -123,16 +123,13 @@ jobs:
           c3c test unit --path test/cpu
           c3c test shader_abi --path test/cpu
 
-      - name: Generator unit tests
+      - name: Shader tool tests
         run: |
-          c3c test unit --path tools/gen_shader_abi
-          python3 -B -m unittest scripts.test_gen_abi
+          c3c test unit --path tools/gpu_shaders
+          python3 -B -m unittest scripts.test_build_shaders
 
-      - name: ABI drift gate
-        run: python3 scripts/gen_abi.py --check
-
-      - name: Build shaders
-        run: python3 scripts/build_shaders.py
+      - name: ABI check and shader build
+        run: python3 scripts/build_shaders.py --check
 
       - name: Run getting-started consumer
         run: |
@@ -316,19 +313,17 @@ jobs:
         # dir is already on the linker search path, so the import lib rides there.
         run: cp "$HOME/tools/VulkanSDK/Lib/vulkan-1.lib" lib/vma.c3l/linked-libs/windows-x64/
 
-      - name: Generator unit tests
+      - name: Shader tool tests
         run: |
-          c3c test unit --path tools/gen_shader_abi
-          python -B -m unittest scripts.test_gen_abi
+          c3c test unit --path tools/gpu_shaders
+          python -B -m unittest scripts.test_build_shaders
 
-      - name: ABI drift gate
-        run: C3C="$(cygpath -w "$(command -v c3c)")" python scripts/gen_abi.py --check
-
-      - name: Build shaders
+      - name: ABI check and shader build
         run: |
+          C3C="$(cygpath -w "$(command -v c3c)")" \
           GLSLC="$(cygpath -w "$(command -v glslc)")" \
           SPIRV_AS="$(cygpath -w "$(command -v spirv-as)")" \
-          python scripts/build_shaders.py
+          python scripts/build_shaders.py --check
 
       - name: Build benchmark targets
         run: |

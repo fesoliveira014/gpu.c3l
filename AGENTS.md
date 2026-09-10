@@ -80,8 +80,7 @@ separate samples repository, not this library.
 Run from the repository root:
 
 ```sh
-python3 scripts/gen_abi.py --check
-python3 scripts/build_shaders.py
+python3 scripts/build_shaders.py --check
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
 c3c build smoke --path test

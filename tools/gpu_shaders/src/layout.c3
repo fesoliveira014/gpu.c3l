@@ -1,4 +1,4 @@
-module gen_shader_abi;
+module gpu_shaders;
 
 const uint ROOT_PUSH_CAPACITY = 128;
 const uint COMPUTE_ROOT_HEADER = 8;

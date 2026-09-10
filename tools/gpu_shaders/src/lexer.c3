@@ -1,4 +1,4 @@
-module gen_shader_abi;
+module gpu_shaders;
 
 import std::collections::list;
 import std::io;

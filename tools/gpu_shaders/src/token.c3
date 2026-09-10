@@ -1,4 +1,4 @@
-module gen_shader_abi;
+module gpu_shaders;
 
 enum TokenKind {
     KW_ABI,

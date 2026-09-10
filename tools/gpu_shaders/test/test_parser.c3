@@ -1,4 +1,4 @@
-module gen_shader_abi;
+module gpu_shaders;
 
 macro void @expect_fault(String source, fault expected) {
     Schema schema;

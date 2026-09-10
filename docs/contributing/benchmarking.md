@@ -10,8 +10,7 @@ C3 0.8.3, submodules initialized, shader assets built, and the Vulkan and VMA
 setup from [testing](testing.md#toolchain).
 
 ```sh
-python3 scripts/gen_abi.py --check
-python3 scripts/build_shaders.py
+python3 scripts/build_shaders.py --check
 ```
 
 Record with every result:
