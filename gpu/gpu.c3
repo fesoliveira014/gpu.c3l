@@ -8,18 +8,15 @@ import std::atomic::types;
 // ---- Handle predicates ----
 
 <* Test whether the device handle differs from the invalid zero sentinel.
-
    @return "True for a nonzero handle; this does not prove live provenance." *>
 fn bool Device.is_valid(self) => (ulong)self != 0;
 
 // Owner-bearing handles require both fields to be nonzero.
 <* Test whether the allocation token has nonzero owner and generation fields.
-
    @return "True for a structurally valid token; this does not prove live provenance." *>
 fn bool GpuAllocation.is_valid(self) => self.owner != 0 && self.generation != 0;
 
 <* Compare complete allocation identities.
-
    @return "True when owner, index, and generation are equal." *>
 fn bool GpuAllocation.equals(self, GpuAllocation other) @operator(==) {
     return self.owner == other.owner
@@ -28,12 +25,10 @@ fn bool GpuAllocation.equals(self, GpuAllocation other) @operator(==) {
 }
 
 <* Test whether the texture handle has nonzero owner and generation fields.
-
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool TextureHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 
 <* Compare complete texture identities.
-
    @return "True when owner, index, and generation are equal." *>
 fn bool TextureHandle.equals(self, TextureHandle other) @operator(==) {
     return self.owner == other.owner
@@ -42,12 +37,10 @@ fn bool TextureHandle.equals(self, TextureHandle other) @operator(==) {
 }
 
 <* Test whether an acceleration-structure handle has nonzero owner and generation fields.
-
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool AccelerationStructureHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 
 <* Compare complete acceleration-structure identities.
-
    @return "True when owner, index, and generation are equal." *>
 fn bool AccelerationStructureHandle.equals(self, AccelerationStructureHandle other) @operator(==) {
     return self.owner == other.owner
@@ -56,12 +49,10 @@ fn bool AccelerationStructureHandle.equals(self, AccelerationStructureHandle oth
 }
 
 <* Test whether the attachment-view handle has nonzero owner and generation fields.
-
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool AttachmentViewHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 
 <* Compare complete attachment-view identities.
-
    @return "True when owner, index, and generation are equal." *>
 fn bool AttachmentViewHandle.equals(self, AttachmentViewHandle other) @operator(==) {
     return self.owner == other.owner
@@ -70,14 +61,12 @@ fn bool AttachmentViewHandle.equals(self, AttachmentViewHandle other) @operator(
 }
 
 <* Test whether the texture view has a nonzero owner, index, and generation.
-
    @return "True for a structurally valid view; this does not prove live provenance." *>
 fn bool TextureView.is_valid(self) {
     return self.owner != 0 && self.index.is_valid() && self.generation != 0;
 }
 
 <* Compare complete texture-view identities.
-
    @return "True when owner, index, and generation are equal." *>
 fn bool TextureView.equals(self, TextureView other) @operator(==) {
     return self.owner == other.owner
@@ -87,14 +76,12 @@ fn bool TextureView.equals(self, TextureView other) @operator(==) {
 
 <* Test whether an acceleration-structure view has nonzero ownership, index,
    and generation fields.
-
    @return "True for a structurally valid view; this does not prove live provenance." *>
 fn bool AccelerationStructureView.is_valid(self) {
     return self.owner != 0 && self.index.is_valid() && self.generation != 0;
 }
 
 <* Compare complete acceleration-structure-view identities.
-
    @return "True when owner, index, and generation are equal." *>
 fn bool AccelerationStructureView.equals(self, AccelerationStructureView other) @operator(==) {
     return self.owner == other.owner
@@ -103,12 +90,10 @@ fn bool AccelerationStructureView.equals(self, AccelerationStructureView other) 
 }
 
 <* Test whether the pipeline handle has nonzero owner and generation fields.
-
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool PipelineHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 
 <* Compare complete pipeline identities.
-
    @return "True when owner, index, and generation are equal." *>
 fn bool PipelineHandle.equals(self, PipelineHandle other) @operator(==) {
     return self.owner == other.owner
@@ -117,12 +102,10 @@ fn bool PipelineHandle.equals(self, PipelineHandle other) @operator(==) {
 }
 
 <* Test whether the swapchain handle has nonzero owner and generation fields.
-
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool SwapchainHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 
 <* Compare complete swapchain identities.
-
    @return "True when owner, index, and generation are equal." *>
 fn bool SwapchainHandle.equals(self, SwapchainHandle other) @operator(==) {
     return self.owner == other.owner
@@ -131,12 +114,10 @@ fn bool SwapchainHandle.equals(self, SwapchainHandle other) @operator(==) {
 }
 
 <* Test whether the command-allocator handle has nonzero owner and generation fields.
-
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool CommandAllocatorHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 
 <* Compare complete command-allocator identities.
-
    @return "True when owner, index, and generation are equal." *>
 fn bool CommandAllocatorHandle.equals(self, CommandAllocatorHandle other) @operator(==) {
     return self.owner == other.owner
@@ -145,12 +126,10 @@ fn bool CommandAllocatorHandle.equals(self, CommandAllocatorHandle other) @opera
 }
 
 <* Test whether the timestamp-pool handle has nonzero owner and generation fields.
-
    @return "True for a structurally valid handle; this does not prove live provenance." *>
 fn bool TimestampPoolHandle.is_valid(self) => self.owner != 0 && self.generation != 0;
 
 <* Compare complete timestamp-pool identities.
-
    @return "True when owner, index, and generation are equal." *>
 fn bool TimestampPoolHandle.equals(self, TimestampPoolHandle other) @operator(==) {
     return self.owner == other.owner
@@ -160,13 +139,11 @@ fn bool TimestampPoolHandle.equals(self, TimestampPoolHandle other) @operator(==
 
 <* Test only whether this value differs from the invalid token sentinel.
    This does not validate live provenance or recording phase.
-
    @return "True for a structurally valid recording token." *>
 fn bool CommandList.is_valid(&self) => self.record != null && self.generation != 0 && self.device_identity != 0;
 
 <* Test only whether this value differs from the invalid token sentinel.
    This does not validate live provenance or executable phase.
-
    @return "True for a structurally valid executable token." *>
 fn bool ExecutableCommandList.is_valid(&self) =>
     self.record != null
@@ -174,34 +151,28 @@ fn bool ExecutableCommandList.is_valid(&self) =>
         && self.device_identity != 0;
 
 <* Test whether a texture heap index differs from the invalid zero sentinel.
-
    @return "True for a nonzero index; this does not prove live provenance." *>
 fn bool TextureIndex.is_valid(self) => (uint)self != 0;
 
 <* Test whether a sampler heap index differs from the invalid zero sentinel.
-
    @return "True for a nonzero index; this does not prove live provenance." *>
 fn bool SamplerIndex.is_valid(self) => (uint)self != 0;
 
 <* Test whether an acceleration-structure heap index differs from zero.
-
    @return "True for a nonzero index; this does not prove live provenance." *>
 fn bool AccelerationStructureIndex.is_valid(self) => (uint)self != 0;
 
 <* Test whether the runtime token differs from the invalid zero value.
-
    @return "True for a nonzero token; this does not prove live provenance." *>
 fn bool Runtime.is_valid(self) => (ulong)self != 0;
 
 // ---- Runtime and devices ----
 
 <* Test whether the adapter token differs from the invalid zero value.
-
    @return "True for a nonzero token; this does not prove live provenance." *>
 fn bool Adapter.is_valid(self) => (ulong)self != 0;
 
 <* Return one borrowed adapter from this runtime-owned view.
-
    @param index : "Zero-based index within the view."
    @return "A borrowed adapter valid until runtime destruction, or a recoverable range or handle fault." *>
 fn Adapter? AdapterList.get(&self, uint index) {
@@ -218,17 +189,14 @@ fn Adapter? AdapterList.get(&self, uint index) {
 }
 
 <* Test whether the surface token differs from the invalid zero value.
-
    @return "True for a nonzero token; this does not prove live provenance." *>
 fn bool Surface.is_valid(self) => (ulong)self != 0;
 
 <* Test whether a queue has a structurally valid owning device.
-
    @return "True for a structurally valid queue; this does not prove live provenance." *>
 fn bool Queue.is_valid(self) => self.device.is_valid();
 
 <* Compare complete selected-queue identities.
-
    @return "True when device, identity, and roles are equal." *>
 fn bool Queue.equals(self, Queue other) @operator(==) {
     return self.device == other.device
@@ -237,7 +205,6 @@ fn bool Queue.equals(self, Queue other) @operator(==) {
 }
 
 <* Construct the all-enabled validation descriptor for development.
-
    @return "A reusable FULL contract-validation descriptor with backend validation enabled." *>
 fn RuntimeDesc full_validation_runtime_desc() => {
     .contract_validation = ContractValidation.FULL,
@@ -247,7 +214,6 @@ fn RuntimeDesc full_validation_runtime_desc() => {
 <* Initialize backend discovery. Importing gpu performs no initialization.
    The descriptor is borrowed only for the call; callback user data must remain
    valid for every callback until runtime destruction.
-
    @param desc : "Borrowed runtime configuration."
    @return "An owning runtime token, or a recoverable validation, initialization, or allocation fault." *>
 fn Runtime? create_runtime(RuntimeDesc* desc) {
@@ -259,7 +225,6 @@ fn Runtime? create_runtime(RuntimeDesc* desc) {
    Preconditions: every surface and device owned by it is destroyed.
    Always checked: live identity and dependent counts.
    Runtime failures: RESOURCE_IN_USE preserves the runtime for retry.
-
    @param runtime : "Owning token to destroy; success replaces it with the invalid value."
    @return "Success, or a recoverable invalid-handle or resource-in-use fault." *>
 fn void? destroy_runtime(Runtime* runtime) {
@@ -277,7 +242,6 @@ fn void? destroy_runtime(Runtime* runtime) {
 }
 
 <* Return an allocation-free view of the runtime's borrowed adapters.
-
    @param runtime : "Live runtime whose immutable adapter cache is borrowed."
    @return "A runtime-owned adapter view, or a recoverable invalid-handle fault." *>
 fn AdapterList? enumerate_adapters(Runtime* runtime) {
@@ -291,7 +255,6 @@ fn AdapterList? enumerate_adapters(Runtime* runtime) {
 
 <* Query backend-neutral information for a borrowed adapter.
    Returned strings are read-only and remain valid until runtime destruction.
-
    @param adapter : "Borrowed adapter token."
    @return "Cached adapter information, or a recoverable invalid-handle fault." *>
 fn AdapterInfo? get_adapter_info(Adapter* adapter) {
@@ -305,7 +268,6 @@ fn AdapterInfo? get_adapter_info(Adapter* adapter) {
 
 <* Query backend and driver identity for diagnostics and logging.
    Returned strings are read-only and remain valid until runtime destruction.
-
    @param adapter : "Borrowed adapter token."
    @return "Cached diagnostic identity, or a recoverable invalid-handle fault." *>
 fn AdapterDiagnostics? get_adapter_diagnostics(Adapter* adapter) {
@@ -319,7 +281,6 @@ fn AdapterDiagnostics? get_adapter_diagnostics(Adapter* adapter) {
 
 <* Query semantic descriptor support without enabling device state.
    `unmet_requirement` is a borrowed static label.
-
    @param adapter : "Borrowed adapter to evaluate."
    @param desc : "Borrowed requirements; null selects the zero-value defaults."
    @return "The support result, or a recoverable invalid-argument or invalid-handle fault." *>
@@ -336,7 +297,6 @@ fn DeviceSupport? supports_device_desc(Adapter* adapter, DeviceDesc* desc = null
 
 <* Return whether an adapter can present to a surface from the same runtime.
    The adapter and surface are borrowed for the call and must share a runtime.
-
    @param adapter : "Borrowed adapter to query."
    @param surface : "Borrowed runtime-owned surface."
    @return "Presentation support, or a recoverable invalid-handle or backend query fault." *>
@@ -354,7 +314,6 @@ fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
 }
 
 <* Snapshot the selected device's immutable capabilities.
-
    @param device : "Live device to query."
    @return "The device capabilities, or a recoverable invalid-handle, busy, or device-loss fault." *>
 fn DeviceCaps? get_device_caps(Device* device) {
@@ -366,7 +325,6 @@ fn DeviceCaps? get_device_caps(Device* device) {
 <* Create a device from one exact borrowed adapter.
    The descriptor is borrowed only for the call. The caller owns the returned
    token and releases it with `destroy_device`.
-
    @param adapter : "Borrowed adapter that owns the requested capabilities."
    @param desc : "Borrowed semantic requirements; null selects the documented defaults."
    @return "An owning device token, or a recoverable support, capacity, allocation, or backend fault." *>
@@ -410,7 +368,6 @@ fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
    Preconditions: no live children, host operations, or incomplete queue work.
    Always checked: device identity, children, pins, closing state, and progress.
    Runtime failures: RESOURCE_IN_USE or DEVICE_BUSY preserves the token.
-
    @param device : "Owning device token; success replaces it with the invalid value."
    @return "Success, or a recoverable invalid-handle, resource-in-use, busy, or device-loss fault." *>
 fn void? destroy_device(Device* device) {
@@ -480,7 +437,6 @@ fn void? destroy_device(Device* device) {
 <* Return a device-owned queue identity for a semantic role. Aliased roles
    return the same token. A dead device faults INVALID_HANDLE; an unavailable
    role faults INVALID_ARGUMENT. The token remains valid while the device is live.
-
    @param device : "Live device whose selected queue is queried."
    @param kind : "Semantic queue role."
    @return "A device-owned queue token, or a recoverable unavailable-role or device fault." *>
@@ -497,7 +453,6 @@ fn Queue? get_queue(Device* device, QueueKind kind) {
 
 <* Return a live queue's device-local identity and supported roles.
    INVALID_HANDLE if the token is stale, foreign, or malformed.
-
    @param device : "Live device expected to own the queue."
    @param queue : "Selected queue token to inspect."
    @return "Stable queue information, or a recoverable ownership, invalid-handle, or device fault." *>
@@ -516,7 +471,6 @@ fn QueueInfo? get_queue_info(Device* device, Queue queue) {
 <* Derive a sub-range without bounds or overflow checks. Use only when the
    caller has already proved the range, or deliberately needs an invalid span
    for validation testing. The returned view inherits the allocation lifetime.
-
    @param offset : "Byte offset relative to this span."
    @param size : "Byte size of the derived span."
    @return "A non-owning span with unchecked offset arithmetic." *>
@@ -532,7 +486,6 @@ fn GpuSpan GpuSpan.unchecked_subspan(self, usz offset, usz size) {
 
 <* Derive a non-empty exact-sized range within this immediate parent.
    The returned view inherits the allocation lifetime.
-
    @param offset : "Byte offset relative to this span."
    @param size : "Nonzero byte size of the derived span."
    @return "A non-owning subspan, or a recoverable range or overflow fault." *>
@@ -546,7 +499,6 @@ fn GpuSpan? GpuSpan.checked_subspan(self, usz offset, usz size) {
 
 <* Owning identity of the allocation this span was carved from. Not validated
    for liveness.
-
    @return "The allocation token whose range contains this span." *>
 fn GpuAllocation GpuSpan.allocation(self) {
     return { .owner = self.owner, .index = self.index, .generation = self.generation };
@@ -556,7 +508,6 @@ fn GpuAllocation GpuSpan.allocation(self) {
    The returned views inherit the owning allocation's lifetime and perform no
    synchronization. The derived byte pointer has no alignment guarantee beyond
    `char`.
-
    @param offset : "Byte offset relative to this mapped span."
    @param size : "Nonzero byte size of the derived mapped span."
    @return "A consistent non-owning mapped subspan, or a recoverable invalid-argument range, representation, or address-overflow fault." *>
@@ -574,7 +525,6 @@ fn MappedGpuSpan? MappedGpuSpan.checked_subspan(self, usz offset, usz size) {
 }
 
 <* Test whether the compatibility value has a complete nonzero payload.
-
    @return "True for a structurally valid compatibility value." *>
 fn bool TextureCompatibility.is_valid(self) {
     uint128 raw = (uint128)self;
@@ -587,7 +537,6 @@ fn bool TextureCompatibility.is_valid(self) {
 <* Allocate caller-managed GPU storage.
    The descriptor is borrowed only for the call. The caller owns the returned
    allocation and frees it with `free_allocation` after GPU use is quiescent.
-
    @param device : "Live device that will own the allocation."
    @param desc : "Borrowed size, memory-class, access, alignment, and debug-name description."
    @return "An owning allocation token, or a recoverable invalid-argument, invalid-handle, unsupported-feature, capacity, allocation, busy, device-loss, or backend fault." *>
@@ -605,7 +554,6 @@ fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
    Preconditions: no command, texture, or descriptor still uses the allocation.
    Always checked: live identity, ownership, and detected dependents.
    Runtime failures: faults preserve the owning token.
-
    @param device : "Live device that owns the allocation."
    @param allocation : "Owning allocation token; success replaces it with the invalid value."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
@@ -624,7 +572,6 @@ fn void? free_allocation(Device* device, GpuAllocation* allocation) {
 }
 
 <* Return immutable properties for a live allocation.
-
    @param device : "Live device that owns the allocation."
    @param allocation : "Allocation token to query."
    @return "Immutable allocation properties, or a recoverable ownership, invalid-handle, or device fault." *>
@@ -641,7 +588,6 @@ fn AllocationInfo? get_allocation_info(Device* device, GpuAllocation allocation)
 
 <* Borrow the allocation's complete range.
    The returned non-owning span remains valid only while the allocation is live.
-
    @param device : "Live device that owns the allocation."
    @param allocation : "Allocation whose complete range is borrowed."
    @return "A non-owning span, or a recoverable invalid-argument, ownership, invalid-handle, busy, or device-loss fault." *>
@@ -658,7 +604,6 @@ fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
 
 <* Borrow the CPU mapping for a live host-visible span.
    The slice inherits the allocation lifetime; callers synchronize CPU access.
-
    @param device : "Live device that owns the span."
    @param span : "Non-owning host-visible allocation range."
    @return "A borrowed mapped byte slice, or a recoverable ownership, mapping, range, or device fault." *>
@@ -670,7 +615,6 @@ fn char[]? get_span_mapping(Device* device, GpuSpan span) {
 
 <* Return the stable nonzero address of a live span.
    The address inherits the allocation lifetime.
-
    @param device : "Live device that owns the span."
    @param span : "Non-owning allocation range."
    @return "The span's GPU address, or a recoverable ownership, range, or device fault." *>
@@ -684,7 +628,6 @@ fn GpuAddress? get_span_address(Device* device, GpuSpan span) {
    The mapping and address are independent public queries; the caller must keep
    the owning allocation live for the complete call and result lifetime. The
    result performs no synchronization.
-
    @param device : "Live device that owns the span."
    @param span : "Non-owning host-visible allocation range."
    @return "Consistent borrowed views, or a recoverable fault from the public mapping or address query." *>
@@ -702,7 +645,6 @@ fn MappedGpuSpan? mapped_gpu_span(Device* device, GpuSpan span) {
 <* Allocate a mapped class and borrow its complete span, mapping, and address.
    A class without a host mapping faults before any allocation. Free with
    `free_allocation` on `span.allocation()`.
-
    @param device : "Live device that will own the allocation."
    @param desc : "Borrowed allocation description with a mapped memory class."
    @return "Consistent borrowed views of the new allocation, or a recoverable invalid-argument, access, allocation, or device fault. A failed view frees the allocation and returns the view fault; a rollback that cannot free the allocation is unrecoverable and panics after reporting the allocation as abandoned." *>
@@ -718,7 +660,6 @@ fn MappedGpuSpan? allocate_mapped_memory(Device* device, AllocationDesc* desc) {
 <* Make CPU writes to a live mapped allocation range visible to the GPU.
    Required unless `AllocationInfo.coherent` is true; coherent ranges are
    no-ops. This call does not submit or wait.
-
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose CPU writes become visible."
    @return "Success, or a recoverable ownership, mapping, range, or device fault." *>
@@ -736,7 +677,6 @@ fn void? flush_mapped_span(Device* device, GpuSpan span) {
 <* After the relevant GPU completion point, make its writes visible to CPU
    reads. Required unless `AllocationInfo.coherent` is true; coherent ranges
    are no-ops. This call does not wait.
-
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose GPU writes become visible."
    @return "Success, or a recoverable ownership, mapping, range, or device fault." *>
@@ -753,7 +693,6 @@ fn void? invalidate_mapped_span(Device* device, GpuSpan span) {
 
 <* Snapshot per-heap memory usage and live allocation counts.
    Values are advisory under concurrent mutation.
-
    @param device : "Live device to query."
    @return "A memory statistics snapshot, or a recoverable invalid-handle, busy, or device-loss fault." *>
 fn MemoryStats? get_memory_stats(Device* device) {
@@ -765,7 +704,6 @@ fn MemoryStats? get_memory_stats(Device* device) {
 <* Build a human-readable memory report.
    The caller owns and frees the returned string; values are advisory under
    concurrent mutation.
-
    @param device : "Live device to query."
    @param detailed : "Whether to include detailed allocation information."
    @return "An owned report string, or a recoverable invalid-handle, allocation, busy, device-loss, or backend fault." *>
@@ -776,7 +714,6 @@ fn String? build_memory_report(Device* device, bool detailed) {
 }
 
 <* Size of one texture axis at a mip level: halved per level, never below one.
-
    @param size : "Base extent of the axis."
    @param mip : "Zero-based mip level."
    @return "The mip extent along that axis." *>
@@ -789,7 +726,6 @@ fn uint texture_mip_dimension(uint size, uint mip) {
 <* Tightly packed bytes of one array layer of a mip level, as
    cmd_copy_buffer_to_texture and cmd_copy_texture_to_buffer consume it:
    whole blocks per row, block rows per slice, 3D slices back to back.
-
    @param desc : "Borrowed texture description."
    @param mip : "Zero-based mip level below the description's mip count."
    @return "The byte footprint, or INVALID_ARGUMENT for a null or undefined-format description or a missing mip." *>
@@ -800,7 +736,6 @@ fn usz? texture_mip_bytes(TextureDesc* desc, uint mip) {
 <* Tightly packed bytes of one aspect of one array layer of a mip. The depth
    aspect of a combined format is 4 bytes per texel and stencil is 1; `AUTO`
    faults for a combined format.
-
    @param desc : "Borrowed texture description."
    @param mip : "Zero-based mip level below the description's mip count."
    @param aspect : "Aspect to size; AUTO for single-aspect formats."
@@ -831,7 +766,6 @@ fn usz? texture_mip_aspect_bytes(TextureDesc* desc, uint mip, TextureAspect aspe
 
 <* Query library-creatable features for a format. Individual feature bits do
    not guarantee that a combination is supported.
-
    @param device : "Live device to query."
    @param format : "Public texel format to inspect."
    @return "Format support flags, or a recoverable invalid-format or device fault." *>
@@ -843,7 +777,6 @@ fn TextureFormatSupport? get_texture_format_support(Device* device, Format forma
 
 <* Return whether an exact descriptor is creatable by the backend and adapter.
    This checks capabilities only; allocation can still fail for lack of memory.
-
    @param device : "Live device to query."
    @param desc : "Borrowed exact texture description."
    @return "Whether the descriptor is supported, or a recoverable invalid-argument or device fault." *>
@@ -856,7 +789,6 @@ fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
 }
 
 <* Return exact storage requirements for a texture descriptor.
-
    @param device : "Live device to query."
    @param desc : "Borrowed texture description."
    @return "Placement requirements, or a recoverable validation, unsupported-feature, or device fault." *>
@@ -872,7 +804,6 @@ fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* de
    The descriptor is borrowed only for the call. The returned handle owns the
    image; shader access goes through a `TextureIndex`. Release it with
    `destroy_texture`.
-
    @param device : "Live device that will own the texture."
    @param desc : "Borrowed texture description."
    @return "An owning texture handle, or a recoverable validation, support, capacity, allocation, or device fault." *>
@@ -889,7 +820,6 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
 
 <* Create a texture in caller-owned texture memory.
    The texture borrows the placement allocation, which must outlive it.
-
    @param device : "Live device that owns the placement allocation."
    @param desc : "Borrowed texture description."
    @param allocation : "Caller-owned compatible texture-memory allocation."
@@ -923,7 +853,6 @@ fn TextureHandle? create_placed_texture(
 <* Create a texture and independently owned dedicated storage atomically.
    Both descriptors are borrowed only for the call. On success the caller owns
    both returned tokens and destroys the texture before freeing the allocation.
-
    @param device : "Live device that will own both resources."
    @param desc : "Borrowed texture description."
    @param allocation_desc : "Borrowed compatible dedicated-allocation description."
@@ -963,7 +892,6 @@ fn DedicatedTexture? create_dedicated_texture(Device* device, TextureDesc* desc,
 <* Destroy a texture after its descriptors and command use complete.
    Always checked: live identity, ownership, and detected dependents.
    Runtime failures: faults preserve the handle; placed storage stays caller-owned.
-
    @param device : "Live device that owns the texture."
    @param texture : "Owning texture handle to destroy."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
@@ -978,7 +906,6 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
 <* Publish one texture view in the shader-visible heap. The texture must carry
    sampled or storage usage. The returned
    owner-bearing view contains the raw generation-free index stored in shader data.
-
    @param device : "Live device that owns the texture."
    @param texture : "Texture whose subresources are exposed."
    @param desc : "Borrowed view description; null selects the full default view."
@@ -996,7 +923,6 @@ fn TextureView? create_texture_view(Device* device, TextureHandle texture, Textu
 <* Batch-publish texture views.
    `out_views.len` must equal `descs.len`; an empty batch succeeds. A fault leaves
    heap allocation, generations, cached native views, and outputs unchanged.
-
    @param device : "Live device that owns every input texture."
    @param descs : "Borrowed batch of texture and view descriptions."
    @param out_views : "Caller-owned output slice with exactly the input length."
@@ -1026,7 +952,6 @@ fn void? create_texture_views(Device* device, TextureViewCreateDesc[] descs, Tex
    Preconditions: GPU references to the index are complete.
    Always checked: live identity and ownership.
    Runtime failures: faults preserve the view.
-
    @param device : "Live device that owns the view."
    @param view : "Owning view token to destroy."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
@@ -1041,7 +966,6 @@ fn void? destroy_texture_view(Device* device, TextureView view) {
 <* Reserve `count` contiguous ascending texture-heap slots that
    `create_texture_view` never hands out. Slots are carved downward from the
    top of the heap; the general region ends where reservations begin.
-
    @param device : "Live device that owns the heap."
    @param count : "Nonzero number of slots."
    @return "The reserved range, or a recoverable invalid-argument, capacity, or device fault." *>
@@ -1057,7 +981,6 @@ fn TextureIndexRange? reserve_texture_indices(Device* device, uint count) {
    general region; releasing a higher one leaves a hole until those below go.
    A slot whose generation is exhausted stays reserved and out of both
    regions.
-
    @param device : "Live device that owns the heap."
    @param range : "A range returned by `reserve_texture_indices`."
    @return "Success, or a recoverable invalid-argument, in-use, or device fault." *>
@@ -1069,7 +992,6 @@ fn void? release_texture_indices(Device* device, TextureIndexRange range) {
 
 <* Publish a view into one reserved slot. Same validation and hazard rule as
    `create_texture_view`; the returned index equals `slot`.
-
    @param device : "Live device that owns the texture."
    @param slot : "A slot inside a live reservation."
    @param texture : "Texture whose subresources are exposed."
@@ -1092,7 +1014,6 @@ fn TextureView? create_texture_view_at(Device* device, TextureIndex slot, Textur
 <* Rewrite the descriptor behind a live view without changing its index.
    The token is rewritten with a new generation; older copies are stale. The
    slot must not be read by executing commands.
-
    @param device : "Live device that owns the view."
    @param view : "Live view token, rewritten on success."
    @param texture : "Texture the slot will expose."
@@ -1114,7 +1035,6 @@ fn void? update_texture_view(Device* device, TextureView* view, TextureHandle te
 
 <* Create an unbound single-layer, single-sample color sparse texture.
    Creation binds no memory; sparse page allocations remain caller-owned.
-
    @param device : "Live sparse-enabled device that will own the texture."
    @param desc : "Borrowed sparse texture description."
    @return "An owning texture handle, or a recoverable validation, support, capacity, allocation, or device fault." *>
@@ -1131,7 +1051,6 @@ fn TextureHandle? create_sparse_texture(Device* device, TextureDesc* desc) {
 }
 
 <* Return the immutable requirements cached for a live sparse texture.
-
    @param device : "Live device that owns the texture."
    @param texture : "Live sparse texture handle."
    @return "The cached requirements, or a recoverable argument, handle, or device fault." *>
@@ -1176,7 +1095,6 @@ fn CompletionPoint? bind_sparse_texture_memory(Queue queue, SparseTextureBindDes
    semantic descriptions return the same value; debug_name is not semantic.
    Active anisotropy must be within the exact range reported by DeviceCaps;
    values above the maximum are rejected rather than clamped.
-
    @param device : "Live device whose sampler heap owns the index."
    @param desc : "Borrowed semantic sampler description."
    @return "A stable device-lifetime sampler index, or a recoverable validation, support, capacity, allocation, or device fault." *>
@@ -1190,7 +1108,6 @@ fn SamplerIndex? intern_sampler(Device* device, SamplerDesc* desc) {
 
 <* Return persistent and caller-owned scratch requirements for an acceleration
    structure capacity descriptor.
-
    @param device : "Live ray-query-enabled device to query."
    @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
    @return "Storage and scratch requirements, or a recoverable validation, support, or device fault." *>
@@ -1209,7 +1126,6 @@ fn AccelerationStructureRequirements? get_acceleration_structure_requirements(
 }
 
 <* Create an acceleration structure with internally managed persistent storage.
-
    @param device : "Live ray-query-enabled device that will own the structure."
    @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
    @return "An owning handle, or a recoverable validation, support, capacity, allocation, or device fault." *>
@@ -1229,7 +1145,6 @@ fn AccelerationStructureHandle? create_acceleration_structure(Device* device, Ac
 
 <* Create an acceleration structure in caller-owned compatible GPU memory.
    The allocation must outlive the structure.
-
    @param device : "Live device that owns the placement allocation."
    @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
    @param allocation : "Caller-owned compatible allocation."
@@ -1263,7 +1178,6 @@ fn AccelerationStructureHandle? create_placed_acceleration_structure(
 
 <* Create an acceleration structure and dedicated persistent allocation
    atomically. Destroy the structure before freeing the returned allocation.
-
    @param device : "Live ray-query-enabled device that will own both resources."
    @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
    @return "The owning structure and allocation pair, or a recoverable validation, support, capacity, allocation, or device fault." *>
@@ -1286,7 +1200,6 @@ fn DedicatedAccelerationStructure? create_dedicated_acceleration_structure(
 
 <* Destroy an acceleration structure without waiting. Live views or tracked
    commands make destruction retryable.
-
    @param device : "Live device that owns the structure."
    @param acceleration_structure : "Owning structure handle to destroy."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
@@ -1308,7 +1221,6 @@ fn void? destroy_acceleration_structure(Device* device, AccelerationStructureHan
 
 <* Return the ordinary GPU address of a live bottom-level acceleration
    structure. Top-level structures are not address inputs to instances.
-
    @param device : "Live device that owns the BLAS."
    @param acceleration_structure : "Live bottom-level structure handle."
    @return "A nonzero BLAS address, or a recoverable argument, ownership, handle, or device fault." *>
@@ -1328,7 +1240,6 @@ fn GpuAddress? get_acceleration_structure_address(Device* device, AccelerationSt
 }
 
 <* Validate a bottom-level structure and pack one exact 64-byte TLAS instance.
-
    @param device : "Live device that owns the referenced BLAS."
    @param desc : "Borrowed transform, BLAS, mask, index, and flag values."
    @return "A packed instance, or a recoverable argument, ownership, handle, or device fault." *>
@@ -1357,7 +1268,6 @@ fn AccelerationStructureInstance? make_acceleration_structure_instance(
 }
 
 <* Publish a live TLAS in the shader-visible acceleration-structure heap.
-
    @param device : "Live ray-query-enabled device that owns the TLAS."
    @param acceleration_structure : "Live top-level structure to publish."
    @return "An owning view containing its raw shader index, or a recoverable validation, ownership, capacity, allocation, or device fault." *>
@@ -1383,7 +1293,6 @@ fn AccelerationStructureView? create_acceleration_structure_view(
 }
 
 <* Retire one shader-visible TLAS view after caller-managed GPU completion.
-
    @param device : "Live device that owns the view."
    @param view : "Owning acceleration-structure view to destroy."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
@@ -1406,7 +1315,6 @@ fn void? destroy_acceleration_structure_view(Device* device, AccelerationStructu
 // ---- Shaders and pipelines ----
 
 <* Construct disabled blending with the selected write mask.
-
    @param write_mask : "Color channels written by the target."
    @return "A caller-owned color-target state with blending disabled." *>
 fn ColorTargetState color_blend_disabled(ColorWriteMask write_mask = COLOR_WRITE_ALL) {
@@ -1414,7 +1322,6 @@ fn ColorTargetState color_blend_disabled(ColorWriteMask write_mask = COLOR_WRITE
 }
 
 <* Construct conventional source-alpha blending with RGBA writes.
-
    @return "A caller-owned conventional alpha-blend target state." *>
 fn ColorTargetState alpha_blend() {
     return {
@@ -1432,7 +1339,6 @@ fn ColorTargetState alpha_blend() {
 }
 
 <* Construct premultiplied-alpha blending with RGBA writes.
-
    @return "A caller-owned premultiplied-alpha target state." *>
 fn ColorTargetState premultiplied_alpha_blend() {
     return {
@@ -1450,7 +1356,6 @@ fn ColorTargetState premultiplied_alpha_blend() {
 }
 
 <* Construct additive blending with RGBA writes.
-
    @return "A caller-owned additive-blend target state." *>
 fn ColorTargetState additive_blend() {
     return {
@@ -1469,7 +1374,6 @@ fn ColorTargetState additive_blend() {
 
 <* Fill caller-owned targets with one state and return a borrowed packet.
    The returned slice aliases `targets` and inherits its lifetime.
-
    @param targets : "Caller-owned target storage to fill."
    @param state : "State copied into every target."
    @return "A non-owning color-state packet over targets." *>
@@ -1482,7 +1386,6 @@ fn ColorState uniform_color_state(ColorTargetState[] targets, ColorTargetState s
    pipeline under distinct handles. Ownership: release with destroy_pipeline,
    once per create. The descriptor and shader bytes are borrowed only for the
    call.
-
    @param device : "Live device that will own the pipeline handle."
    @param desc : "Borrowed compute pipeline description."
    @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, compilation, or device fault." *>
@@ -1503,7 +1406,6 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
    At most MAX_COLOR_ATTACHMENTS color targets. Ownership:
    release with destroy_pipeline, once per create. The descriptor, shaders, and
    color-format slice are borrowed only for the call.
-
    @param device : "Live device that will own the pipeline handle."
    @param desc : "Borrowed graphics pipeline description."
    @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, compilation, or device fault." *>
@@ -1520,7 +1422,6 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
 <* Create a mesh pipeline. Needs DeviceDesc.enable_mesh_shaders; a task
    shader needs DeviceCaps.mesh_shaders.task_shaders. The mesh root travels
    in vertex_root_gpu; raster.topology is ignored.
-
    @param device : "Live device."
    @param desc : "Borrowed mesh pipeline description."
    @return "Owning pipeline handle, or a recoverable validation, support, capacity, or device fault." *>
@@ -1539,7 +1440,6 @@ fn PipelineHandle? create_mesh_pipeline(Device* device, MeshPipelineDesc* desc) 
    Identical immutable descriptors may alias one backend pipeline under
    distinct owning handles. All descriptor slices and shader bytes are borrowed
    only for the call.
-
    @param device : "Live device created with enable_ray_tracing_pipelines."
    @param desc : "Borrowed structured ray-tracing pipeline description."
    @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, compilation, or device fault." *>
@@ -1559,7 +1459,6 @@ fn PipelineHandle? create_ray_tracing_pipeline(Device* device, RayTracingPipelin
 
 <* Return deterministic ray-generation, miss, hit, and callable group ranges
    for a live ray-tracing pipeline. The result contains no borrowed storage.
-
    @param device : "Live device that owns pipeline."
    @param pipeline : "Live ray-tracing pipeline handle."
    @return "The pipeline group ranges, or a recoverable ownership, kind, or device fault." *>
@@ -1576,7 +1475,6 @@ fn RayTracingPipelineInfo? get_ray_tracing_pipeline_info(Device* device, Pipelin
 <* Copy exact native shader-group handles for a contiguous group range.
    `out.len` must equal `group_count * shader_group_handle_size`; zero groups
    require an empty output and perform no backend call.
-
    @param device : "Live device that owns pipeline."
    @param pipeline : "Live ray-tracing pipeline handle."
    @param first_group : "First group in the deterministic pipeline order."
@@ -1604,7 +1502,6 @@ fn void? get_ray_tracing_shader_group_handles(
 
 <* Return the byte requirement for one present shader role in a live
    ray-tracing group. The role and group category must match.
-
    @param device : "Live device that owns pipeline."
    @param pipeline : "Live ray-tracing pipeline handle."
    @param group : "Group index in the deterministic pipeline order."
@@ -1631,7 +1528,6 @@ fn ulong? get_ray_tracing_shader_group_stack_size(
    Preconditions: recorded and submitted use of this handle is complete.
    Always checked: live identity, ownership, and detected command use.
    Runtime failures: faults preserve this alias; shared backend state is refcounted.
-
    @param device : "Live device that owns the pipeline."
    @param pipeline : "Owning pipeline handle to release."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
@@ -1646,7 +1542,6 @@ fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
 <* Byte size of the driver pipeline cache blob. The cache grows as pipelines
    are built — re-query before each export. Must not be called concurrently
    with pipeline creation.
-
    @param device : "Live device whose cache is queried."
    @return "The current cache byte size, or a recoverable invalid-handle, busy, device-loss, or backend fault." *>
 fn usz? get_pipeline_cache_size(Device* device) {
@@ -1660,7 +1555,6 @@ fn usz? get_pipeline_cache_size(Device* device) {
    blob. Feed the blob to RuntimeDesc.pipeline_cache_data before creating a
    later runtime and device. Must not be called concurrently with pipeline
    creation.
-
    @param device : "Live device whose cache is exported."
    @param out : "Caller-owned output storage sized from a fresh cache-size query."
    @return "Bytes written, or a recoverable invalid-argument, invalid-handle, busy, device-loss, or backend fault." *>
@@ -1679,7 +1573,6 @@ fn usz? get_pipeline_cache_data(Device* device, char[] out) {
    configured here and is instead sized by reserve_generated_work.
    Creation may fault for invalid limits, host/device allocation failure, a full
    allocator table, device loss, or a busy/closing device.
-
    @param device : "Live device that will own the allocator."
    @param queue : "Exact selected queue the allocator records for."
    @param desc : "Borrowed capacity description; null or zero fields select defaults."
@@ -1746,7 +1639,6 @@ fn CommandAllocator? create_command_allocator(Device* device, Queue queue, Comma
    Preconditions: all recording, executable, and submitted units are retired.
    Always checked: identity, ownership, and allocator lifecycle.
    Runtime failures: RESOURCE_IN_USE or DEVICE_BUSY preserves the token.
-
    @param allocator : "Owning allocator; success replaces it with the zero value."
    @return "Success, or a recoverable invalid-handle, resource-in-use, busy, ownership, or device fault." *>
 fn void? destroy_command_allocator(CommandAllocator* allocator) {
@@ -1770,7 +1662,6 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
    reservation table bounds replacement. Reservation is transactional: on
    failure the previous matching reservation stays published and usable.
    The caller externally synchronizes the allocator.
-
    @param allocator : "Live quiescent allocator that owns the reservation."
    @param desc : "Borrowed pipeline, work-kind, command-count, and concurrency description."
    @return "Success, or a recoverable validation, ownership, capacity, allocation, busy, or device fault." *>
@@ -1802,7 +1693,6 @@ fn void? reserve_generated_work(CommandAllocator* allocator, GeneratedWorkReserv
 <* Release one generated-work reservation from a quiescent allocator.
    Release never waits for GPU work.
    The caller externally synchronizes the allocator.
-
    @param allocator : "Live quiescent allocator that owns the reservation."
    @param pipeline : "Exact pipeline named by the reservation."
    @param kind : "Generated-work record kind named by the reservation."
@@ -1831,7 +1721,6 @@ fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipe
    Always checked: live identity, ownership, and fixed-unit availability.
    Runtime failures: DEVICE_BUSY preserves the allocator; success retains its device.
    The allocator and returned token are confined to one recording thread.
-
    @param allocator : "Live allocator with one available fixed recording unit."
    @return "A recording token, or a recoverable invalid-handle, ownership, capacity, busy, or device fault." *>
 fn CommandList? begin_commands(CommandAllocator* allocator) {
@@ -1855,7 +1744,6 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
    Always checked: token identity and authoritative phase.
    Runtime failures: failure leaves the token recording. The token and all
    aliases are confined to one thread until this operation succeeds.
-
    @param commands : "Recording token consumed on success."
    @return "An executable token, or a recoverable command-state or device fault." *>
 fn ExecutableCommandList? end_commands(CommandList* commands) {
@@ -1874,7 +1762,6 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
    Preconditions: aliases are thread-confined and have not been consumed.
    Always checked: token identity and authoritative recording phase.
    Runtime failures: failure preserves the token.
-
    @param commands : "Recording token consumed on success."
    @return "Success, or a recoverable command-state or ownership fault." *>
 fn void? discard_commands(CommandList* commands) {
@@ -1899,7 +1786,6 @@ fn void? discard_commands(CommandList* commands) {
    Preconditions: aliases are thread-confined and have not been consumed.
    Always checked: token identity and authoritative executable phase.
    Runtime failures: failure preserves the token.
-
    @param commands : "Executable token consumed on success."
    @return "Success, or a recoverable command-state or ownership fault." *>
 fn void? discard_executable_commands(ExecutableCommandList* commands) {
@@ -1923,7 +1809,6 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
 <* Open a debug-utils label region; a no-op without debug utils.
    Preconditions: calls are balanced while recording.
    Always checked: token identity, authoritative phase, and non-null label.
-
    @param commands : "Live recording token."
    @param label : "Borrowed non-null label text used only for the call."
    @param color : "Optional RGBA label color; the zero value is accepted."
@@ -1937,7 +1822,6 @@ fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = 
 <* Close a debug-utils label region.
    Preconditions: a matching label region is open.
    Always checked: token identity and authoritative recording phase.
-
    @param commands : "Live recording token."
    @return "Success, or a recoverable command-state fault." *>
 fn void? cmd_end_label(CommandList* commands) {
@@ -1949,7 +1833,6 @@ fn void? cmd_end_label(CommandList* commands) {
    Preconditions: usage and queue access are valid.
    Always checked: token phase, required pointer, identity, bounds, and safe lowering.
    FULL diagnostics: usage and queue-access misuse.
-
    @param commands : "Live recording token."
    @param desc : "Borrowed exact source and destination ranges."
    @return "Success, or a recoverable command, validation, ownership, bounds, or device fault." *>
@@ -1963,7 +1846,6 @@ fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
    Preconditions: usage, queue access, and surrounding barriers are valid.
    Always checked: token phase, identity, bounds, alignment, and safe lowering.
    FULL diagnostics: usage and queue-access misuse.
-
    @param commands : "Live recording token."
    @param dst : "Destination GPU span."
    @param value : "Repeated 32-bit fill pattern."
@@ -1979,7 +1861,6 @@ fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
    Always checked: token phase, required pointer, identities, format support,
    dimension/subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
    FULL diagnostics: usage and queue-access misuse.
-
    @param commands : "Live recording token."
    @param desc : "Borrowed source-span and destination-texture region."
    @return "Success, or a recoverable command, validation, ownership, bounds, alignment, support, or device fault." *>
@@ -1995,7 +1876,6 @@ fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc
    Always checked: token phase, required pointer, identities, format support,
    dimension/subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
    FULL diagnostics: usage and queue-access misuse.
-
    @param commands : "Live recording token."
    @param desc : "Borrowed source-texture and destination-span region."
    @return "Success, or a recoverable command, validation, ownership, bounds, alignment, support, or device fault." *>
@@ -2007,7 +1887,6 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
 
 <* Record one full BLAS or TLAS build using caller-owned input and scratch
    spans. The command inserts no barrier.
-
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, dynamic inputs, and build scratch."
    @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
@@ -2021,7 +1900,6 @@ fn void? cmd_build_acceleration_structure(CommandList* commands, AccelerationStr
 <* Record an in-place acceleration-structure update using caller-owned input
    and update scratch spans matching the completed build shape. The command
    inserts no barrier.
-
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, matching dynamic inputs, and update scratch."
    @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
@@ -2045,7 +1923,6 @@ fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationSt
    destination contains both `indirect` and `acceleration_structure_build`.
    FULL retains the destination, every explicit input, scratch, and range span
    through completion. TRUSTED makes those lifetimes caller preconditions.
-
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, maximum-count inputs, and build scratch."
    @param ranges : "GPU-authored fixed-stride range records retained under FULL."
@@ -2074,7 +1951,6 @@ fn void? cmd_build_acceleration_structure_indirect(
    GPU-authored actual count equals the corresponding actual count from its
    prior build or update, while remaining within the supplied CPU maximum and
    explicit input span. The library does not inspect or read back the packet.
-
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, maximum-count inputs, and update scratch."
    @param ranges : "GPU-authored fixed-stride range records retained under FULL."
@@ -2096,7 +1972,6 @@ fn void? cmd_update_acceleration_structure_indirect(
 
 <* Record one device clone from a completed acceleration structure into a
    distinct, matching unbuilt destination. The command inserts no barrier.
-
    @param commands : "Live recording token outside a render pass."
    @param source : "Completed source kept live through clone completion."
    @param destination : "Matching unbuilt destination kept live through completion."
@@ -2121,7 +1996,6 @@ fn void? cmd_clone_acceleration_structure(
    binding prerequisites, and a safe native snapshot.
    FULL diagnostics: render-pass compatibility when binding during a pass;
    failure preserves the prior logical bind.
-
    @param commands : "Live recording token."
    @param pipeline : "Compute, graphics, or ray-tracing pipeline to bind."
    @return "Success, or a recoverable command, ownership, compatibility, invalid-handle, or device fault." *>
@@ -2134,7 +2008,6 @@ fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
    The bytes are copied during the recording call and the value need not
    outlive it; its size must be a multiple of four and at most
    `INLINE_ROOT_CAPACITY`.
-
    @param value : "Pointer to the payload value."
    @return "A borrowed byte slice over the value." *>
 macro char[] @inline_root(value) => ((char*)value)[:@sizeof(*value)];
@@ -2146,7 +2019,6 @@ macro char[] @inline_root(value) => ((char*)value)[:@sizeof(*value)];
    Always checked: token identity, authoritative recording phase, and a
    usable bound-pipeline snapshot.
    FULL diagnostics: active-kind and group-limit misuse.
-
    @param commands : "Live recording token."
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param groups : "Workgroup counts in X, Y, and Z."
@@ -2164,7 +2036,6 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups, char
    Always checked: token phase, identities, bounds, a usable bound-pipeline
    snapshot, and safe lowering.
    FULL diagnostics: pipeline kind, usage, queue, and span misuse.
-
    @param commands : "Live recording token."
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param args : "Non-owning span containing one GPU-written dispatch record."
@@ -2185,7 +2056,6 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
    FULL diagnostics: pipeline-kind, usage, queue, and count misuse.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
-
    @param commands : "Live recording token."
    @param records : "Non-owning GPU-written generated-dispatch record range."
    @param count_span : "Non-owning span containing the GPU-written dispatch count."
@@ -2205,7 +2075,6 @@ fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan 
    The caller owns, populates, uploads, synchronizes, and retains every SBT
    span. The command pushes one RootPush value and inserts no hidden barrier,
    bind, upload, submission, or wait.
-
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address passed unchanged to all ray-tracing stages."
    @param shader_binding_table : "Borrowed caller-owned SBT regions."
@@ -2234,7 +2103,6 @@ fn void? cmd_trace_rays(
 <* Record one basic indirect ray dispatch through the active ray-tracing
    pipeline. The root and caller-owned SBT remain direct; only dimensions come
    from the GPU span. The command inserts no hidden synchronization or work.
-
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param shader_binding_table : "Borrowed caller-owned direct shader binding table regions."
@@ -2264,7 +2132,6 @@ fn void? cmd_trace_rays_indirect(
    The root stays direct; the shader binding table regions and dimensions all
    come from the GPU packet. The command inserts no hidden synchronization or
    work.
-
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param args : "Span beginning with one GPU-written TraceRaysIndirectCommand2; FULL retains the span but never the raw addresses inside it, and TRUSTED retains neither, so every referenced shader binding table allocation stays caller-owned through completion."
@@ -2279,7 +2146,6 @@ fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpa
 
 <* Set a caller-derived byte size after binding a dynamic-stack ray pipeline.
    The value must fit uint and cover every shader execution in later traces.
-
    @param commands : "Live recording token outside a render pass on a compute-capable graphics or compute family."
    @param pipeline_stack_size : "Sufficient byte count, which may be zero; FULL checks uint representability."
    @return "Success, or a recoverable command, pipeline, queue, scope, range, support, or device fault." *>
@@ -2294,7 +2160,6 @@ fn void? cmd_set_ray_tracing_pipeline_stack_size(CommandList* commands, ulong pi
 
 <* Create immutable attachment metadata and any required subresource view
    before recording. The returned handle retains its texture.
-
    @param device : "Live device that owns the texture."
    @param desc : "Borrowed texture subresource description."
    @return "An owning attachment-view handle, or a recoverable validation, ownership, capacity, allocation, or device fault." *>
@@ -2319,7 +2184,6 @@ fn AttachmentViewHandle? create_attachment_view(Device* device, AttachmentViewDe
    Preconditions: every recorded and submitted use is complete.
    Always checked: live identity, ownership, and detected command use.
    Runtime failures: faults preserve the view.
-
    @param device : "Live device that owns the attachment view."
    @param view : "Owning attachment-view handle to destroy."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
@@ -2337,7 +2201,6 @@ fn void? destroy_attachment_view(Device* device, AttachmentViewHandle view) {
 
 <* A stencil face that keeps on fail and depth-fail with full masks. Covers
    writing an id (`ALWAYS` / `REPLACE`) and masking by id (`EQUAL` / `KEEP`).
-
    @param compare : "Stencil comparison."
    @param pass : "Operation when stencil and depth pass."
    @param reference : "Reference value for the comparison and REPLACE."
@@ -2357,7 +2220,6 @@ fn StencilFaceState stencil_face(CompareOp compare, StencilOp pass, uint referen
 <* Construct full-area viewport/scissor with zero raster/depth state.
    The returned color packet is empty and must be supplied separately for a
    color pipeline. Dimensions must be in [1, int::max].
-
    @param width : "Positive render width representable as int."
    @param height : "Positive render height representable as int."
    @return "A caller-owned graphics state, or a recoverable invalid-argument fault." *>
@@ -2386,7 +2248,6 @@ fn GraphicsState? render_geometry_state(uint width, uint height) {
    Always checked: token phase, host-safe descriptor shape, a render area zero in
    exactly one dimension, identities, and safe lowering.
    FULL diagnostics: attachment, usage, queue, compatibility, and render-area misuse.
-
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed attachment and render-area description copied into the command stream; a zero extent selects the first attachment's extent."
    @return "Success, or a recoverable command, validation, ownership, compatibility, or device fault." *>
@@ -2401,7 +2262,6 @@ fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
    graphics-capable, and all state values are valid.
    Always checked: token phase, required host-safe input, and safe lowering.
    FULL diagnostics: pipeline, queue, enum, feature, and state-value misuse.
-
    @param commands : "Live recording token."
    @param state : "Borrowed complete graphics state copied into the command stream."
    @return "Success, or a recoverable command, validation, pipeline, support, or device fault." *>
@@ -2414,7 +2274,6 @@ fn void? cmd_set_graphics_state(CommandList* commands, GraphicsState* state) {
 <* End the active render pass without adding synchronization.
    Preconditions: a render pass is active.
    Always checked: token identity and authoritative render-pass phase.
-
    @param commands : "Live recording token inside a render pass."
    @return "Success, or a recoverable command-state fault." *>
 fn void? cmd_end_render_pass(CommandList* commands) {
@@ -2426,7 +2285,6 @@ fn void? cmd_end_render_pass(CommandList* commands) {
    Preconditions: values are finite, representable, within device bounds, and height is nonzero.
    Always checked: token phase and required pointer.
    FULL diagnostics: queue and viewport-value misuse.
-
    @param commands : "Live recording token."
    @param viewport : "Borrowed complete viewport state copied into the command stream."
    @return "Success, or a recoverable command, validation, queue-support, or device fault." *>
@@ -2440,7 +2298,6 @@ fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
    Preconditions: origin and extent are nonnegative and signed-representable.
    Always checked: token phase and required pointer.
    FULL diagnostics: queue and scissor-value misuse.
-
    @param commands : "Live recording token."
    @param scissor : "Borrowed complete scissor state copied into the command stream."
    @return "Success, or a recoverable command, validation, queue-support, or device fault." *>
@@ -2456,7 +2313,6 @@ fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
    Always checked: token identity, authoritative render-pass phase, and a
    usable bound-pipeline snapshot.
    FULL diagnostics: pipeline-kind and state misuse.
-
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
@@ -2482,7 +2338,6 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    Always checked: token phase, identities, index bounds, a usable bound-pipeline
    snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, and index-type misuse.
-
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
@@ -2509,7 +2364,6 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
 <* Dispatch mesh work groups inside a render pass with a bound mesh pipeline
    and complete graphics state. Roots are pushed unchanged; zero is valid.
    Group counts must fit DeviceCaps.mesh_shaders.
-
    @param commands : "Live recording token inside a render pass."
    @param mesh_root : "Task or mesh stage root address."
    @param fragment_root : "Fragment root address."
@@ -2530,7 +2384,6 @@ fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAdd
 <* Dispatch mesh work groups from GPU-visible DrawMeshTasksIndirectCommand
    records; one root pair applies to every draw. Same preconditions as
    cmd_draw_mesh_tasks; args must be visible to the indirect stage.
-
    @param commands : "Live recording token inside a render pass."
    @param mesh_root : "Task or mesh stage root address."
    @param fragment_root : "Fragment root address."
@@ -2552,7 +2405,6 @@ fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_roo
 
 <* As cmd_draw_mesh_tasks_indirect with a GPU-written draw count. Needs
    DeviceCaps.draw_indirect_count.
-
    @param commands : "Live recording token inside a render pass."
    @param mesh_root : "Task or mesh stage root address."
    @param fragment_root : "Fragment root address."
@@ -2580,7 +2432,6 @@ fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress me
    Always checked: token phase, identities, bounds, overflow, a usable
    bound-pipeline snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, and count misuse.
-
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
@@ -2606,7 +2457,6 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    Always checked: token phase, identities, host-visible bounds, overflow, a
    usable bound-pipeline snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse.
-
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
@@ -2637,7 +2487,6 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    usable bound-pipeline snapshot, and safe lowering.
    FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse.
    Runtime failures: unsupported count execution faults UNSUPPORTED_FEATURE.
-
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
@@ -2672,7 +2521,6 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    FULL diagnostics: pipeline-kind, state, usage, queue, and count misuse.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
-
    @param commands : "Live recording token inside a render pass."
    @param records : "Non-owning GPU-written generated-draw record range."
    @param count_span : "Non-owning span containing the GPU-written draw count."
@@ -2697,7 +2545,6 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
    FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
-
    @param commands : "Live recording token inside a render pass."
    @param records : "Non-owning GPU-written indexed generated-draw record range."
    @param count_span : "Non-owning span containing the GPU-written draw count."
@@ -2720,12 +2567,10 @@ fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuS
 // ---- Synchronization and submission ----
 
 <* Test whether a completion point has a device and nonzero sequence.
-
    @return "True for a structurally valid point; this does not prove live provenance." *>
 fn bool CompletionPoint.is_valid(self) => self.device.is_valid() && gpu::internal::completion_point_sequence(self) != 0;
 
 <* Compare complete completion-point identities.
-
    @return "True when device and packed queue sequence are equal." *>
 fn bool CompletionPoint.equals(self, CompletionPoint other) @operator(==) {
     return self.device == other.device && self.payload == other.payload;
@@ -2733,7 +2578,6 @@ fn bool CompletionPoint.equals(self, CompletionPoint other) @operator(==) {
 
 <* Construct a sampled, read-only texture state at `stages`. This inserts no
    synchronization; pass the result to a texture barrier.
-
    @param stages : "Consumer execution stages."
    @return "A caller-owned sampled read state." *>
 fn TextureState sampled_at(StageMask stages) {
@@ -2746,7 +2590,6 @@ fn TextureState sampled_at(StageMask stages) {
 
 <* Construct a storage texture state at `stages`, preserving `access`. This
    inserts no synchronization; pass the result to a texture barrier.
-
    @param stages : "Consumer execution stages."
    @param access : "Storage read/write intent."
    @return "A caller-owned storage state." *>
@@ -2760,7 +2603,6 @@ fn TextureState storage_at(StageMask stages, TextureAccess access) {
 
 <* Construct a semantic transition for a selected texture range.
    `UNDEFINED` is source-only.
-
    @param texture : "Texture handle named by the transition."
    @param view : "Selected subresource range; the zero value selects the full default view."
    @param before : "Prior semantic state."
@@ -2787,7 +2629,6 @@ fn TextureBarrier? texture_view_transition(
 
 <* Construct a semantic transition for the whole texture.
    `UNDEFINED` is source-only.
-
    @param texture : "Texture handle named by the transition."
    @param before : "Prior semantic state."
    @param after : "Next semantic state."
@@ -2806,7 +2647,6 @@ fn TextureBarrier? texture_transition(TextureHandle texture, TextureState before
    Always checked: token identity, authoritative phase, required pointer, and
    `index_input` on the source side.
    FULL diagnostics: stage and queue-support misuse.
-
    @param commands : "Live recording token."
    @param barrier : "Borrowed source and destination execution scopes."
    @return "Success, or a recoverable command, validation, queue-support, or device fault." *>
@@ -2820,7 +2660,6 @@ fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
    Preconditions: the texture, range, states, usage, and queue access are valid.
    Always checked: token phase, required pointer, texture identity, range, and safe lowering.
    FULL diagnostics: state, usage, queue, format, and presentation misuse.
-
    @param commands : "Live recording token."
    @param barrier : "Borrowed texture, subresource range, and semantic states."
    @return "Success, or a recoverable command, validation, ownership, range, support, or device fault." *>
@@ -2832,7 +2671,6 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
 
 <* Create a caller-owned timestamp pool. Slots are uninitialized and must be
    reset with `cmd_reset_timestamps` before their first write.
-
    @param device : "Live device that will own the pool."
    @param desc : "Borrowed pool capacity and debug-name description."
    @return "An owning pool handle, or a recoverable invalid-argument, unsupported-feature, capacity, allocation, or device fault." *>
@@ -2851,7 +2689,6 @@ fn TimestampPoolHandle? create_timestamp_pool(Device* device, TimestampPoolDesc*
 }
 
 <* Destroy a pool after all recorded and submitted uses have retired.
-
    @param device : "Live device that owns the pool."
    @param pool : "Owning pool handle to destroy."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, or device fault." *>
@@ -2869,7 +2706,6 @@ fn void? destroy_timestamp_pool(Device* device, TimestampPoolHandle pool) {
 }
 
 <* Reset a nonempty pool range outside a render pass.
-
    @param commands : "Live recording token."
    @param pool : "Pool whose slots will be reset."
    @param first : "First slot in the reset range."
@@ -2887,7 +2723,6 @@ fn void? cmd_reset_timestamps(
 }
 
 <* Write one timestamp at exactly one executable pipeline stage.
-
    @param commands : "Live recording token."
    @param pool : "Pool that receives the timestamp."
    @param index : "Destination slot index."
@@ -2907,7 +2742,6 @@ fn void? cmd_write_timestamp(
 <* Resolve packed `ulong` values with a device-side wait into aligned caller
    storage. Every slot must have been reset and written; an unwritten slot can
    stall the queue indefinitely. This call never waits on the host.
-
    @param commands : "Live recording token."
    @param pool : "Pool containing the timestamp values."
    @param first : "First slot to resolve."
@@ -2930,7 +2764,6 @@ fn void? cmd_resolve_timestamps(
    The caller orders this read after GPU completion and externally synchronizes
    mutation or destruction of the same pool. `DEVICE_BUSY` leaves
    `out[0..count]` unspecified.
-
    @param device : "Live device that owns the pool."
    @param pool : "Pool to read."
    @param first : "First slot to read."
@@ -2965,7 +2798,6 @@ fn void? read_timestamps(
 }
 
 <* Convert same-native-queue timestamp values with role-specific modular wrap.
-
    @param caps : "Borrowed timestamp capabilities for the owning device."
    @param queue : "Semantic role for the native queue that produced both values."
    @param begin : "Earlier raw timestamp value."
@@ -3015,7 +2847,6 @@ fn double? timestamp_delta_ns(
    success consumes every list and any valid swapchain readiness. The caller
    externally synchronizes submit, present, and sparse-bind host calls on the
    same native queue, including aliased roles.
-
    @param queue : "Exact selected queue that executes the submission."
    @param desc : "Borrowed waits and mutable executable-token batch; success clears command tokens and invalidates valid readiness."
    @return "A reusable completion point, or a recoverable validation, ownership, capacity, busy, device-loss, or backend fault." *>
@@ -3068,7 +2899,6 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
    Always checked: point identity, ownership, publication, and device state.
    Runtime failures: device loss or backend failure preserves the point. This
    operation never waits and does not consume the point.
-
    @param point : "Reusable queue completion point."
    @return "Whether completion has occurred, or a recoverable ownership, invalid-handle, device-loss, or backend fault." *>
 fn bool? poll_completion(CompletionPoint point) {
@@ -3088,7 +2918,6 @@ fn bool? poll_completion(CompletionPoint point) {
    Always checked: point identity, ownership, publication, and device state.
    Runtime failures: WAIT_TIMEOUT, device loss, or backend failure preserves the point.
    The wait does not consume the point.
-
    @param point : "Reusable queue completion point."
    @param timeout_ns : "Maximum host wait in nanoseconds; TIMEOUT_INFINITE waits without a deadline."
    @return "Success, or a recoverable timeout, ownership, invalid-handle, device-loss, or backend fault." *>
@@ -3108,12 +2937,10 @@ fn void? wait_completion(CompletionPoint point, ulong timeout_ns = TIMEOUT_INFIN
 // ---- Presentation and diagnostics ----
 
 <* Test whether swapchain readiness has a device and nonzero payload.
-
    @return "True for a structurally valid one-shot value; this does not prove live provenance." *>
 fn bool SwapchainReadiness.is_valid(self) => self.device.is_valid() && self.payload != 0;
 
 <* Compare complete swapchain-readiness identities.
-
    @return "True when device and one-shot payload are equal." *>
 fn bool SwapchainReadiness.equals(self, SwapchainReadiness other) @operator(==) {
     return self.device == other.device && self.payload == other.payload;
@@ -3123,7 +2950,6 @@ fn bool SwapchainReadiness.equals(self, SwapchainReadiness other) @operator(==) 
    Preconditions: every borrowing swapchain is destroyed.
    Always checked: live identity, runtime ownership, and dependent count.
    Runtime failures: RESOURCE_IN_USE preserves the surface for retry.
-
    @param surface : "Owning token to destroy; success replaces it with the invalid value."
    @return "Success, or a recoverable invalid-handle or resource-in-use fault." *>
 fn void? destroy_surface(Surface* surface) {
@@ -3149,7 +2975,6 @@ fn void? destroy_surface(Surface* surface) {
 <* Create a swapchain for the exact surface selected at device creation.
    The surface remains owned by its runtime and must outlive the swapchain.
    The descriptor is borrowed only for the call.
-
    @param device : "Live presentation-enabled device."
    @param surface : "Borrowed matching runtime-owned surface."
    @param desc : "Borrowed requested extent, format, image count, usage, and present mode."
@@ -3182,7 +3007,6 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
 
 <* Actual format, extent, image count, and present mode selected for a
    swapchain. Dormant swapchains return the dormant sentinel snapshot.
-
    @param device : "Live device that owns the swapchain."
    @param swapchain : "Swapchain to query."
    @return "The current immutable configuration snapshot, or a recoverable ownership, invalid-handle, or device fault." *>
@@ -3197,7 +3021,6 @@ fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) 
 
 <* Present modes the swapchain's surface supports. Unsupported requested
    modes fall back to FIFO at creation; query this to pick deliberately.
-
    @param device : "Live device that owns the swapchain."
    @param swapchain : "Swapchain whose surface modes are queried."
    @return "Supported present modes, or a recoverable ownership, invalid-handle, surface, or device fault." *>
@@ -3216,7 +3039,6 @@ fn PresentModeSupport? get_present_mode_support(Device* device, SwapchainHandle 
    Runtime failures: failed or zero-clamped rebuild leaves it dormant; other
    faults preserve it, and successful resize stales prior image handles. This
    operation never waits.
-
    @param device : "Live device that owns the swapchain."
    @param swapchain : "Quiescent swapchain to recreate."
    @param width : "Requested surface width."
@@ -3238,7 +3060,6 @@ fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width,
    progress before using TIMEOUT_INFINITE.
    Always checked: live identity, ownership, and acquisition lifecycle.
    Runtime failures: WAIT_TIMEOUT and surface/swapchain faults preserve it.
-
    @param device : "Live device that owns the swapchain."
    @param swapchain : "Externally synchronized swapchain to acquire from."
    @param timeout_ns : "Maximum host wait in nanoseconds; zero is nonblocking."
@@ -3260,7 +3081,6 @@ fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain, 
    Always checked: image/point identity, ownership, publication, and lifecycle.
    Runtime failures: host/device out-of-memory and pre-submit WAIT_TIMEOUT
    preserve the image. Success and every other submitted result consume it.
-
    @param device : "Live device that owns the acquired image."
    @param image : "Externally synchronized acquired image; consumed results replace it with the zero value."
    @param render_completion : "Completion point returned by the readiness-consuming render submission."
@@ -3291,7 +3111,6 @@ fn void? present(Device* device, AcquiredImage* image, CompletionPoint render_co
    failure) also preserve the handle and pending state. This call consumes
    neither the swapchain handle nor an acquired image, waits no completion
    point, and retires no command references.
-
    @param device : "Live device that owns the swapchain."
    @param swapchain : "Borrowed swapchain handle whose presentations are waited."
    @param timeout_ns : "Maximum host wait in nanoseconds; TIMEOUT_INFINITE waits without a deadline and zero is nonblocking."
@@ -3310,7 +3129,6 @@ fn void? wait_swapchain_presentations(Device* device, SwapchainHandle swapchain,
    Preconditions: no pending acquisition, presentation, command, or view use.
    Always checked: live identity, ownership, and lifecycle state.
    Runtime failures: detected use faults without consuming the handle.
-
    @param device : "Live device that owns the swapchain."
    @param swapchain : "Owning swapchain handle to destroy."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, surface, or device fault." *>

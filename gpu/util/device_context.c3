@@ -54,7 +54,6 @@ struct DeviceContext {
 
 <* Choose full contract checks, public default capacities, and a graphics queue.
    Presentation requires a surface factory and the application's drawable size.
-
    @return "An overridable headless setup description with backend layers off." *>
 fn DeviceContextDesc default_device_context_desc() {
     return {
@@ -81,7 +80,6 @@ fn DeviceContextDesc default_device_context_desc() {
 <* Create an owning context without submitting work or retrying setup failures.
    Externally synchronize runtime/surface mutation. Callbacks run synchronously;
    native window objects and debug userdata remain borrowed through teardown.
-
    @param desc : "Call-scoped settings; never modified. Null is invalid."
    @return "A complete context, or the original fault after best-effort cleanup." *>
 fn DeviceContext? create_device_context(DeviceContextDesc* desc) {
@@ -150,7 +148,6 @@ fn DeviceContext? create_device_context(DeviceContextDesc* desc) {
 <* Attempt reverse-order teardown, reporting faults and continuing without waits.
    Stop concurrent use, discard unsubmitted commands, wait completions and
    presentations, and destroy additional application resources before calling.
-
    @param context : "Owner to consume and clear; zero or null is harmless. Copies must not be reused." *>
 fn void destroy_device_context(DeviceContext* context) {
     if (context == null) return;

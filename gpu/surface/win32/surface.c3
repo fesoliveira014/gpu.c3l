@@ -8,7 +8,6 @@ import gpu::internal::vk;
    The runtime retains the surface; the caller destroys it with
    `gpu::destroy_surface`. The native instance and window must remain valid
    until then.
-
    @param runtime : "Live runtime that will own the surface."
    @param instance : "Borrowed non-null native instance handle."
    @param window : "Borrowed non-null native window handle."

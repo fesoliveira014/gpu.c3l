@@ -106,7 +106,6 @@ Every public callable has a C3 docstring in this order:
 
 ```text
 summary, including which recoverable faults it returns
-
 @param entries in declaration order
 @return entry
 @require entries, only for stable local contracts
@@ -125,7 +124,6 @@ Example:
 ```c3
 <* Allocate caller-managed GPU storage.
    Free the returned allocation after GPU use is quiescent.
-
    @param device : "Live device that will own the allocation."
    @param desc : "Borrowed allocation description."
    @return "An owning allocation token, or a recoverable validation, capacity, allocation, or device fault." *>
