@@ -12,9 +12,11 @@ Windowed programs live in the
 ## Build from this checkout
 
 Each example's `project.json` resolves `gpu` from the repository root and the
-bindings from `lib/`. Compile the shaders once, then build and run:
+bindings from `lib/`. Install the VMA static libraries and compile the shaders
+once, then build and run:
 
 ```sh
+python3 scripts/fetch_vma_libs.py
 python3 scripts/build_shaders.py
 c3c run hello_gpu --path examples/getting_started
 c3c run device_context --path examples/device_context

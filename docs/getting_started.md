@@ -14,7 +14,8 @@ Targets: C3 0.8.3, `linux-x64` or `windows-x64`, Vulkan 1.3.
 - `c3c --version` reports 0.8.3.
 - A Vulkan 1.3 loader and driver. On a headless Linux box, lavapipe works.
 - `glslc` (Vulkan SDK or shaderc) to compile GLSL to SPIR-V.
-- Git with submodule support, if cloning instead of using a release.
+- Git with submodule support and Python 3, if cloning instead of using a
+  release.
 
 ## Install
 
@@ -31,13 +32,15 @@ hello_gpu/
 └── project.json
 ```
 
-Add the library as a submodule pinned to a release tag:
+Add the library as a submodule pinned to a release tag, then download the
+VMA static libraries, which git does not carry:
 
 ```sh
 git submodule add https://github.com/fesoliveira014/gpu.c3l lib/gpu.c3l
 git -C lib/gpu.c3l checkout v0.5.0
 git submodule update --init --recursive lib/gpu.c3l
 git config -f .gitmodules submodule.lib/gpu.c3l.shallow true
+python3 lib/gpu.c3l/scripts/fetch_vma_libs.py
 ```
 
 Without git, extract the archive for your target from the

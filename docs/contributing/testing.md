@@ -18,6 +18,7 @@ Layers:
 ```sh
 c3c --version                         # 0.8.3
 git submodule update --init --recursive
+python3 scripts/fetch_vma_libs.py     # VMA static libraries
 ```
 
 Vulkan targets need a Vulkan 1.3 loader, the VMA static library, SPIRV-Reflect,
