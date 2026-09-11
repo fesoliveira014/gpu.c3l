@@ -968,7 +968,7 @@ running.
 These recipes need `DeviceDesc.enable_ray_queries` or
 `enable_ray_tracing_pipelines` and a nonzero
 `RuntimeDesc.acceleration_structure_heap_capacity`. The interactive
-[`cornell_box`](https://github.com/fesoliveira014/gpu.c3l-samples/tree/main/cornell_box)
+[`cornell_box`](https://github.com/fesoliveira014/gpu.c3l-samples/tree/main/samples/26_cornell_box)
 sample is the complete reference.
 
 ### Build a BLAS and TLAS
