@@ -37,7 +37,7 @@ VMA static libraries, which git does not carry:
 
 ```sh
 git submodule add https://github.com/fesoliveira014/gpu.c3l lib/gpu.c3l
-git -C lib/gpu.c3l checkout v0.5.0
+git -C lib/gpu.c3l checkout v0.5.1
 git submodule update --init --recursive lib/gpu.c3l
 git config -f .gitmodules submodule.lib/gpu.c3l.shallow true
 python3 lib/gpu.c3l/scripts/fetch_vma_libs.py
