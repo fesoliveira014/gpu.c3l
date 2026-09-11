@@ -303,7 +303,7 @@ hello_gpu: all 256 values doubled on the GPU
 ## Step 2: a triangle in an SDL3 window
 
 The complete program lives in the samples repository:
-[`hello_triangle_sdl`](https://github.com/fesoliveira014/gpu.c3l-samples/tree/main/hello_triangle_sdl).
+[`hello_triangle_sdl`](https://github.com/fesoliveira014/gpu.c3l-samples/tree/main/samples/02_hello_triangle_sdl).
 Its window and surface helpers are in
 [`shared/sample_window_sdl.c3`](https://github.com/fesoliveira014/gpu.c3l-samples/blob/main/shared/sample_window_sdl.c3).
 The sample also uploads a texture and captures screenshots; the sections
