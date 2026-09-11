@@ -10,7 +10,8 @@ private Vulkan 1.3 backend is `gpu::internal::vk`. The project targets
   `c3-expert` skill and local compiler instead of remembered syntax.
 - Use `c3-style` when writing or reviewing `.c3`/`.c3i`.
 - Use `c3-bindings` when touching `vk`, `vma`, `spvreflect`, or SDL3 bindings.
-- Initialize dependencies with `git submodule update --init --recursive`.
+- Initialize dependencies with `git submodule update --init --recursive`, then
+  install the VMA static libraries with `python3 scripts/fetch_vma_libs.py`.
 - Read [docs/index.md](docs/index.md), the relevant
   [public API page](docs/api/index.md), and the source docstrings before
   changing a public contract.
@@ -74,8 +75,11 @@ When the API changes:
 ## Build and verification
 
 Native libraries are resolved from dependency manifests. The backend requires a
-Vulkan 1.3 loader and the vendored VMA static library. SDL3 belongs to the
-separate samples repository, not this library.
+Vulkan 1.3 loader and the VMA static library. `vma.c3l` publishes that library
+as release assets, not in git; `scripts/fetch_vma_libs.py` pins the release
+that matches `lib/vma.c3l`, so moving the submodule means updating its tag,
+commit, and checksums. SDL3 belongs to the separate samples repository, not
+this library.
 
 Run from the repository root:
 

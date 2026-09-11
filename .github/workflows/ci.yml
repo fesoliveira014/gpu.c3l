@@ -36,6 +36,9 @@ jobs:
           test ! -e lib/vma.c3l/test/libs/sdl3.c3l
           test ! -e lib/vma.c3l/test/libs/vk.c3l/.git
 
+      - name: Fetch VMA static libraries
+        run: python3 scripts/fetch_vma_libs.py
+
       - name: Cache c3c
         uses: actions/cache@v4
         with:
@@ -207,6 +210,9 @@ jobs:
           test ! -e lib/vma.c3l/test/libs/sdl3.c3l
           test ! -e lib/vma.c3l/test/libs/vk.c3l/.git
 
+      - name: Fetch VMA static libraries
+        run: python scripts/fetch_vma_libs.py
+
       - name: Cache toolchain
         uses: actions/cache@v4
         with:
@@ -214,9 +220,8 @@ jobs:
             ~/tools/c3
             ~/tools/VulkanSDK
             ~/tools/VulkanRT
-            ~/tools/vma
             ~/tools/mesa
-          key: win-tools-${{ env.C3C_VERSION }}-${{ env.VULKAN_SDK_VERSION }}-${{ env.MESA_DIST_WIN_VERSION }}-vma330
+          key: win-tools-${{ env.C3C_VERSION }}-${{ env.VULKAN_SDK_VERSION }}-${{ env.MESA_DIST_WIN_VERSION }}
 
       - name: Install c3c
         run: |
@@ -262,23 +267,6 @@ jobs:
           # GITHUB_PATH needs a Windows-form path — the OS loader reads it.
           cygpath -w "$(dirname "$DLL")" >> "$GITHUB_PATH"
 
-      - name: VMA header (pinned)
-        # The SDK's silent install does not ship include/vma/; the build script
-        # includes <vma/vk_mem_alloc.h>, so stage the pinned upstream header.
-        run: |
-          if [ ! -f ~/tools/vma/include/vma/vk_mem_alloc.h ]; then
-            # Same tag as vma.c3l's build-vma-libs workflow, so both platforms
-            # build against one VMA version.
-            git clone -q --depth 1 --branch v3.3.0 \
-              https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator /tmp/vma-src
-            mkdir -p ~/tools/vma/include/vma
-            cp /tmp/vma-src/include/vk_mem_alloc.h ~/tools/vma/include/vma/
-          fi
-          echo "VMA_INCLUDE=$(cygpath -w "$HOME/tools/vma/include")" >> "$GITHUB_ENV"
-
-      - name: MSVC environment
-        uses: ilammy/msvc-dev-cmd@v1
-
       - name: Build Windows release bundle
         run: |
           python -B -m unittest scripts.test_package_release -v
@@ -298,9 +286,6 @@ jobs:
           path: dist/gpu.c3l-v*-windows-x64.zip
           if-no-files-found: error
           retention-days: 7
-
-      - name: Build VMA static library
-        run: sh lib/vma.c3l/scripts/build-vma-windows.sh
 
       - name: Stage vulkan-1 import library
         # vk.c3l links `vulkan-1` but is bindings-only; vma.c3l's linked-libs

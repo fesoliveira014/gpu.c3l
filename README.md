@@ -59,14 +59,16 @@ it for a platform or workload.
 ## Install
 
 Add the repository as a submodule at `lib/gpu.c3l`, pinned to a release tag.
-The checkout brings its three binding packages (`vk`, `vma`, `spvreflect`)
-with vendored native libraries for `linux-x64` and `windows-x64`:
+The checkout brings its three binding packages (`vk`, `vma`, `spvreflect`).
+Git does not carry the VMA static libraries; `fetch_vma_libs.py` downloads
+the `linux-x64` and `windows-x64` builds that match the pinned `vma` binding:
 
 ```sh
 git submodule add https://github.com/fesoliveira014/gpu.c3l lib/gpu.c3l
 git -C lib/gpu.c3l checkout v0.5.0
 git submodule update --init --recursive lib/gpu.c3l
 git config -f .gitmodules submodule.lib/gpu.c3l.shallow true
+python3 lib/gpu.c3l/scripts/fetch_vma_libs.py
 ```
 
 Without git, download the archive for your target from the

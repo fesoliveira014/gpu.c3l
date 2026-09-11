@@ -18,8 +18,6 @@
       "linked-libraries": []
     },
     "windows-x64": {
-      // Build the VMA static library during Windows setup; its dependency
-      // manifest supplies the native link input.
       "link-args": [],
       "dependencies": [ "vk", "vma", "spvreflect" ],
       "linked-libraries": []
