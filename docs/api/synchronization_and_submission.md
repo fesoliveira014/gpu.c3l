@@ -23,8 +23,8 @@ flowchart LR
 `acceleration_structure_build`, `ray_tracing`, `index_input`,
 `mesh_shader`. `all` and `present` cannot be combined with others.
 `index_input` is destination-only: valid in `Barrier.after` and
-`CompletionWait.before`, rejected in `Barrier.before`, texture states, and
-`SubmitDesc.readiness_before`. `mesh_shader` needs
+`CompletionWait.before`. Applications must not use it in `Barrier.before`,
+texture states, or `SubmitDesc.readiness_before`. `mesh_shader` needs
 `DeviceDesc.enable_mesh_shaders` and covers the mesh stage and the task stage
 when task shaders are enabled.
 
@@ -71,8 +71,8 @@ gpu::TextureState present   = { .layout = gpu::TextureLayout.PRESENT };
 
 Layouts: `UNDEFINED` (source only), `TRANSFER_SOURCE`,
 `TRANSFER_DESTINATION`, `SAMPLED`, `STORAGE`, `COLOR_ATTACHMENT`,
-`DEPTH_ATTACHMENT`, `PRESENT`, and `GENERAL` (unified mode only; explicit
-mode faults `INVALID_ARGUMENT`). Zero access is valid only for `UNDEFINED`
+`DEPTH_ATTACHMENT`, `PRESENT`, and `GENERAL`. Applications must use `GENERAL`
+only in unified mode. Zero access is valid only for `UNDEFINED`
 and `PRESENT`.
 
 Under `DeviceDesc.unified_layouts` every layout except `UNDEFINED` lowers
@@ -192,8 +192,8 @@ timestamps.
 
 | Cause | Fault |
 |---|---|
-| invalid stage, access, layout, or range | `INVALID_ARGUMENT` |
-| contradictory or unestablished state | `INVALID_RESOURCE_STATE` |
+| invalid submission wait stage, descriptor, or host-lowering range | `INVALID_ARGUMENT` |
+| incompatible library-owned state | `INVALID_RESOURCE_STATE` |
 | stale, foreign, or consumed token | `INVALID_HANDLE`, `COMMAND_RECORDING_ERROR` |
 | wait elapsed | `WAIT_TIMEOUT` |
 | values not ready | `DEVICE_BUSY` |

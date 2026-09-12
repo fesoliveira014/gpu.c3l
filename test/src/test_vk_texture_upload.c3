@@ -28,7 +28,6 @@ const usz BC_EDGE_BYTES = BC1_BLOCK_BYTES * 4;
 
 fn gpu::Device make_upload_test_device() {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_texture_upload_test",
     };
@@ -644,24 +643,6 @@ fn void compressed_upload_mip_chain_sample_and_readback() @test {
     )!!;
     gpu::cmd_texture_barrier(&cmd, &edge_to_dst)!!;
 
-    gpu::BufferTextureCopyDesc misaligned_origin = {
-        .src = staging.span, .texture = chain, .x = 2,
-    };
-    assert(@catch(gpu::cmd_copy_buffer_to_texture(&cmd, &misaligned_origin))
-            == gpu::INVALID_ARGUMENT,
-        "block-compressed copy origins must sit on block boundaries");
-    gpu::BufferTextureCopyDesc partial_block = {
-        .src = staging.span, .texture = chain, .width = 6,
-    };
-    assert(@catch(gpu::cmd_copy_buffer_to_texture(&cmd, &partial_block))
-            == gpu::INVALID_ARGUMENT,
-        "block-compressed extents are block multiples unless they reach the edge");
-    gpu::BufferTextureCopyDesc ragged_rows = {
-        .src = staging.span, .texture = chain, .row_length_texels = 6,
-    };
-    assert(@catch(gpu::cmd_copy_buffer_to_texture(&cmd, &ragged_rows))
-            == gpu::INVALID_ARGUMENT,
-        "row lengths of block-compressed copies are block multiples");
     gpu::BufferTextureCopyDesc short_tail = {
         .src     = staging.span.checked_subspan(bc_mip_offset(3), 4)!!,
         .texture = chain,
@@ -947,10 +928,6 @@ fn void copy_validation_faults() @test {
     gpu::BufferTextureCopyDesc bad_mip = { .src = span, .texture = texture, .mip = 1 };
     fault mip_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &bad_mip));
     assert(mip_fault == gpu::INVALID_ARGUMENT, "copy to a missing mip faults INVALID_ARGUMENT");
-
-    gpu::TextureBufferCopyDesc no_src_usage = { .texture = texture, .dst = span };
-    fault usage_fault = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &no_src_usage));
-    assert(usage_fault == gpu::INVALID_ARGUMENT, "texture without transfer_src faults INVALID_ARGUMENT on readback");
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 

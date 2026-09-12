@@ -187,7 +187,7 @@ const AccelerationStructureIndex ACCELERATION_STRUCTURE_INDEX_INVALID = {};
 const Runtime RUNTIME_INVALID = {};
 
 // Public fault set. Categories describe causes, not whole fault values: one
-// value can report an always-checked cause, a FULL diagnostic, or a runtime
+// value can report an implementation-safety cause or a runtime
 // failure. docs/api/index.md carries the complete cause classification.
 faultdef
     // Runtime failure: the requested backend or Vulkan 1.3 driver is absent,
@@ -197,7 +197,7 @@ faultdef
     // or exact semantic capacity is unavailable.
     UNSUPPORTED_FEATURE,
     // Always checked for required host-safety, safe-lowering, and cold-path
-    // configuration causes; FULL also uses it for semantic diagnostics.
+    // configuration causes.
     INVALID_ARGUMENT,
     // Always checked: a bounded public identity is zero, stale, consumed,
     // foreign, malformed, or was never live.
@@ -239,8 +239,7 @@ faultdef
     // Runtime failure: the swapchain no longer matches the surface; resize
     // and retry.
     SWAPCHAIN_OUT_OF_DATE,
-    // Always checked for authoritative command phase and submit claims; FULL
-    // also uses it for detailed command-state diagnostics.
+    // Authoritative command phase or submit claims are incompatible.
     COMMAND_RECORDING_ERROR,
     // Runtime failure: a bounded wait elapsed or presentation progress is
     // transiently unavailable. Safe to retry with the unchanged value.
@@ -486,25 +485,8 @@ struct DeviceCaps {
     Format depth_stencil_format;
 }
 
-<* Selects library contract behavior; this is independent of Vulkan validation
-   layers.
-   Preconditions: valid callers satisfy operation contracts under every policy.
-   Always checked: token device identity, record generation, authoritative
-   phase, host safety, safe lowering, lifecycle integrity, cold paths, and
-   runtime results.
-   FULL diagnostics: detailed command semantic misuse.
-   Runtime failures: valid callers may receive documented faults in every policy. *>
-enum ContractValidation : int {
-    // Trusted command recording with the mandatory always-checked floor.
-    TRUSTED,
-    // FULL command tables with semantic diagnostics.
-    FULL,
-}
-
-<* Runtime discovery configuration. A zero-initialized value selects TRUSTED,
-   with Vulkan validation layers off. *>
+<* Runtime discovery configuration. Vulkan validation layers are off by default. *>
 struct RuntimeDesc {
-    ContractValidation   contract_validation;
     bool                 enable_vulkan_validation;
     bool                 enable_debug_names;
     uint                 texture_heap_capacity;

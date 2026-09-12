@@ -72,7 +72,6 @@ fn vk::Result distinct_upstream_counter_query(
 
 fn gpu::Device make_lifetime_test_device() {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_immediate_lifetime_test",
     };
@@ -268,7 +267,7 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
         "quiescent release does not wait for unrelated queue or device idle");
 }
 
-fn void failed_texture_validation_preserves_resource_teardown() @test {
+fn void failed_texture_resolution_preserves_resource_teardown() @test {
     gpu::Device device = make_lifetime_test_device();
 
     defer destroy_test_device(&device)!!;
@@ -290,19 +289,17 @@ fn void failed_texture_validation_preserves_resource_teardown() @test {
         .before  = { .layout = gpu::TextureLayout.UNDEFINED },
         .after   = { .layout = gpu::TextureLayout.UNDEFINED },
     };
+    barrier.texture.generation++;
     assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
-        == gpu::INVALID_ARGUMENT,
-        "an invalid semantic use faults");
+        == gpu::INVALID_HANDLE,
+        "a stale texture faults before native emission");
     gpu::destroy_texture(&device, texture)!!;
     gpu::discard_commands(&commands)!!;
 }
 
 fn void incomplete_command_drain_is_deterministic() @test {
     vk::VkDeviceState state = {
-        .validation_policy = {
-            .contract = gpu::ContractValidation.FULL,
-        },
-        .host_allocator = &allocators::LIBC_ALLOCATOR,
+                .host_allocator = &allocators::LIBC_ALLOCATOR,
     };
     vk::QueueCompletionState[1] completions = {{
         .timeline = (vk::Semaphore)(uptr)1,

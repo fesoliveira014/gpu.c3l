@@ -24,7 +24,7 @@ flowchart LR
 ## Runtime
 
 ```c3
-gpu::RuntimeDesc desc = gpu::full_validation_runtime_desc();
+gpu::RuntimeDesc desc = { .enable_vulkan_validation = true };
 desc.application_name = "my_app";
 gpu::Runtime runtime = gpu::create_runtime(&desc)!;
 defer (void)gpu::destroy_runtime(&runtime);
@@ -34,7 +34,6 @@ defer (void)gpu::destroy_runtime(&runtime);
 
 | Field | Zero means | Purpose |
 |---|---|---|
-| `contract_validation` | `TRUSTED` | `FULL` adds semantic checks |
 | `enable_vulkan_validation` | off | Loads the Khronos validation layer |
 | `enable_debug_names` | off | Passes `debug_name` strings to the driver |
 | `texture_heap_capacity` | 4,096 | Bindless texture slots |
@@ -46,7 +45,7 @@ defer (void)gpu::destroy_runtime(&runtime);
 | `application_name` | none | Reported to the driver |
 | `debug_callback`, `debug_user_data` | none | Structured diagnostics |
 
-`full_validation_runtime_desc()` sets `FULL` and Vulkan validation. The
+Set `enable_vulkan_validation` explicitly during development. The
 descriptor is borrowed for the call; `debug_user_data` must stay valid until
 the runtime is destroyed.
 
@@ -161,8 +160,8 @@ uint max_targets = caps.max_color_attachments;
 maximum geometry, primitive, and instance counts.
 `RayTracingPipelineCaps` carries `indirect_dispatch`, `indirect2_dispatch`,
 recursion depth, dispatch limits, and SBT alignment and stride
-requirements. Query these rather than hardcoding values. Exceeding a limit
-returns `INVALID_ARGUMENT` or `UNSUPPORTED_FEATURE`.
+requirements. Query these rather than hardcoding values. Applications must
+keep GPU operations within the reported limits.
 
 ## Queues
 

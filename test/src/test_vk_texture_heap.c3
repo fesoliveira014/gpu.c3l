@@ -40,7 +40,6 @@ const uint HEAP_CUBE_OUTPUT_TEXELS = 9;
 
 fn void bindless_texture_write_then_sample() @test {
     gpu::RuntimeDesc device_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_texture_heap_test",
     };
@@ -256,7 +255,6 @@ fn void bindless_texture_write_then_sample() @test {
 
 fn void bindless_volume_write_load_and_sample() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_volume_heap_test",
     };
@@ -455,7 +453,6 @@ fn void bindless_volume_write_load_and_sample() @test {
 
 fn void bindless_cube_upload_and_sample() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_cube_heap_test",
     };
@@ -676,7 +673,6 @@ fn void bindless_cube_upload_and_sample() @test {
 
 fn void storage_write_then_fragment_sample() @test {
     gpu::RuntimeDesc device_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_storage_fragment_test",
     };
@@ -958,7 +954,6 @@ fn uint quantize_unorm8(float value) {
 
 fn void anisotropic_sampler_caps_honest() @test {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_aniso_test",
     };
@@ -993,7 +988,6 @@ fn void anisotropic_sampler_caps_honest() @test {
 
 fn void anisotropy_range_validated() @test {
     gpu::RuntimeDesc device_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_aniso_range_test",
     };
@@ -1045,7 +1039,6 @@ fn void anisotropy_range_validated() @test {
 
 fn void updated_view_samples_new_texture_at_same_index() @test {
     gpu::RuntimeDesc device_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_texture_update_test",
     };
@@ -1262,7 +1255,6 @@ fn void reserved_row_addressing_samples_correct_texture() @test {
     char[4] color_1 = { 210, 30, 90, 255 };
 
     gpu::RuntimeDesc device_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_row_addressing_test",
     };
@@ -1412,7 +1404,6 @@ fn void row_addressed_render_samples_shader_computed_index() @test {
     char[4] color_1 = { 210, 30, 90, 255 };
 
     gpu::RuntimeDesc device_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_row_addressed_render_test",
     };

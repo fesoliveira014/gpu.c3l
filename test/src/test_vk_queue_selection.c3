@@ -44,7 +44,6 @@ fn vk::QueueFamilyProperties family(uint flags, uint count) {
 
 fn gpu::Device make_queue_test_device() {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_queue_selection_test",
     };
@@ -955,7 +954,6 @@ fn void allocator_pool_ownership_is_exact() @test {
 
 fn void cross_queue_timeline_chain_validates() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_cross_queue_timeline_test",
     };
@@ -1004,7 +1002,6 @@ fn void cross_queue_timeline_chain_validates() @test {
 
 fn void distinct_transfer_compute_graphics_completion_chain() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_distinct_queue_test",
     };

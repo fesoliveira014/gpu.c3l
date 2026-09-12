@@ -152,9 +152,6 @@ fn int main() {
         REPS,
     );
     gpu::RuntimeDesc desc = {
-        .contract_validation = validation_enabled()
-            ? gpu::ContractValidation.FULL
-            : gpu::ContractValidation.TRUSTED,
         .enable_vulkan_validation = validation_enabled(),
         .application_name  = "gpu_async_overlap_bench",
     };

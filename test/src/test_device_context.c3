@@ -89,9 +89,8 @@ fn void assert_context_empty(util::DeviceContext* context) {
     assert(context.debug_callback == null && context.debug_user_data == null);
 }
 
-fn void context_defaults_enable_contract_checks_without_layers() @test {
+fn void context_defaults_leave_layers_disabled() @test {
     util::DeviceContextDesc desc = util::default_device_context_desc();
-    assert(desc.runtime.contract_validation == gpu::ContractValidation.FULL);
     assert(!desc.runtime.enable_vulkan_validation);
     assert(desc.command_queue == gpu::QueueKind.GRAPHICS);
     assert(desc.command_allocator.command_buffer_capacity == gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY);
@@ -212,7 +211,6 @@ fn void context_zero_descriptor_preserves_core_defaults() @test {
     reset_context_stub();
     util::DeviceContextDesc desc;
     util::DeviceContext context = util::create_device_context(&desc)!!;
-    assert(desc.runtime.contract_validation == ContractValidation.TRUSTED);
     assert(desc.command_allocator.command_buffer_capacity == 0);
     assert(context.queue.roles.graphics);
     util::destroy_device_context(&context);

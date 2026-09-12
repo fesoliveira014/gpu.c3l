@@ -477,19 +477,6 @@ fn bool barrier_stage_mask_valid(gpu::StageMask stages) @private {
     return gpu::internal::stage_mask_valid(stages);
 }
 
-fn ZString barrier_masks_rejected_field(gpu::Barrier* barrier) {
-    if (barrier == null) return "Barrier";
-    if (!barrier_stage_mask_valid(barrier.before) || barrier.before.index_input) {
-        return "Barrier.before";
-    }
-    if (!barrier_stage_mask_valid(barrier.after)) return "Barrier.after";
-    return null;
-}
-
-fn bool barrier_masks_valid(gpu::Barrier* barrier) {
-    return barrier_masks_rejected_field(barrier) == null;
-}
-
 fn bool queue_flags_include(
     vk::QueueFlags flags,
     vk::QueueFlagBits required,
@@ -551,41 +538,6 @@ fn vk::PipelineStageFlags2? submit_wait_stages_to_vk(
         return gpu::INVALID_ARGUMENT~;
     }
     return barrier_before_stages_to_vk(stages, generated_work, task_shaders);
-}
-
-fn ZString barrier_queue_rejected_field(
-    gpu::Barrier* barrier,
-    vk::QueueFlags flags,
-    bool ray_queries = false,
-    bool ray_tracing_pipelines = false,
-    bool mesh_shaders = false,
-) {
-    if (!barrier_stage_mask_supported(
-        stages:                barrier.before,
-        flags:                 flags,
-        ray_queries:           ray_queries,
-        ray_tracing_pipelines: ray_tracing_pipelines,
-        mesh_shaders:          mesh_shaders,
-    )) {
-        return "Barrier.before";
-    }
-    if (!barrier_stage_mask_supported(
-        stages:                barrier.after,
-        flags:                 flags,
-        ray_queries:           ray_queries,
-        ray_tracing_pipelines: ray_tracing_pipelines,
-        mesh_shaders:          mesh_shaders,
-    )) {
-        return "Barrier.after";
-    }
-    return null;
-}
-
-fn bool barrier_queue_flags_valid(
-    gpu::Barrier* barrier,
-    vk::QueueFlags flags,
-) {
-    return barrier_queue_rejected_field(barrier, flags) == null;
 }
 
 fn gpu::PresentMode present_mode_from_vk(vk::PresentModeKHR mode) {

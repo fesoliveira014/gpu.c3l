@@ -365,7 +365,6 @@ fn void vulkan_debug_message_routes_structured_fields() @test {
         "native acceleration-structure identity remains hidden");
 }
 
-
 fn void vulkan_debug_message_prefers_named_resource_and_falls_back_to_kind() @test {
     DebugCapture capture;
     vk::VkDeviceState state = {
@@ -436,60 +435,6 @@ fn void vulkan_debug_message_handles_null_callback_data() @test {
     assert(!capture.last.resource.has_public_identity, "missing objects produce no public identity");
 }
 
-fn void barrier_mask_diagnostic_preserves_fault() @test {
-    DebugCapture capture;
-    gpu::RuntimeDesc device_desc = {
-        .contract_validation = gpu::ContractValidation.FULL,
-        .debug_callback      = &capture_debug_message,
-        .debug_user_data     = &capture,
-        .application_name    = "gpu_debug_contract_test",
-    };
-    gpu::Device device = create_test_device(&device_desc)!!;
-    defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(
-        &device,
-        queue,
-    )!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    gpu::Barrier barrier = {
-        .before = {
-            .all = true,
-            .compute = true,
-        },
-        .after = { .compute = true },
-    };
-
-    uint before = capture.calls;
-    fault rejected = @catch(gpu::cmd_barrier(&commands, &barrier));
-
-    assert(rejected == gpu::INVALID_ARGUMENT,
-        "structured diagnostics do not change the public fault");
-    assert(capture.calls == before + 1,
-        "one public-contract message accompanies the fault");
-    assert(capture.last.severity == gpu::DebugMessageSeverity.ERROR,
-        "public rejection is an error");
-    assert(capture.last.category.public_contract,
-        "public rejection carries the contract category");
-    assert(capture.last.has_fault
-        && capture.last.public_fault == gpu::INVALID_ARGUMENT,
-        "diagnostic carries the same public fault");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.NONE,
-        "global barrier rejection carries no resource kind");
-    assert(!capture.last.resource.has_public_identity,
-        "global barrier rejection carries no public identity");
-    assert(capture.barrier_strings_match,
-        "callback observes borrowed semantic barrier metadata while valid");
-
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    defer discard_test_executable(&executable)!!;
-}
-
 fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
     DebugCapture capture;
     vk::VkDeviceState state = {
@@ -523,7 +468,6 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
     assert(capture.barrier_strings_match,
         "helper exposes borrowed contract strings only during callback delivery");
 }
-
 
 fn void debug_names_do_not_require_validation() @test {
     gpu::RuntimeDesc desc = {
@@ -580,7 +524,6 @@ fn void interned_sampler_keeps_first_debug_name() @test {
 
 fn gpu::Device make_dbg_device() {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_debug_test",
     };
@@ -774,7 +717,7 @@ fn void acceleration_structure_leaks_route_semantic_diagnostics() @test {
         "acceleration-structure leaks preserve standard metadata and names");
 }
 
-fn void full_validation_teardown_reports_live_acceleration_structure() @test {
+fn void teardown_reports_live_acceleration_structure() @test {
     gpu::Runtime runtime;
     gpu::Device device = create_ray_query_test_device(&runtime)!!;
     gpu::AccelerationStructureDesc desc = {
@@ -804,12 +747,12 @@ fn void full_validation_teardown_reports_live_acceleration_structure() @test {
     assert(capture.total == 1
             && capture.acceleration_structures == 1
             && capture.acceleration_structure_a_seen,
-        "FULL teardown routes the live acceleration-structure owner once");
+        "Teardown routes the live acceleration-structure owner once");
     assert(capture.acceleration_structure_identity_valid
             && capture.public_identities == 1,
-        "FULL teardown preserves the exact live owner identity");
+        "Teardown preserves the exact live owner identity");
     assert(capture.metadata_valid && capture.named_resources_valid,
-        "FULL teardown preserves standard leak metadata and name");
+        "Teardown preserves standard leak metadata and name");
 }
 
 fn void debug_name_copy_is_independent() @test {

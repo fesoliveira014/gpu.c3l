@@ -21,20 +21,6 @@ struct RuntimeData @private {
 
 RuntimeData[MAX_RUNTIMES] runtime_slots @private;
 
-fn bool contract_validation_is_known(ContractValidation policy) @private {
-    switch (policy) {
-        case ContractValidation.TRUSTED:
-        case ContractValidation.FULL:
-            return true;
-        default:
-            return false;
-    }
-}
-
-fn void? validate_contract_validation(ContractValidation policy) @private {
-    if (!contract_validation_is_known(policy)) return gpu::INVALID_ARGUMENT~;
-}
-
 fn RuntimeData* resolve_runtime(Runtime* runtime) @private {
     if (runtime == null || !runtime.is_valid()) return null;
     if (runtime.reserved != 0) return null;
@@ -119,7 +105,6 @@ fn void? runtime_release_device(Runtime* runtime) @private {
 
 fn void? validate_runtime_desc(RuntimeDesc* desc) @private {
     if (desc == null) return gpu::INVALID_ARGUMENT~;
-    validate_contract_validation(desc.contract_validation)!;
     if (desc.texture_heap_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
         || desc.sampler_heap_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
         || desc.texture_capacity > gpu::MAX_SHADER_HEAP_CAPACITY

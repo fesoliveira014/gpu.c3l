@@ -480,16 +480,11 @@ fn void stencil_only_format_when_supported() @test {
 }
 
 fn void stencil_validation_faults() @test {
-    stencil_validation_faults_under(gpu::ContractValidation.FULL);
+    stencil_validation_faults_under();
 }
 
-fn void stencil_validation_faults_under_trusted() @test {
-    stencil_validation_faults_under(gpu::ContractValidation.TRUSTED);
-}
-
-fn void stencil_validation_faults_under(gpu::ContractValidation policy) {
+fn void stencil_validation_faults_under() {
     gpu::RuntimeDesc device_desc = {
-        .contract_validation      = policy,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_stencil_validation_test",
     };
@@ -546,10 +541,6 @@ fn void stencil_validation_faults_under(gpu::ContractValidation policy) {
     );
     gpu::ColorTargetState[1] color_on = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
     state.color = { .targets = color_on[..] };
-    *((int*)&state.stencil.front.pass) = 99;
-    assert(@catch(gpu::cmd_set_graphics_state(&cmd, &state)) == gpu::INVALID_ARGUMENT,
-        "an undefined stencil operation faults under every policy");
-    state.stencil.front.pass = gpu::StencilOp.KEEP;
     state.stencil.test_enable = false;
     *((int*)&state.stencil.back.compare) = 99;
     gpu::cmd_set_graphics_state(&cmd, &state)!!;
@@ -560,61 +551,6 @@ struct StencilDiagnosticCapture {
     uint performance;
     uint faults;
     bool field_matches;
-}
-
-fn void capture_stencil_diagnostic(gpu::DebugMessage* message, void* user_data) {
-    if (message.operation == null) return;
-    StencilDiagnosticCapture* capture = (StencilDiagnosticCapture*)user_data;
-    if (message.has_fault) capture.faults++;
-    if (message.category.performance) capture.performance++;
-    capture.field_matches = message.rejected_field != null
-        && message.rejected_field.str_view() == "GraphicsState.stencil.test_enable";
-}
-
-fn void stencil_without_aspect_reports_performance_diagnostic() @test {
-    StencilDiagnosticCapture capture;
-    gpu::RuntimeDesc device_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
-        .enable_vulkan_validation = true,
-        .application_name         = "gpu_stencil_diagnostic_test",
-        .debug_callback           = &capture_stencil_diagnostic,
-        .debug_user_data          = &capture,
-    };
-    gpu::Device device = create_test_device(&device_desc)!!;
-    defer destroy_test_device(&device)!!;
-    DepthCtx ctx = make_depth_ctx();
-    gpu::PipelineHandle no_stencil = make_stencil_pipeline(&device, &ctx, gpu::Format.D32_FLOAT);
-    defer gpu::destroy_pipeline(&device, no_stencil)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::TextureHandle depth = make_depth_texture(&device, true);
-    defer gpu::destroy_texture(&device, depth)!!;
-    gpu::AttachmentViewHandle depth_view = create_test_attachment_view(&device, depth)!!;
-    defer destroy_test_attachment_view(&device, &depth_view)!!;
-    gpu::TextureHandle target = make_color_target(&device);
-    defer gpu::destroy_texture(&device, target)!!;
-    gpu::AttachmentViewHandle target_view = create_test_attachment_view(&device, target)!!;
-    defer destroy_test_attachment_view(&device, &target_view)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-    record_color_to_attach(&cmd, target);
-    record_depth_to_attach(&cmd, depth);
-    gpu::ColorTargetDesc[1] colors = {{ .view = target_view }};
-    gpu::DepthTargetDesc depth_target = { .view = depth_view };
-    gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    gpu::cmd_bind_pipeline(&cmd, no_stencil)!!;
-    gpu::GraphicsState state = stencil_graphics_state(
-        gpu::stencil_face(gpu::CompareOp.ALWAYS, gpu::StencilOp.KEEP, 0),
-        true,
-    );
-    gpu::ColorTargetState[1] color_on = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
-    state.color = { .targets = color_on[..] };
-    gpu::cmd_set_graphics_state(&cmd, &state)!!;
-    assert(capture.performance == 1 && capture.faults == 0 && capture.field_matches,
-        "an enabled stencil test without a stencil aspect reports one performance diagnostic");
-    gpu::cmd_end_render_pass(&cmd)!!;
 }
 
 fn void stencil_aspect_fetches_in_fragment_stage() @test {

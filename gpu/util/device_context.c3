@@ -52,13 +52,12 @@ struct DeviceContext {
     void* debug_user_data;
 }
 
-<* Choose full contract checks, public default capacities, and a graphics queue.
+<* Choose public default capacities and a graphics queue.
    Presentation requires a surface factory and the application's drawable size.
    @return "An overridable headless setup description with backend layers off." *>
 fn DeviceContextDesc default_device_context_desc() {
     return {
         .runtime = {
-            .contract_validation = gpu::ContractValidation.FULL,
             .texture_heap_capacity = gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
             .sampler_heap_capacity = gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
             .texture_capacity = gpu::DEFAULT_TEXTURE_CAPACITY,

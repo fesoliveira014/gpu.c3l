@@ -22,7 +22,7 @@ limits an application must design around.
   and debug labels.
 - Timeline-based completion points, cross-queue waits, swapchain acquire
   and present, and explicit resize recovery.
-- Optional full contract validation, structured diagnostics, object naming,
+- Optional Vulkan validation, structured diagnostics, object naming,
   and leak reporting.
 - A schema generator that emits matching C3 and GLSL std430 declarations.
 - Opt-in ray queries: triangle and AABB BLAS, TLAS instances, in-place
@@ -82,7 +82,7 @@ by CPU tests but has not run on hardware that reports the capability.
   is destroyed.
 - Allocations are never moved. An address is valid until `free_allocation`.
 - A `CompletionPoint` orders work. It does not keep anything alive.
-- Commands do not retain application resources under any validation policy.
+- Commands do not retain application resources.
   Keep resources alive and unmodified as required through their last GPU use.
 - Creation is transactional; destruction never waits and may return
   `RESOURCE_IN_USE` or `DEVICE_BUSY`.
@@ -138,9 +138,10 @@ Exhaustion returns `DESCRIPTOR_HEAP_FULL`, `SLOT_TABLE_FULL`, or
 
 ## Validation and callbacks
 
-`ContractValidation.FULL` checks ownership, generations, call order,
-and semantic limits. It does not prove sparse
-residency or the validity of data reached through a `GpuAddress`.
+The library protects handle identity, host translation, and its own lifecycle.
+Applications own GPU usage, ordering, resource lifetimes, and sparse residency.
+Enable Vulkan validation explicitly for development diagnostics; neither the
+library nor the layer proves the validity of data reached through a `GpuAddress`.
 
 Debug callbacks are synchronous, may run on any thread, and must not call
 back into the library. Message pointers are valid only during the call.

@@ -169,7 +169,6 @@ fn void texture_descriptors_use_classic_layouts() @test {
 
 fn gpu::Device make_heap_test_device(uint tex_capacity, uint smp_capacity) {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .texture_heap_capacity = tex_capacity,
         .sampler_heap_capacity = smp_capacity,
@@ -1639,7 +1638,6 @@ fn void device_loss_teardown_accepts_live_texture_views() @test {
     )) == gpu::DEVICE_LOST,
         "the fixture enters forced device-loss teardown");
 
-    state.validation_policy.contract = gpu::ContractValidation.TRUSTED;
     destroy_test_device(&device)!!;
 }
 

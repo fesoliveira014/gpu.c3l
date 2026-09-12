@@ -65,18 +65,17 @@ fn void runtime_policies_plan_layers_and_debug_utils_independently() @test {
         application_name: null,
         messenger_info:  &messenger_info,
     );
-    assert(!plan.enable_validation, "trusted defaults do not request validation layers");
-    assert(!plan.enable_debug_utils, "trusted defaults do not request debug utils");
-    assert(plan.debug_messenger_info == null, "trusted defaults omit messenger chaining");
+    assert(!plan.enable_validation, "defaults do not request validation layers");
+    assert(!plan.enable_debug_utils, "defaults do not request debug utils");
+    assert(plan.debug_messenger_info == null, "defaults omit messenger chaining");
 
-    config.validation.contract = gpu::ContractValidation.FULL;
     plan = gpu::internal::vk::runtime_instance_desc(
         config:           &config,
         application_name: null,
         messenger_info:  &messenger_info,
     );
-    assert(!plan.enable_validation, "contract and lifetime policies do not request layers");
-    assert(!plan.enable_debug_utils, "contract and lifetime policies do not request debug utils");
+    assert(!plan.enable_validation, "the default runtime configuration leaves layers disabled");
+    assert(!plan.enable_debug_utils, "the default runtime configuration leaves debug utils disabled");
 
     config.debug_callback = &capture_instance_message;
     plan = gpu::internal::vk::runtime_instance_desc(
@@ -99,7 +98,7 @@ fn void runtime_policies_plan_layers_and_debug_utils_independently() @test {
     assert(plan.enable_debug_utils, "names-only configuration requests debug utils");
 
     config.debug_names = false;
-    config.validation.vulkan_layers = true;
+    config.enable_vulkan_validation = true;
     plan = gpu::internal::vk::runtime_instance_desc(
         config:           &config,
         application_name: null,

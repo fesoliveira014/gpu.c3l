@@ -8,7 +8,6 @@ import std::thread;
 import std::atomic::types;
 import std::io;
 
-
 const uint SUBMISSION_CHECKPOINT_SPIN_LIMIT = 1_000_000;
 
 ulong rejected_user_completion_value;
@@ -219,7 +218,6 @@ fn void assert_allocator_submission_state(
 
 fn gpu::Device make_submit_test_device() {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_submit_test",
     };
@@ -271,7 +269,6 @@ fn void concurrent_same_device_submits_allocate_distinct_visit_epochs() @test {
 
 fn void distinct_selected_queues_reach_native_submit_concurrently() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_distinct_submit_concurrency_test",
     };
@@ -415,7 +412,6 @@ fn void validation_failure_preserves_recording_and_allocator_state() @test {
 
 fn void different_queue_submit_preserves_executable_allocator_unit_when_available() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_different_queue_submit_test",
     };
@@ -494,7 +490,6 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
         "distinct graphics/compute queues unavailable, skipping",
     );
 }
-
 
 fn vk::Result reject_user_submit(
     vk::Queue queue,
@@ -1469,7 +1464,6 @@ fn void completion_wait_infos_emit_every_exact_native_stage() @test {
 
 fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation       = gpu::ContractValidation.FULL,
         .enable_vulkan_validation  = true,
         .application_name          = "gpu_draw_argument_wait_test",
     };

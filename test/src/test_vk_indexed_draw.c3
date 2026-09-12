@@ -43,7 +43,6 @@ struct QuadInputs {
 
 fn gpu::Device u16v_device() {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_u16_verify",
     };

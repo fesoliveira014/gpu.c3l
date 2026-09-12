@@ -28,31 +28,6 @@ fn RuntimeDesc runtime_desc() {
     };
 }
 
-fn void contract_validation_defaults_to_trusted() @test {
-    RuntimeDesc desc;
-    assert(
-        desc.contract_validation == ContractValidation.TRUSTED,
-        "the zero runtime descriptor selects trusted contract validation"
-    );
-    assert(gpu::internal::contract_validation_is_known(ContractValidation.TRUSTED));
-    assert(gpu::internal::contract_validation_is_known(ContractValidation.FULL));
-}
-
-fn void full_validation_runtime_desc_enables_full_and_layers() @test {
-    RuntimeDesc desc = gpu::full_validation_runtime_desc();
-    assert(desc.contract_validation == ContractValidation.FULL);
-    assert(desc.enable_vulkan_validation);
-}
-
-fn void unknown_contract_validation_is_rejected() @test {
-    RuntimeDesc desc = runtime_desc();
-    desc.contract_validation = bitcast(99, ContractValidation);
-    assert(
-        @catch(gpu::create_runtime(&desc)) == gpu::INVALID_ARGUMENT,
-        "unknown contract validation ordinals are rejected before backend work"
-    );
-}
-
 fn void acceleration_structure_heap_capacity_is_zero_compatible_and_bounded() @test {
     RuntimeDesc baseline = runtime_desc();
     Runtime runtime = gpu::create_runtime(&baseline)!!;

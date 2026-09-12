@@ -173,7 +173,6 @@ fn gpu::TextureRequirements placement_test_requirements(
     };
 }
 
-
 // Headless (lavapipe): minimal texture lifecycle and whole-image barriers.
 
 struct TextureDiagnosticCapture {
@@ -217,7 +216,6 @@ fn void capture_texture_diagnostic(gpu::DebugMessage* message, void* user_data) 
 
 fn gpu::Device make_texture_diagnostic_device(TextureDiagnosticCapture* capture) {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_texture_diagnostic_test",
         .debug_callback    = &capture_texture_diagnostic,
@@ -226,11 +224,9 @@ fn gpu::Device make_texture_diagnostic_device(TextureDiagnosticCapture* capture)
     return create_test_device(&desc)!!;
 }
 
-fn gpu::Device make_texture_test_device_with_contract(
-    gpu::ContractValidation contract,
+fn gpu::Device make_texture_command_device(
 ) {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = contract,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_texture_test",
     };
@@ -238,386 +234,7 @@ fn gpu::Device make_texture_test_device_with_contract(
 }
 
 fn gpu::Device make_texture_test_device() {
-    return make_texture_test_device_with_contract(
-        gpu::ContractValidation.FULL,
-    );
-}
-
-fn void assert_texture_state_accepted(
-    gpu::TextureState texture_state,
-    vk::TextureSlot* slot,
-    vk::QueueFlags flags,
-    bool before,
-    bool ray_tracing_pipelines = false,
-) {
-    vk::TextureBarrierRejection rejection = vk::texture_state_rejection(
-        texture_state: texture_state,
-        slot:          slot,
-        flags:         flags,
-        ray_tracing_pipelines: ray_tracing_pipelines,
-        before:        before,
-    );
-    assert(rejection.field == null, "texture state is accepted by the semantic matrix");
-}
-
-fn void assert_texture_state_rejected(
-    gpu::TextureState texture_state,
-    vk::TextureSlot* slot,
-    vk::QueueFlags flags,
-    bool before,
-    ZString expected_field,
-    bool ray_tracing_pipelines = false,
-) {
-    vk::TextureBarrierRejection rejection = vk::texture_state_rejection(
-        texture_state: texture_state,
-        slot:          slot,
-        flags:         flags,
-        ray_tracing_pipelines: ray_tracing_pipelines,
-        before:        before,
-    );
-    assert(rejection.field != null,
-        "invalid texture state is rejected by the semantic matrix");
-    assert(rejection.field.str_view() == expected_field.str_view(),
-        "texture state rejection identifies the exact nested field");
-}
-
-fn void texture_shader_state_matrix_accepts_combinations_and_access_modes() @test {
-    vk::TextureSlot slot = {
-        .format = gpu::Format.RGBA8_UNORM,
-        .usage  = { .sampled, .storage },
-    };
-    vk::QueueFlags graphics_compute = (vk::QueueFlags)(
-        (uint)vk::QueueFlagBits.GRAPHICS_BIT
-            | (uint)vk::QueueFlagBits.COMPUTE_BIT
-    );
-    gpu::StageMask[5] sampled_stages = {
-        { .vertex_shader },
-        { .fragment_shader },
-        { .compute },
-        { .vertex_shader, .fragment_shader },
-        { .vertex_shader, .fragment_shader, .compute },
-    };
-    foreach (stages : sampled_stages) {
-        assert_texture_state_accepted(
-            texture_state: gpu::sampled_at(stages),
-            slot:          &slot,
-            flags:         graphics_compute,
-            before:        false,
-        );
-    }
-
-    gpu::TextureAccess[3] storage_access = {
-        { .read },
-        { .write },
-        { .read, .write },
-    };
-    foreach (access : storage_access) {
-        assert_texture_state_accepted(
-            texture_state: gpu::storage_at({ .compute }, access),
-            slot:          &slot,
-            flags:         graphics_compute,
-            before:        false,
-        );
-    }
-
-    assert_texture_state_accepted(
-        texture_state: gpu::sampled_at({ .all }),
-        slot:          &slot,
-        flags:         graphics_compute,
-        before:        false,
-    );
-    assert_texture_state_accepted(
-        texture_state: gpu::storage_at({ .all }, { .read, .write }),
-        slot:          &slot,
-        flags:         graphics_compute,
-        before:        false,
-    );
-}
-
-fn void texture_ray_tracing_state_matrix_requires_opt_in_and_shader_queue() @test {
-    vk::TextureSlot slot = {
-        .format = gpu::Format.RGBA8_UNORM,
-        .usage  = { .sampled, .storage },
-    };
-    vk::QueueFlags compute =
-        (vk::QueueFlags)(uint)vk::QueueFlagBits.COMPUTE_BIT;
-    assert_texture_state_accepted(
-        texture_state: gpu::sampled_at({ .ray_tracing }),
-        slot:          &slot,
-        flags:         compute,
-        before:        false,
-        ray_tracing_pipelines: true,
-    );
-    assert_texture_state_accepted(
-        texture_state: gpu::storage_at(
-            { .ray_tracing },
-            { .read, .write },
-        ),
-        slot:          &slot,
-        flags:         compute,
-        before:        false,
-        ray_tracing_pipelines: true,
-    );
-    assert_texture_state_rejected(
-        texture_state: gpu::sampled_at({ .ray_tracing }),
-        slot:          &slot,
-        flags:         compute,
-        before:        false,
-        expected_field: "TextureBarrier.after.stages",
-    );
-    assert_texture_state_rejected(
-        texture_state: gpu::storage_at(
-            { .ray_tracing },
-            { .read, .write },
-        ),
-        slot:          &slot,
-        flags:         (vk::QueueFlags)(uint)vk::QueueFlagBits.TRANSFER_BIT,
-        before:        false,
-        expected_field: "TextureBarrier.after.stages",
-        ray_tracing_pipelines: true,
-    );
-}
-
-fn void texture_transfer_state_matrix_requires_exact_access() @test {
-    vk::TextureSlot slot = {
-        .format = gpu::Format.RGBA8_UNORM,
-        .usage  = { .transfer_src, .transfer_dst },
-    };
-    vk::QueueFlags transfer_only =
-        (vk::QueueFlags)(uint)vk::QueueFlagBits.TRANSFER_BIT;
-    gpu::TextureState source = {
-        .layout = gpu::TextureLayout.TRANSFER_SOURCE,
-        .stages = { .transfer },
-        .access = { .read },
-    };
-    gpu::TextureState destination = {
-        .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
-        .stages = { .transfer },
-        .access = { .write },
-    };
-    assert_texture_state_accepted(
-        texture_state: source,
-        slot:          &slot,
-        flags:         transfer_only,
-        before:        true,
-    );
-    assert_texture_state_accepted(
-        texture_state: destination,
-        slot:          &slot,
-        flags:         transfer_only,
-        before:        false,
-    );
-
-    gpu::TextureAccess[3] invalid_source_access = {
-        {},
-        { .write },
-        { .read, .write },
-    };
-    foreach (access : invalid_source_access) {
-        source.access = access;
-        assert_texture_state_rejected(
-            texture_state: source,
-            slot:          &slot,
-            flags:         transfer_only,
-            before:        true,
-            expected_field: "TextureBarrier.before.access",
-        );
-    }
-    gpu::TextureAccess[3] invalid_destination_access = {
-        {},
-        { .read },
-        { .read, .write },
-    };
-    foreach (access : invalid_destination_access) {
-        destination.access = access;
-        assert_texture_state_rejected(
-            texture_state: destination,
-            slot:          &slot,
-            flags:         transfer_only,
-            before:        false,
-            expected_field: "TextureBarrier.after.access",
-        );
-    }
-
-    source = {
-        .layout = gpu::TextureLayout.TRANSFER_SOURCE,
-        .stages = { .all },
-        .access = { .read },
-    };
-    assert_texture_state_accepted(
-        texture_state: source,
-        slot:          &slot,
-        flags:         transfer_only,
-        before:        true,
-    );
-    source.stages = { .all = true, .transfer = true };
-    assert_texture_state_rejected(
-        texture_state: source,
-        slot:          &slot,
-        flags:         transfer_only,
-        before:        true,
-        expected_field: "TextureBarrier.before.stages",
-    );
-}
-
-fn void texture_state_matrix_rejects_reserved_stages_and_access() @test {
-    vk::TextureSlot slot = {
-        .format = gpu::Format.RGBA8_UNORM,
-        .usage  = { .sampled },
-    };
-    vk::QueueFlags graphics_only =
-        (vk::QueueFlags)(uint)vk::QueueFlagBits.GRAPHICS_BIT;
-    gpu::TextureState sampled = gpu::sampled_at({ .fragment_shader });
-
-    sampled.stages = { .host };
-    assert_texture_state_rejected(
-        texture_state: sampled,
-        slot:          &slot,
-        flags:         graphics_only,
-        before:        true,
-        expected_field: "TextureBarrier.before.stages",
-    );
-    sampled.stages = { .present };
-    assert_texture_state_rejected(
-        texture_state: sampled,
-        slot:          &slot,
-        flags:         graphics_only,
-        before:        false,
-        expected_field: "TextureBarrier.after.stages",
-    );
-    sampled.stages = { .indirect };
-    assert_texture_state_rejected(
-        texture_state: sampled,
-        slot:          &slot,
-        flags:         graphics_only,
-        before:        false,
-        expected_field: "TextureBarrier.after.stages",
-    );
-    sampled.stages = { .index_input };
-    assert_texture_state_rejected(
-        texture_state: sampled,
-        slot:          &slot,
-        flags:         graphics_only,
-        before:        false,
-        expected_field: "TextureBarrier.after.stages",
-    );
-    assert_texture_state_rejected(
-        texture_state: sampled,
-        slot:          &slot,
-        flags:         graphics_only,
-        before:        true,
-        expected_field: "TextureBarrier.before.stages",
-    );
-    sampled.stages = (gpu::StageMask)0x400u;
-    assert_texture_state_rejected(
-        texture_state: sampled,
-        slot:          &slot,
-        flags:         graphics_only,
-        before:        false,
-        expected_field: "TextureBarrier.after.stages",
-    );
-    sampled.stages = { .fragment_shader };
-    sampled.access = (gpu::TextureAccess)0x4u;
-    assert_texture_state_rejected(
-        texture_state: sampled,
-        slot:          &slot,
-        flags:         graphics_only,
-        before:        true,
-        expected_field: "TextureBarrier.before.access",
-    );
-
-    gpu::TextureLayout unknown_layout = bitcast(999, gpu::TextureLayout);
-    sampled = { .layout = unknown_layout };
-    assert_texture_state_rejected(
-        texture_state: sampled,
-        slot:          &slot,
-        flags:         graphics_only,
-        before:        true,
-        expected_field: "TextureBarrier.before.layout",
-    );
-    sampled = { .layout = gpu::TextureLayout.UNDEFINED };
-    assert_texture_state_rejected(
-        texture_state: sampled,
-        slot:          &slot,
-        flags:         graphics_only,
-        before:        false,
-        expected_field: "TextureBarrier.after.layout",
-    );
-}
-
-fn void texture_attachment_and_present_state_matrix_enforces_texture_kind() @test {
-    vk::QueueFlags graphics_only =
-        (vk::QueueFlags)(uint)vk::QueueFlagBits.GRAPHICS_BIT;
-    gpu::TextureState color = {
-        .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
-        .stages = { .color_output },
-        .access = { .read, .write },
-    };
-    gpu::TextureState depth = {
-        .layout = gpu::TextureLayout.DEPTH_ATTACHMENT,
-        .stages = { .depth_output },
-        .access = { .write },
-    };
-    vk::TextureSlot color_slot = {
-        .format = gpu::Format.RGBA8_UNORM,
-        .usage  = { .color_attach },
-    };
-    vk::TextureSlot depth_slot = {
-        .format = gpu::Format.D32_FLOAT,
-        .usage  = { .depth_attach },
-    };
-    assert_texture_state_accepted(
-        texture_state: color,
-        slot:          &color_slot,
-        flags:         graphics_only,
-        before:        false,
-    );
-    assert_texture_state_accepted(
-        texture_state: depth,
-        slot:          &depth_slot,
-        flags:         graphics_only,
-        before:        false,
-    );
-
-    color_slot.format = gpu::Format.D32_FLOAT;
-    assert_texture_state_rejected(
-        texture_state: color,
-        slot:          &color_slot,
-        flags:         graphics_only,
-        before:        false,
-        expected_field: "TextureBarrier.after.layout",
-    );
-    color_slot = { .format = gpu::Format.RGBA8_UNORM };
-    assert_texture_state_rejected(
-        texture_state: color,
-        slot:          &color_slot,
-        flags:         graphics_only,
-        before:        false,
-        expected_field: "TextureBarrier.after.layout",
-    );
-    depth_slot.format = gpu::Format.RGBA8_UNORM;
-    assert_texture_state_rejected(
-        texture_state: depth,
-        slot:          &depth_slot,
-        flags:         graphics_only,
-        before:        true,
-        expected_field: "TextureBarrier.before.layout",
-    );
-    depth_slot = { .format = gpu::Format.D32_FLOAT };
-    assert_texture_state_rejected(
-        texture_state: depth,
-        slot:          &depth_slot,
-        flags:         graphics_only,
-        before:        true,
-        expected_field: "TextureBarrier.before.layout",
-    );
-
-    assert_texture_state_rejected(
-        texture_state: { .layout = gpu::TextureLayout.PRESENT },
-        slot:          &color_slot,
-        flags:         graphics_only,
-        before:        false,
-        expected_field: "TextureBarrier.after.layout",
+    return make_texture_command_device(
     );
 }
 
@@ -860,7 +477,7 @@ fn void three_dimensional_texture_barriers_use_one_array_layer() @test {
             .access = { .write },
         },
     };
-    vk::texture_barrier_with_injected_ops(
+    vk::vk_cmd_texture_barrier_with_ops(
         vk::resolve_command(&commands)!!,
         &barrier,
         &ops,
@@ -873,7 +490,7 @@ fn void three_dimensional_texture_barriers_use_one_array_layer() @test {
         "three-dimensional barriers cover full mip depth through one array layer");
 
     barrier.view = { .base_layer = 1 };
-    assert(@catch(vk::texture_barrier_with_injected_ops(
+    assert(@catch(vk::vk_cmd_texture_barrier_with_ops(
         vk::resolve_command(&commands)!!,
         &barrier,
         &ops,
@@ -1153,7 +770,7 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
             .access = { .write },
         },
     };
-    vk::texture_barrier_with_injected_ops(
+    vk::vk_cmd_texture_barrier_with_ops(
         vk::resolve_command(&commands)!!,
         &barrier,
         &ops,
@@ -1229,7 +846,7 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
         .before  = { .layout = gpu::TextureLayout.UNDEFINED },
         .after   = gpu::sampled_at({ .vertex_shader, .fragment_shader }),
     };
-    vk::texture_barrier_with_injected_ops(record, &sampled, &ops)!!;
+    vk::vk_cmd_texture_barrier_with_ops(record, &sampled, &ops)!!;
     vk::PipelineStageFlags2 sampled_stages = (vk::PipelineStageFlags2)(
         (ulong)vk::PipelineStageFlagBits2.STAGE_2_VERTEX_SHADER_BIT
             | (ulong)vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT
@@ -1248,7 +865,7 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
         .before  = gpu::storage_at({ .compute }, { .write }),
         .after   = gpu::storage_at({ .compute }, { .read }),
     };
-    vk::texture_barrier_with_injected_ops(record, &storage, &ops)!!;
+    vk::vk_cmd_texture_barrier_with_ops(record, &storage, &ops)!!;
     assert(capture.native.src_stage_mask
             == vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT
         && capture.native.dst_stage_mask
@@ -1274,7 +891,7 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
         },
         .after = { .layout = gpu::TextureLayout.PRESENT },
     };
-    vk::texture_barrier_with_injected_ops(record, &to_present, &ops)!!;
+    vk::vk_cmd_texture_barrier_with_ops(record, &to_present, &ops)!!;
     assert(capture.calls == 3,
         "injected seam captures every composed texture barrier");
     assert(capture.native.src_stage_mask
@@ -1304,7 +921,7 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
             .access = { .write },
         },
     };
-    vk::texture_barrier_with_injected_ops(record, &to_color, &ops)!!;
+    vk::vk_cmd_texture_barrier_with_ops(record, &to_color, &ops)!!;
     assert(capture.calls == 4,
         "present-to-color emits one additional native barrier");
     assert(capture.native.src_stage_mask
@@ -1327,10 +944,9 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     slot.swapchain_owned = false;
 }
 
-fn void assert_present_barrier_emission_for_contract(
-    gpu::ContractValidation contract,
+fn void assert_present_barrier_emission(
 ) {
-    gpu::Device device = make_texture_test_device_with_contract(contract);
+    gpu::Device device = make_texture_command_device();
     defer destroy_test_device(&device)!!;
     if (gpu::get_device_caps(&device)!!.unified_layouts) return;
     gpu::TextureDesc desc = {
@@ -1369,7 +985,7 @@ fn void assert_present_barrier_emission_for_contract(
             .access = { .read },
         },
     };
-    vk::texture_barrier_with_injected_ops(record, &barrier, &ops)!!;
+    vk::vk_cmd_texture_barrier_with_ops(record, &barrier, &ops)!!;
 
     assert(capture.calls == 1,
         "one presentation transition emits one native barrier");
@@ -1400,7 +1016,7 @@ fn void assert_present_barrier_emission_for_contract(
         },
         .after = { .layout = gpu::TextureLayout.PRESENT },
     };
-    vk::texture_barrier_with_injected_ops(record, &to_present, &ops)!!;
+    vk::vk_cmd_texture_barrier_with_ops(record, &to_present, &ops)!!;
     slot.swapchain_owned = false;
 
     assert(capture.calls == 2,
@@ -1425,99 +1041,13 @@ fn void assert_present_barrier_emission_for_contract(
         "ordinary-to-presentation adds no queue-family ownership transfer");
 }
 
-fn void present_barrier_emission_matches_both_contract_policies() @test {
-    assert_present_barrier_emission_for_contract(
-        gpu::ContractValidation.TRUSTED,
+fn void present_barrier_emission_is_exact() @test {
+    assert_present_barrier_emission(
     );
-    assert_present_barrier_emission_for_contract(
-        gpu::ContractValidation.FULL,
+    assert_present_barrier_emission(
     );
 }
 
-fn void texture_barrier_invalid_state_prevents_emission() @test {
-    gpu::Device device = make_texture_test_device();
-    defer destroy_test_device(&device)!!;
-    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
-    gpu::TextureDesc desc = {
-        .access     = { .graphics },
-        .width      = 8,
-        .height     = 8,
-        .mip_levels = 2,
-        .format     = gpu::Format.RGBA8_UNORM,
-        .usage      = { .sampled },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
-    defer gpu::destroy_command_allocator(&command_allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-
-    TextureBarrierEmitCapture capture;
-    vk::BarrierEmitOps ops = {
-        .user_data = &capture,
-        .emit      = &capture_texture_barrier_emit,
-    };
-
-    gpu::TextureBarrier barrier = {
-        .texture = texture,
-        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
-        .after   = {
-            .layout = gpu::TextureLayout.SAMPLED,
-            .stages = { .fragment_shader },
-        },
-    };
-    assert(@catch(vk::texture_barrier_with_injected_ops(
-        record,
-        &barrier,
-        &ops,
-    ))
-            == gpu::INVALID_ARGUMENT,
-        "sampled state without read access faults before emission");
-
-    assert(capture.calls == 0, "invalid destination state never reaches emission");
-}
-
-fn void texture_barrier_rejects_unsupported_texture_states() @test {
-    gpu::Device device = make_texture_test_device();
-    defer destroy_test_device(&device)!!;
-    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
-
-    gpu::TextureDesc desc = {
-        .access    = { .graphics },
-        .width     = 8,
-        .height    = 8,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .transfer_dst },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
-    defer gpu::destroy_command_allocator(&command_allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
-    defer discard_test_commands(&commands)!!;
-
-    gpu::TextureBarrier sampled = gpu::texture_transition(
-        texture: texture,
-        before:  { .layout = gpu::TextureLayout.UNDEFINED },
-        after:   gpu::sampled_at({ .fragment_shader }),
-    )!!;
-    assert(@catch(gpu::cmd_texture_barrier(&commands, &sampled))
-        == gpu::INVALID_ARGUMENT,
-        "sampled use requires sampled texture usage");
-
-    gpu::TextureBarrier present = gpu::texture_transition(
-        texture: texture,
-        before:  { .layout = gpu::TextureLayout.UNDEFINED },
-        after:   { .layout = gpu::TextureLayout.PRESENT },
-    )!!;
-    assert(@catch(gpu::cmd_texture_barrier(&commands, &present))
-        == gpu::INVALID_ARGUMENT,
-        "present use requires a swapchain texture");
-}
 fn void texture_barrier_stale_handle_rejected() @test {
     TextureDiagnosticCapture diagnostic = {
         .expected_operation      = "cmd_texture_barrier",
@@ -1559,24 +1089,12 @@ fn void texture_barrier_stale_handle_rejected() @test {
             { .read, .write },
         ),
     };
-    fault barrier_fault = @catch(vk::texture_barrier_with_injected_ops(
+    fault barrier_fault = @catch(vk::vk_cmd_texture_barrier_with_ops(
         record,
         &barrier,
         &ops,
     ));
     assert(barrier_fault == gpu::INVALID_HANDLE, "barrier on a destroyed texture faults INVALID_HANDLE");
-    assert(diagnostic.calls == 1 && diagnostic.operation_matches
-            && diagnostic.rejected_field_matches
-            && diagnostic.invariant_matches,
-        "stale texture emits one exact texture-barrier diagnostic");
-    assert(diagnostic.has_fault && diagnostic.public_fault == barrier_fault
-            && diagnostic.public_contract,
-        "stale texture diagnostic preserves INVALID_HANDLE");
-    assert(diagnostic.resource_kind == gpu::DebugResourceKind.TEXTURE
-            && !diagnostic.has_public_identity
-            && diagnostic.index == 0
-            && diagnostic.generation == 0,
-        "stale texture diagnostic claims no resolved resource identity");
     assert(emission.calls == 0,
         "stale texture reaches no native emission");
 
@@ -1750,7 +1268,6 @@ fn void foreign_attachment_view_destroy_rejects_without_consuming() @test {
 
 fn void raised_texture_capacity_holds_more_than_default() @test {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .texture_capacity  = 2048,
         .application_name  = "gpu_texture_capacity_test",
@@ -2043,130 +1560,6 @@ fn void unsupported_texture_capability_diagnostic_preserves_fault() @test {
     fault without_callback = @catch(gpu::create_texture(&device, &unsupported));
     assert(without_callback == with_callback, "callback presence does not alter the capability fault");
     assert(capture.calls == 1, "null callback emits no additional diagnostic");
-}
-
-fn void texture_barrier_invalid_use_diagnostic_identifies_resource() @test {
-    TextureDiagnosticCapture capture = {
-        .expected_operation      = "cmd_texture_barrier",
-        .expected_debug_name     = "texture_barrier_diagnostic",
-        .expected_rejected_field = "TextureBarrier.after.layout",
-        .expected_invariant      = "UNDEFINED is source-only",
-    };
-    gpu::Device device = make_texture_diagnostic_device(&capture);
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc desc = {
-        .access     = { .graphics, .compute },
-        .width      = 8,
-        .height     = 8,
-        .format     = gpu::Format.RGBA8_UNORM,
-        .usage      = { .sampled, .storage },
-        .debug_name = "texture_barrier_diagnostic",
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
-    defer gpu::destroy_command_allocator(&command_allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    gpu::TextureBarrier barrier = {
-        .texture = texture,
-        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
-        .after   = { .layout = gpu::TextureLayout.UNDEFINED },
-    };
-    fault with_callback = @catch(gpu::cmd_texture_barrier(
-        &commands,
-        &barrier,
-    ));
-
-    assert(with_callback == gpu::INVALID_ARGUMENT,
-        "invalid semantic use keeps INVALID_ARGUMENT");
-    assert(capture.calls == 1, "invalid semantic use emits exactly one diagnostic");
-    assert(capture.operation_matches, "operation is cmd_texture_barrier");
-    assert(capture.has_fault && capture.public_fault == with_callback,
-        "diagnostic carries the unchanged semantic-use fault");
-    assert(capture.public_contract, "invalid semantic use is a public-contract diagnostic");
-    assert(capture.resource_kind == gpu::DebugResourceKind.TEXTURE,
-        "resource kind is texture");
-    assert(capture.has_public_identity, "live texture identity is present");
-    assert(capture.index == texture.index, "texture index is preserved");
-    assert(capture.generation == texture.generation,
-        "texture generation is preserved");
-    assert(capture.debug_name_matches, "texture debug name is preserved");
-    assert(capture.rejected_field_matches, "after-use field is identified");
-    assert(capture.invariant_matches, "semantic-use invariant is identified");
-
-    gpu::internal::vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    state.debug_callback = null;
-    fault without_callback = @catch(gpu::cmd_texture_barrier(
-        &commands,
-        &barrier,
-    ));
-    assert(without_callback == with_callback,
-        "callback presence does not alter the semantic-use fault");
-    assert(capture.calls == 1, "null callback emits no additional diagnostic");
-}
-
-fn void texture_barrier_state_diagnostics_name_nested_side_fields() @test {
-    TextureDiagnosticCapture capture = {
-        .expected_operation      = "cmd_texture_barrier",
-        .expected_debug_name     = "texture_state_diagnostic",
-        .expected_rejected_field = "TextureBarrier.before.access",
-        .expected_invariant      = "sampled textures require read-only access",
-    };
-    gpu::Device device = make_texture_diagnostic_device(&capture);
-    defer destroy_test_device(&device)!!;
-    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
-    gpu::TextureDesc desc = {
-        .access     = { .graphics },
-        .width      = 8,
-        .height     = 8,
-        .format     = gpu::Format.RGBA8_UNORM,
-        .usage      = { .sampled },
-        .debug_name = "texture_state_diagnostic",
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
-    defer gpu::destroy_command_allocator(&command_allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    gpu::TextureBarrier barrier = {
-        .texture = texture,
-        .before = {
-            .layout = gpu::TextureLayout.SAMPLED,
-            .stages = { .fragment_shader },
-        },
-        .after  = gpu::sampled_at({ .fragment_shader }),
-    };
-    assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
-            == gpu::INVALID_ARGUMENT,
-        "invalid source access faults INVALID_ARGUMENT");
-    assert(capture.calls == 1 && capture.operation_matches
-        && capture.rejected_field_matches && capture.invariant_matches,
-        "source-state diagnostic names TextureBarrier.before.access exactly");
-
-    capture = {
-        .expected_operation      = "cmd_texture_barrier",
-        .expected_debug_name     = "texture_state_diagnostic",
-        .expected_rejected_field = "TextureBarrier.after.stages",
-        .expected_invariant      = "stages must contain known non-host pipeline stages and all must be exclusive",
-    };
-    barrier.before = { .layout = gpu::TextureLayout.UNDEFINED };
-    barrier.after  = {
-        .layout = gpu::TextureLayout.SAMPLED,
-        .stages = { .host },
-        .access = { .read },
-    };
-    assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
-            == gpu::INVALID_ARGUMENT,
-        "invalid destination stages fault INVALID_ARGUMENT");
-    assert(capture.calls == 1 && capture.operation_matches
-        && capture.rejected_field_matches && capture.invariant_matches,
-        "destination-state diagnostic names TextureBarrier.after.stages exactly");
 }
 
 fn void placed_texture_requirements_validate_and_release_storage() @test {

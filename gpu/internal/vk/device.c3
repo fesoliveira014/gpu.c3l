@@ -62,11 +62,6 @@ enum DeviceCreationCheckpoint : uint {
     BEFORE_PUBLICATION,
 }
 
-struct DeviceValidationPolicy {
-    gpu::ContractValidation contract;
-    bool                    vulkan_layers;
-}
-
 struct DeviceCreationProbe {
     DeviceCreationCheckpoint fail_at;
     DeviceCreationCheckpoint reached;
@@ -94,13 +89,6 @@ struct VkShaderHeapState {
     DescriptorHeapState descriptors;
 }
 
-struct ViewportLimits {
-    uint  max_width;
-    uint  max_height;
-    float min_bound;
-    float max_bound;
-}
-
 struct VkDeviceState @public {
     gpu::Device                 owner;
     ulong                       resource_owner;
@@ -126,11 +114,8 @@ struct VkDeviceState @public {
     uint                       compute_completion_id;
     uint                       transfer_completion_id;
     gpu::DeviceCaps            caps;
-    ViewportLimits             viewport_limits;
     ulong                      max_timeline_semaphore_value_difference;
     usz                        non_coherent_atom_size;
-    DeviceValidationPolicy     validation_policy;
-    CommandOps*                command_ops;
     bool                       debug_names;
     gpu::DebugMessageCallback  debug_callback;
     void*                      debug_user_data;
@@ -660,105 +645,6 @@ fn void? reach_device_creation_checkpoint(
     if (probe.fail_at == checkpoint) return gpu::BACKEND_ERROR~;
 }
 
-const CommandOps TRUSTED_COMMAND_OPS @private = {
-    .copy_buffer                 = &trusted_copy_buffer,
-    .fill_buffer                 = &trusted_fill_buffer,
-    .copy_buffer_to_texture      = &trusted_copy_buffer_to_texture,
-    .copy_texture_to_buffer      = &trusted_copy_texture_to_buffer,
-    .barrier                     = &trusted_barrier,
-    .texture_barrier             = &trusted_texture_barrier,
-    .bind_pipeline               = &trusted_bind_pipeline,
-    .set_graphics_state          = &trusted_set_graphics_state,
-    .dispatch                    = &trusted_dispatch,
-    .trace_rays                  = &trusted_trace_rays,
-    .trace_rays_indirect         = &trusted_trace_rays_indirect,
-    .trace_rays_indirect2        = &trusted_trace_rays_indirect2,
-    .set_ray_tracing_pipeline_stack_size =
-        &trusted_set_ray_tracing_pipeline_stack_size,
-    .begin_render_pass           = &trusted_begin_render_pass,
-    .set_viewport                = &trusted_set_viewport,
-    .set_scissor                 = &trusted_set_scissor,
-    .end_render_pass             = &vk_cmd_end_render_pass,
-    .draw                        = &trusted_draw,
-    .draw_indexed                = &trusted_draw_indexed,
-    .draw_indirect               = &trusted_draw_indirect,
-    .draw_indexed_indirect       = &trusted_draw_indexed_indirect,
-    .draw_indexed_indirect_count = &trusted_draw_indexed_indirect_count,
-    .draw_mesh_tasks             = &trusted_draw_mesh_tasks,
-    .draw_mesh_tasks_indirect    = &trusted_draw_mesh_tasks_indirect,
-    .draw_mesh_tasks_indirect_count = &trusted_draw_mesh_tasks_indirect_count,
-    .dispatch_indirect           = &trusted_dispatch_indirect,
-    .draw_generated              = &trusted_draw_generated,
-    .draw_indexed_generated      = &trusted_draw_indexed_generated,
-    .dispatch_generated          = &trusted_dispatch_generated,
-    .begin_label                 = &vk_cmd_begin_label,
-    .end_label                   = &vk_cmd_end_label,
-    .reset_timestamps            = &trusted_reset_timestamps,
-    .write_timestamp             = &trusted_write_timestamp,
-    .resolve_timestamps          = &trusted_resolve_timestamps,
-    .build_acceleration_structure  = &trusted_build_acceleration_structure,
-    .update_acceleration_structure = &trusted_update_acceleration_structure,
-    .build_acceleration_structure_indirect =
-        &trusted_build_acceleration_structure_indirect,
-    .update_acceleration_structure_indirect =
-        &trusted_update_acceleration_structure_indirect,
-    .clone_acceleration_structure  = &trusted_clone_acceleration_structure,
-};
-
-const CommandOps FULL_COMMAND_OPS @private = {
-    .copy_buffer                 = &full_copy_buffer,
-    .fill_buffer                 = &full_fill_buffer,
-    .copy_buffer_to_texture      = &full_copy_buffer_to_texture,
-    .copy_texture_to_buffer      = &full_copy_texture_to_buffer,
-    .barrier                     = &full_barrier,
-    .texture_barrier             = &full_texture_barrier,
-    .bind_pipeline               = &full_bind_pipeline,
-    .set_graphics_state          = &full_set_graphics_state,
-    .dispatch                    = &full_dispatch,
-    .trace_rays                  = &full_trace_rays,
-    .trace_rays_indirect         = &full_trace_rays_indirect,
-    .trace_rays_indirect2        = &full_trace_rays_indirect2,
-    .set_ray_tracing_pipeline_stack_size =
-        &full_set_ray_tracing_pipeline_stack_size,
-    .begin_render_pass           = &full_begin_render_pass,
-    .set_viewport                = &full_set_viewport,
-    .set_scissor                 = &full_set_scissor,
-    .end_render_pass             = &vk_cmd_end_render_pass,
-    .draw                        = &full_draw,
-    .draw_indexed                = &full_draw_indexed,
-    .draw_indirect               = &full_draw_indirect,
-    .draw_indexed_indirect       = &full_draw_indexed_indirect,
-    .draw_indexed_indirect_count = &full_draw_indexed_indirect_count,
-    .draw_mesh_tasks             = &full_draw_mesh_tasks,
-    .draw_mesh_tasks_indirect    = &full_draw_mesh_tasks_indirect,
-    .draw_mesh_tasks_indirect_count = &full_draw_mesh_tasks_indirect_count,
-    .dispatch_indirect           = &full_dispatch_indirect,
-    .draw_generated              = &full_draw_generated,
-    .draw_indexed_generated      = &full_draw_indexed_generated,
-    .dispatch_generated          = &full_dispatch_generated,
-    .begin_label                 = &vk_cmd_begin_label,
-    .end_label                   = &vk_cmd_end_label,
-    .reset_timestamps            = &full_reset_timestamps,
-    .write_timestamp             = &full_write_timestamp,
-    .resolve_timestamps          = &full_resolve_timestamps,
-    .build_acceleration_structure  = &full_build_acceleration_structure,
-    .update_acceleration_structure = &full_update_acceleration_structure,
-    .build_acceleration_structure_indirect =
-        &full_build_acceleration_structure_indirect,
-    .update_acceleration_structure_indirect =
-        &full_update_acceleration_structure_indirect,
-    .clone_acceleration_structure  = &full_clone_acceleration_structure,
-};
-
-fn bool contract_uses_full_validation(DeviceValidationPolicy policy) =>
-    policy.contract != gpu::ContractValidation.TRUSTED;
-
-fn CommandOps* select_command_ops(DeviceValidationPolicy policy) {
-    return contract_uses_full_validation(policy)
-        ? &FULL_COMMAND_OPS
-        : &TRUSTED_COMMAND_OPS;
-}
-
 fn gpu::Device? create_vk_device(
     gpu::Adapter* adapter,
     gpu::DeviceDesc* device_desc,
@@ -838,7 +724,6 @@ fn void? validate_device_baseline_support(
     VkDeviceState diagnostic_state = {
         .debug_callback    = runtime_state.config.debug_callback,
         .debug_user_data   = runtime_state.config.debug_user_data,
-        .validation_policy = runtime_state.config.validation,
     };
     validate_shader_heap_support(
         &diagnostic_state,
@@ -876,8 +761,6 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.debug_callback = config.debug_callback;
     state.debug_user_data = config.debug_user_data;
     state.debug_names = config.debug_names;
-    state.validation_policy = config.validation;
-    state.command_ops = select_command_ops(state.validation_policy);
     state.resource_mutex.init()!;
     state.pending_init_mutex.init()!;
     state.pipeline_creation_mutex.init()!;
@@ -1364,7 +1247,6 @@ fn gpu::Device? create_vk_device_from_runtime(
         v12:                     &features12,
         physical_device:         state.physical_device,
         inputs:                  &caps_inputs,
-        viewport_limits:         &state.viewport_limits,
         max_timeline_difference: &state.max_timeline_semaphore_value_difference,
         non_coherent_atom_size:  &state.non_coherent_atom_size,
     );
@@ -1453,8 +1335,6 @@ fn fault vk_report_root_contract_failure(
     ZString rejected_field,
     ZString invariant,
 ) {
-    if (state.validation_policy.contract
-        == gpu::ContractValidation.TRUSTED) return public_fault;
     return report_contract_failure(
         state:               state,
         operation:           operation,
@@ -1480,9 +1360,6 @@ fn void vk_destroy_device(VkDeviceState* state) {
     destroy_state(state);
 }
 
-fn bool report_teardown_leaks(VkDeviceState* state) =>
-    contract_uses_full_validation(state.validation_policy);
-
 <* Reverse-order cleanup after accepted destruction, device loss, or partial creation. *>
 fn void destroy_state(VkDeviceState* state) @private {
     if (state == null) return;
@@ -1490,7 +1367,7 @@ fn void destroy_state(VkDeviceState* state) @private {
         destroy_submitted_commands(state);
         destroy_internal_command_allocators(state);
         // Report before cleanup clears the diagnostic tables.
-        if (report_teardown_leaks(state)) (void)report_resource_leaks(state);
+        (void)report_resource_leaks(state);
         destroy_command_table(state);
         destroy_timestamp_pool_table(state);
         if (state.command_allocators.slots.ptr != null) {
@@ -1513,7 +1390,7 @@ fn void destroy_state(VkDeviceState* state) @private {
             mem::free(state.presentation.swapchains.slots.ptr);
             state.presentation.swapchains.slots = {};
         }
-        if (report_teardown_leaks(state)) report_descriptor_leaks(state);
+        report_descriptor_leaks(state);
         destroy_descriptor_heap(state);
         destroy_sampler_table(state);
         destroy_attachment_view_table(state);
@@ -1702,8 +1579,7 @@ fn void? validate_shader_heap_support(
         default:
             return gpu::BACKEND_ERROR~;
     }
-    if (device.debug_callback == null
-        && contract_uses_full_validation(device.validation_policy)) {
+    if (device.debug_callback == null) {
         HeapDescriptorTotals totals = descriptor_heap_totals(
             state.texture_capacity,
             state.sampler_capacity,
@@ -2166,7 +2042,6 @@ fn gpu::DeviceCaps build_caps(
     vk::PhysicalDeviceVulkan12Features* v12,
     vk::PhysicalDevice physical_device,
     CapsInputs* inputs,
-    ViewportLimits* viewport_limits,
     ulong* max_timeline_difference,
     usz* non_coherent_atom_size,
 ) @private {
@@ -2176,12 +2051,6 @@ fn gpu::DeviceCaps build_caps(
         vk::physical_device_properties2().set_next(&timeline_props);
     vk::get_physical_device_properties2(physical_device, &props2);
     vk::PhysicalDeviceProperties props = props2.properties;
-    *viewport_limits = {
-        .max_width  = props.limits.max_viewport_dimensions[0],
-        .max_height = props.limits.max_viewport_dimensions[1],
-        .min_bound  = props.limits.viewport_bounds_range[0],
-        .max_bound  = props.limits.viewport_bounds_range[1],
-    };
     *max_timeline_difference =
         timeline_props.max_timeline_semaphore_value_difference;
     *non_coherent_atom_size = (usz)props.limits.non_coherent_atom_size;

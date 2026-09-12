@@ -6,207 +6,6 @@ import std::atomic;
 import std::core::mem;
 import std::thread;
 
-alias CmdCopyBufferFn @private = fn void? (
-    CommandRecord*,
-    gpu::BufferCopyDesc*,
-);
-alias CmdFillBufferFn @private = fn void? (
-    CommandRecord*,
-    gpu::GpuSpan,
-    uint,
-);
-alias CmdCopyBufferToTextureFn @private = fn void? (
-    CommandRecord*,
-    gpu::BufferTextureCopyDesc*,
-);
-alias CmdCopyTextureToBufferFn @private = fn void? (
-    CommandRecord*,
-    gpu::TextureBufferCopyDesc*,
-);
-alias CmdBarrierFn @private = fn void? (CommandRecord*, gpu::Barrier*);
-alias CmdTextureBarrierFn @private = fn void? (
-    CommandRecord*,
-    gpu::TextureBarrier*,
-);
-alias CmdBindPipelineFn @private = fn void? (
-    CommandRecord*,
-    gpu::PipelineHandle,
-);
-alias CmdSetGraphicsStateFn @private = fn void? (
-    CommandRecord*,
-    gpu::GraphicsState*,
-);
-alias CmdDispatchFn @private = fn void? (
-    CommandRecord*,
-    gpu::GpuAddress,
-    gpu::Vec3u,
-);
-alias CmdTraceRaysFn @private = fn void? (
-    CommandRecord*,
-    gpu::GpuAddress,
-    gpu::RayTracingShaderBindingTable*,
-    gpu::Vec3u,
-);
-alias CmdTraceRaysIndirectFn @private = fn void? (
-    CommandRecord*,
-    gpu::GpuAddress,
-    gpu::RayTracingShaderBindingTable*,
-    gpu::GpuSpan,
-);
-alias CmdTraceRaysIndirect2Fn @private = fn void? (
-    CommandRecord*,
-    gpu::GpuAddress,
-    gpu::GpuSpan,
-);
-alias CmdSetRayTracingPipelineStackSizeFn @private = fn void? (
-    CommandRecord*,
-    ulong,
-);
-alias CmdBeginRenderPassFn @private = fn void? (
-    CommandRecord*,
-    gpu::RenderPassDesc*,
-);
-alias CmdSetViewportFn @private = fn void? (
-    CommandRecord*,
-    gpu::Viewport*,
-);
-alias CmdSetScissorFn @private = fn void? (
-    CommandRecord*,
-    gpu::ScissorRect*,
-);
-alias CmdEndRenderPassFn @private = fn void? (CommandRecord*);
-alias CmdDrawFn @private = fn void? (
-    CommandRecord* record,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    uint vertex_count,
-    uint instance_count,
-);
-alias CmdDrawIndexedFn @private = fn void? (
-    CommandRecord* record,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan index_span,
-    uint index_count,
-    uint instance_count,
-    gpu::IndexType index_type,
-);
-alias CmdDrawIndirectFn @private = fn void? (
-    CommandRecord* record,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    uint draw_count,
-);
-alias CmdDrawIndexedIndirectFn @private = fn void? (
-    CommandRecord* record,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    uint draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-);
-alias CmdDrawIndexedIndirectCountFn @private = fn void? (
-    CommandRecord* record,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-);
-alias CmdDispatchIndirectFn @private = fn void? (
-    CommandRecord*,
-    gpu::GpuAddress,
-    gpu::GpuSpan,
-);
-alias CmdDrawMeshTasksFn @private = fn void? (
-    CommandRecord* record,
-    gpu::GpuAddress mesh_root,
-    gpu::GpuAddress fragment_root,
-    gpu::Vec3u groups,
-);
-alias CmdDrawMeshTasksIndirectFn @private = fn void? (
-    CommandRecord* record,
-    gpu::GpuAddress mesh_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    uint draw_count,
-);
-alias CmdDrawMeshTasksIndirectCountFn @private = fn void? (
-    CommandRecord* record,
-    gpu::GpuAddress mesh_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-);
-alias CmdDrawGeneratedFn @private = fn void? (
-    CommandRecord* record,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-);
-alias CmdDrawIndexedGeneratedFn @private = fn void? (
-    CommandRecord* record,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-);
-alias CmdDispatchGeneratedFn @private = fn void? (
-    CommandRecord* record,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_dispatch_count,
-);
-alias CmdBeginLabelFn @private = fn void? (
-    CommandRecord*,
-    ZString,
-    float[4],
-);
-alias CmdEndLabelFn @private = fn void? (CommandRecord*);
-alias CmdResetTimestampsFn @private = fn void? (
-    CommandRecord*,
-    gpu::TimestampPoolHandle,
-    uint,
-    uint,
-);
-alias CmdWriteTimestampFn @private = fn void? (
-    CommandRecord*,
-    gpu::TimestampPoolHandle,
-    uint,
-    gpu::StageMask,
-);
-alias CmdResolveTimestampsFn @private = fn void? (
-    CommandRecord*,
-    gpu::TimestampPoolHandle,
-    uint,
-    uint,
-    gpu::GpuSpan,
-);
-alias CmdBuildAccelerationStructureFn @private = fn void? (
-    CommandRecord*,
-    gpu::AccelerationStructureBuildDesc*,
-);
-alias CmdUpdateAccelerationStructureFn @private = fn void? (
-    CommandRecord*,
-    gpu::AccelerationStructureBuildDesc*,
-);
-alias CmdAccelerationStructureIndirectFn @private = fn void? (
-    CommandRecord*,
-    gpu::AccelerationStructureBuildDesc*,
-    gpu::GpuSpan,
-);
-alias CmdCloneAccelerationStructureFn @private = fn void? (
-    CommandRecord*,
-    gpu::AccelerationStructureHandle,
-    gpu::AccelerationStructureHandle,
-);
-
 const uint  STUB_SAMPLER_CAPACITY       @private = 16;
 const float STUB_SAMPLER_LOD_BIAS_LIMIT @private = 16.0f;
 const float STUB_SAMPLER_ANISOTROPY_LIMIT @private = 16.0f;
@@ -214,7 +13,6 @@ const uint STUB_COMMAND_CAPACITY @private = 64;
 const uint STUB_ADAPTER_CAPACITY @private = 16;
 
 struct CommandRecord @public {
-    CommandOps*                      ops;
     VkDeviceState*                   device_state;
     gpu::Device                      device;
     gpu::internal::CommandListHandle identity;
@@ -223,54 +21,11 @@ struct CommandRecord @public {
     char[]                           inline_root;
 }
 
-fn void? set_inline_root(CommandRecord* record, char[] inline_root, ZString operation) {
-    (void)operation;
+fn void? set_inline_root(CommandRecord* record, char[] inline_root) {
     if (inline_root.len % 4 != 0 || inline_root.len > gpu::INLINE_ROOT_CAPACITY) {
         return gpu::INVALID_ARGUMENT~;
     }
     record.inline_root = inline_root;
-}
-
-struct CommandOps @public {
-    CmdCopyBufferFn               copy_buffer;
-    CmdFillBufferFn               fill_buffer;
-    CmdCopyBufferToTextureFn      copy_buffer_to_texture;
-    CmdCopyTextureToBufferFn      copy_texture_to_buffer;
-    CmdBarrierFn                  barrier;
-    CmdTextureBarrierFn           texture_barrier;
-    CmdBindPipelineFn             bind_pipeline;
-    CmdSetGraphicsStateFn         set_graphics_state;
-    CmdDispatchFn                 dispatch;
-    CmdTraceRaysFn                trace_rays;
-    CmdTraceRaysIndirectFn        trace_rays_indirect;
-    CmdTraceRaysIndirect2Fn       trace_rays_indirect2;
-    CmdSetRayTracingPipelineStackSizeFn set_ray_tracing_pipeline_stack_size;
-    CmdBeginRenderPassFn          begin_render_pass;
-    CmdSetViewportFn              set_viewport;
-    CmdSetScissorFn               set_scissor;
-    CmdEndRenderPassFn            end_render_pass;
-    CmdDrawFn                     draw;
-    CmdDrawIndexedFn              draw_indexed;
-    CmdDrawIndirectFn             draw_indirect;
-    CmdDrawIndexedIndirectFn      draw_indexed_indirect;
-    CmdDrawIndexedIndirectCountFn draw_indexed_indirect_count;
-    CmdDrawMeshTasksFn            draw_mesh_tasks;
-    CmdDrawMeshTasksIndirectFn    draw_mesh_tasks_indirect;
-    CmdDrawMeshTasksIndirectCountFn draw_mesh_tasks_indirect_count;
-    CmdDispatchIndirectFn         dispatch_indirect;
-    CmdDrawGeneratedFn            draw_generated;
-    CmdDrawIndexedGeneratedFn     draw_indexed_generated;
-    CmdDispatchGeneratedFn        dispatch_generated;
-    CmdBeginLabelFn               begin_label;
-    CmdEndLabelFn                 end_label;
-    CmdResetTimestampsFn          reset_timestamps;
-    CmdWriteTimestampFn           write_timestamp;
-    CmdResolveTimestampsFn        resolve_timestamps;
-    CmdBuildAccelerationStructureFn  build_acceleration_structure;
-    CmdUpdateAccelerationStructureFn update_acceleration_structure;
-    CmdAccelerationStructureIndirectFn build_acceleration_structure_indirect;
-    CmdAccelerationStructureIndirectFn update_acceleration_structure_indirect;
-    CmdCloneAccelerationStructureFn  clone_acceleration_structure;
 }
 
 struct VkRuntimeState @public {
@@ -373,12 +128,16 @@ struct StubSamplerSlot {
 }
 
 struct VkDeviceState @public {
+    Atomic{bool} command_entered;
+    Atomic{bool} command_release;
+    uint pins_during_command;
+    bool block_command;
+    bool reject_command;
     gpu::Adapter         adapter;
     gpu::Surface         surface;
     gpu::Device          owner;
     gpu::Queue           allocator_queue;
     gpu::CommandAllocatorDesc allocator_desc;
-    CommandOps*          command_ops;
     CommandRecord[STUB_COMMAND_CAPACITY] command_records;
     gpu::GpuAllocation   allocation;
     gpu::AllocationDesc  allocation_desc;
@@ -544,7 +303,6 @@ fn void? vk_begin_commands(
     if (state == null || allocator == null || out_commands == null) {
         return gpu::INVALID_HANDLE~;
     }
-    if (state.command_ops == null) return gpu::BACKEND_ERROR~;
     gpu::Device device = allocator.device;
     gpu::internal::DeviceData* data =
         gpu::internal::resolve_pinned_device(&device);
@@ -567,7 +325,6 @@ fn void? vk_begin_commands(
         .generation = state.command_generations[index],
     };
     state.command_records[index] = {
-        .ops          = state.command_ops,
         .device_state = state,
         .device       = device,
         .identity     = identity,
@@ -2081,4 +1838,357 @@ fn gpu::Device? create_vk_device(
     )!;
     last_created_device = device;
     return device;
+}
+
+fn void? vk_cmd_texture_barrier(
+    CommandRecord* commands,
+    gpu::TextureBarrier* barrier,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_build_acceleration_structure(
+    CommandRecord* record,
+    gpu::AccelerationStructureBuildDesc* desc,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_update_acceleration_structure(
+    CommandRecord* record,
+    gpu::AccelerationStructureBuildDesc* desc,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_build_acceleration_structure_indirect(
+    CommandRecord* record,
+    gpu::AccelerationStructureBuildDesc* desc,
+    gpu::GpuSpan ranges,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_update_acceleration_structure_indirect(
+    CommandRecord* record,
+    gpu::AccelerationStructureBuildDesc* desc,
+    gpu::GpuSpan ranges,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_clone_acceleration_structure(
+    CommandRecord* record,
+    gpu::AccelerationStructureHandle source,
+    gpu::AccelerationStructureHandle destination,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_begin_label(CommandRecord* commands, ZString label, float[4] color)  {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_end_label(CommandRecord* commands)  {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_copy_buffer(
+    CommandRecord* commands,
+    gpu::BufferCopyDesc* desc,
+) {
+    $if $feat(COMMAND_WRAPPER_BENCH):
+        gpu::observe_copy_buffer();
+        return;
+    $else
+    return gpu::UNSUPPORTED_FEATURE~;
+    $endif
+}
+
+fn void? vk_cmd_fill_buffer(
+    CommandRecord* commands,
+    gpu::GpuSpan dst,
+    uint value,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_copy_buffer_to_texture(
+    CommandRecord* commands,
+    gpu::BufferTextureCopyDesc* desc,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_copy_texture_to_buffer(
+    CommandRecord* commands,
+    gpu::TextureBufferCopyDesc* desc,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_bind_pipeline(
+    CommandRecord* commands,
+    gpu::PipelineHandle pipeline,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_dispatch(
+    CommandRecord* commands,
+    gpu::GpuAddress root,
+    gpu::Vec3u groups,
+) {
+    $if $feat(COMMAND_WRAPPER_BENCH):
+        gpu::observe_dispatch();
+        return;
+    $else
+    return gpu::UNSUPPORTED_FEATURE~;
+    $endif
+}
+
+fn void? vk_cmd_dispatch_indirect(
+    CommandRecord* commands,
+    gpu::GpuAddress root,
+    gpu::GpuSpan args,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_dispatch_generated(
+    CommandRecord* commands,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_dispatch_count,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_begin_render_pass(
+    CommandRecord* commands,
+    gpu::RenderPassDesc* desc,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_set_viewport(
+    CommandRecord* commands,
+    gpu::Viewport* viewport,
+) {
+    $if $feat(COMMAND_WRAPPER_BENCH):
+        gpu::observe_viewport();
+        return;
+    $else
+    return gpu::UNSUPPORTED_FEATURE~;
+    $endif
+}
+
+fn void? vk_cmd_set_graphics_state(
+    CommandRecord* commands,
+    gpu::GraphicsState* state,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_set_scissor(
+    CommandRecord* commands,
+    gpu::ScissorRect* scissor,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_end_render_pass(CommandRecord* commands)  {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_draw(
+    CommandRecord* commands,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    uint vertex_count,
+    uint instance_count,
+) {
+    $if $feat(COMMAND_WRAPPER_BENCH):
+        gpu::observe_draw();
+        return;
+    $else
+    return gpu::UNSUPPORTED_FEATURE~;
+    $endif
+}
+
+fn void? vk_cmd_draw_indexed(
+    CommandRecord* commands,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan index_span,
+    uint index_count,
+    uint instance_count,
+    gpu::IndexType index_type,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_draw_indirect(
+    CommandRecord* commands,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_draw_indexed_indirect(
+    CommandRecord* commands,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_draw_indexed_indirect_count(
+    CommandRecord* commands,
+    gpu::GpuAddress vertex_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_draw_generated(
+    CommandRecord* commands,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_draw_indexed_generated(
+    CommandRecord* commands,
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+    gpu::GpuSpan index_span,
+    gpu::IndexType index_type,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_draw_mesh_tasks(
+    CommandRecord* commands,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::Vec3u groups,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_draw_mesh_tasks_indirect(
+    CommandRecord* commands,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    uint draw_count,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_draw_mesh_tasks_indirect_count(
+    CommandRecord* commands,
+    gpu::GpuAddress mesh_root,
+    gpu::GpuAddress fragment_root,
+    gpu::GpuSpan args,
+    gpu::GpuSpan count_span,
+    uint max_draw_count,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_reset_timestamps(
+    CommandRecord* record,
+    gpu::TimestampPoolHandle pool,
+    uint first,
+    uint count,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_write_timestamp(
+    CommandRecord* record,
+    gpu::TimestampPoolHandle pool,
+    uint index,
+    gpu::StageMask stage,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_resolve_timestamps(
+    CommandRecord* record,
+    gpu::TimestampPoolHandle pool,
+    uint first,
+    uint count,
+    gpu::GpuSpan destination,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_set_ray_tracing_pipeline_stack_size(
+    CommandRecord* record,
+    ulong pipeline_stack_size,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_trace_rays(
+    CommandRecord* record,
+    gpu::GpuAddress root,
+    gpu::RayTracingShaderBindingTable* table,
+    gpu::Vec3u dimensions,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_trace_rays_indirect(
+    CommandRecord* record,
+    gpu::GpuAddress root,
+    gpu::RayTracingShaderBindingTable* table,
+    gpu::GpuSpan args,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_trace_rays_indirect2(
+    CommandRecord* record,
+    gpu::GpuAddress root,
+    gpu::GpuSpan args,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
+fn void? vk_cmd_barrier(CommandRecord* commands, gpu::Barrier* barrier) {
+    $if $feat(COMMAND_WRAPPER_BENCH):
+        gpu::observe_barrier();
+        return;
+    $else
+    VkDeviceState* state = commands.device_state;
+    gpu::internal::DeviceSlotControl control =
+        (gpu::internal::DeviceSlotControl)gpu::internal::device_slots[commands.device.index].control.load(
+            AtomicOrdering.ACQUIRE,
+        );
+    state.pins_during_command = control.pins;
+    state.command_entered.store(true, AtomicOrdering.RELEASE);
+    while (state.block_command && !state.command_release.load(AtomicOrdering.ACQUIRE)) {
+        thread::yield();
+    }
+    if (state.reject_command) return gpu::INVALID_HANDLE~;
+    $endif
 }

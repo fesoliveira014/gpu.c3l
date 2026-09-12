@@ -7,7 +7,6 @@ import std::core::mem;
 
 // Headless (lavapipe): the device's VMA allocator + memory stats.
 
-
 fn void memory_queries_reject_uninitialized_allocator() @test {
     gpu::internal::vk::VkDeviceState* state =
         mem::new(gpu::internal::vk::VkDeviceState);
@@ -27,7 +26,6 @@ fn void memory_queries_reject_uninitialized_allocator() @test {
 
 fn void allocator_stats_and_report() @test {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_vma_test",
     };

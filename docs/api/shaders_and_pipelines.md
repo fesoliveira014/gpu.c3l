@@ -110,8 +110,8 @@ gpu::PipelineHandle mesh_pipeline = gpu::create_mesh_pipeline(&device, &mesh_des
 Mesh pipelines take the same attachment state and `GraphicsState` as
 graphics pipelines; `raster.topology` is ignored. They push the graphics root
 header with `vertex_root_gpu` carrying the mesh (or task) root. Draw with
-`cmd_draw_mesh_tasks` and its indirect forms; `cmd_draw*` reject a mesh
-pipeline and mesh draws reject a graphics pipeline with `INVALID_ARGUMENT`.
+`cmd_draw_mesh_tasks` and its indirect forms. Applications must bind a mesh
+pipeline for mesh draws and a graphics pipeline for vertex/indexed draws.
 Generated work does not cover mesh draws.
 
 ## Ray-tracing pipelines
@@ -160,8 +160,8 @@ gpu::destroy_pipeline(&device, pipeline)!;
 ```
 
 Destruction never waits. Recording, ending, or submitting commands does not
-retain pipelines. Keep each pipeline alive through its last GPU use under
-every validation policy; cached command state does not extend its lifetime.
+retain pipelines. Keep each pipeline alive through its last GPU use;
+cached command state does not extend its lifetime.
 
 Equal descriptions on one device share a private cached pipeline; each
 `PipelineHandle` is still a separate owner with its own lifetime. Pipeline
