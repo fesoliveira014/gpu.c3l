@@ -948,8 +948,11 @@ fn void? create_texture_views(Device* device, TextureViewCreateDesc[] descs, Tex
     gpu::internal::retain_device_children(&operation, (ulong)descs.len);
 }
 
-<* Release one texture view and recycle its shader-visible index immediately.
-   Preconditions: GPU references to the index are complete.
+<* Release one texture view. General slots are recycled unless their
+   generation is exhausted; reserved slots remain reserved. The destroyed
+   view is no longer usable.
+   Preconditions: GPU references to the index are complete. Any later use
+   of the slot must refer to a newly published live view.
    Always checked: live identity and ownership.
    Runtime failures: faults preserve the view.
    @param device : "Live device that owns the view."
