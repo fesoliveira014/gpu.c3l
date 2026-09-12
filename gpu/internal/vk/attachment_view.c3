@@ -21,7 +21,6 @@ struct AttachmentViewSlot {
     uint               array_layer;
     bool               owns_native;
     bool               swapchain_owned;
-    Atomic{uint}       tracked_command_references;
 }
 
 struct AttachmentViewCell {
@@ -163,7 +162,7 @@ fn gpu::AttachmentViewHandle? vk_create_attachment_view(
         .owns_native  = owns_native,
     };
     gpu::AttachmentViewHandle handle = state.attachment_views.alloc(slot)!;
-    (void)texture.tracked_command_references.add(1, AtomicOrdering.RELAXED);
+    (void)texture.internal_references.add(1, AtomicOrdering.RELAXED);
     return handle;
 }
 
@@ -175,17 +174,11 @@ fn void? vk_destroy_attachment_view(
     defer state.resource_mutex.unlock();
     AttachmentViewSlot* slot = state.attachment_views.get(handle)!;
     if (slot.swapchain_owned) return gpu::INVALID_RESOURCE_STATE~;
-    if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
-        drain_completed_submitted_commands(state)!;
-        if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
-            return gpu::RESOURCE_IN_USE~;
-        }
-    }
     TextureSlot* texture = state.textures.get(slot.texture)!;
     vk::ImageView native = slot.native;
     bool owns_native = slot.owns_native;
     state.attachment_views.free(handle)!;
-    (void)texture.tracked_command_references.sub(1, AtomicOrdering.RELAXED);
+    (void)texture.internal_references.sub(1, AtomicOrdering.RELAXED);
     if (owns_native) vk::destroy_image_view(state.device, native, null);
 }
 

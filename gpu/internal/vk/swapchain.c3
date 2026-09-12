@@ -913,19 +913,8 @@ fn bool? swapchain_images_referenced_locked(
         gpu::TextureHandle handle = slot.textures[i];
         TextureSlot* texture = state.textures.get(handle)!;
         if (texture_has_live_descriptor_views(texture)) return true;
-        if (texture.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
+        if (texture.internal_references.load(AtomicOrdering.RELAXED) > 0) {
             return true;
-        }
-        // A missing borrowed slot carries no references; a missing texture
-        // is real inconsistency, so its lookup above still faults.
-        if (try attachment_view = state.attachment_views.get(
-            slot.attachment_views[i],
-        )) {
-            if (attachment_view.tracked_command_references.load(
-                AtomicOrdering.RELAXED,
-            ) > 0) {
-                return true;
-            }
         }
     }
     return false;
@@ -973,7 +962,7 @@ fn void? release_swapchain_images_for_lifecycle_with(
             context:        context,
             public_fault:   gpu::RESOURCE_IN_USE,
             rejected_field: "swapchain image references",
-            invariant:      "all command and texture-view references must be released first",
+            invariant:      "texture views must be released and internal image operations must complete first",
         )~;
     }
     release_swapchain_images_locked(state, slot);

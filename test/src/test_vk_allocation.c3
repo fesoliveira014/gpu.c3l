@@ -700,15 +700,7 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
         &ops,
     )!!;
     vk::AllocationSlot* slot = fixture.state.allocations.get(allocation)!!;
-    vk::CommandResourceReference[1] references = {{
-        .owner      = allocation.owner,
-        .index      = allocation.index,
-        .generation = allocation.generation,
-    }};
-    vk::retain_tracked_command_reference(
-        &fixture.state,
-        &references[0],
-    )!!;
+
     gpu::Queue queue = {
         .device = { .generation = 1 },
         .id     = 0,
@@ -720,8 +712,6 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
     defer (void)completions[0].retirement_mutex.destroy();
     completions[0].published_sequence.store(1, AtomicOrdering.RELEASE);
     vk::CommandScratch[1] scratch = {{
-        .references      = references[..],
-        .reference_count = 1,
         .in_use          = true,
     }};
     uint[1] available;
@@ -758,8 +748,7 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
     completions[0].retirement_mutex.lock()!!;
     vk::retire_queue_through_locked(&fixture.state, &completions[0], 1);
     completions[0].retirement_mutex.unlock();
-    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 0
-        && completions[0].submitted_count == 0,
+    assert(completions[0].submitted_count == 0,
         "the first retirement releases the ownership record exactly once");
     vk::free_allocation_for_state_with_ops(
         &fixture.state,

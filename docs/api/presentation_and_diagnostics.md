@@ -129,8 +129,8 @@ wait; `wait_swapchain_presentations` is what retires pending presents.
 Its `WAIT_TIMEOUT` (zero timeout is a nonblocking query) leaves everything
 intact; pump the platform event loop and retry. `RESOURCE_IN_USE` or
 `DEVICE_BUSY` from resize or destroy after a successful wait means an
-image was acquired and never presented, or a command list still references
-the swapchain.
+image was acquired and never presented, an image has a live descriptor view,
+or backend-owned image work is still pending.
 
 Resize invalidates every `AcquiredImage`. Re-read `get_swapchain_info`
 and rebuild anything that depends on format or extent.
@@ -180,7 +180,7 @@ and still refuses to destroy them.
 | native surface lost | `SURFACE_LOST` |
 | surface changed | `SWAPCHAIN_OUT_OF_DATE` |
 | acquire or present timed out | `WAIT_TIMEOUT` |
-| live acquisition or reference | `RESOURCE_IN_USE`, `DEVICE_BUSY` |
+| live acquisition, view, or backend operation | `RESOURCE_IN_USE`, `DEVICE_BUSY` |
 | swapchain table full | `SLOT_TABLE_FULL` |
 | device loss | `DEVICE_LOST` |
 

@@ -534,74 +534,6 @@ fn PreparedRenderPass? full_prepare_render_pass(
     return pass;
 }
 
-fn void? track_render_pass(
-    CommandRecord* commands,
-    PreparedRenderPass* pass,
-) {
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    CommandResourceReference[
-        gpu::MAX_COLOR_ATTACHMENTS * 2 + 1
-    ] references;
-    uint reference_count;
-    for (uint i = 0; i < pass.color_count; i++) {
-        gpu::AttachmentViewHandle color = pass.color_handles[i];
-        references[reference_count++] = {
-            .owner      = color.owner,
-            .index      = color.index,
-            .generation = color.generation,
-        };
-        gpu::AttachmentViewHandle resolve = pass.resolve_handles[i];
-        if (resolve.is_valid()) {
-            references[reference_count++] = {
-                .owner      = resolve.owner,
-                .index      = resolve.index,
-                .generation = resolve.generation,
-            };
-        }
-    }
-    if (pass.has_depth) {
-        references[reference_count++] = {
-            .owner      = pass.depth_handle.owner,
-            .index      = pass.depth_handle.index,
-            .generation = pass.depth_handle.generation,
-        };
-    }
-    preflight_command_references(
-        record,
-        references[:reference_count],
-    )!;
-    for (uint i = 0; i < pass.color_count; i++) {
-        gpu::AttachmentViewHandle color = pass.color_handles[i];
-        track_command_reference(
-            state,
-            record,
-            color.owner,
-            color.index,
-            color.generation,
-        )!;
-        gpu::AttachmentViewHandle resolve = pass.resolve_handles[i];
-        if (resolve.is_valid()) {
-            track_command_reference(
-                state,
-                record,
-                resolve.owner,
-                resolve.index,
-                resolve.generation,
-            )!;
-        }
-    }
-    if (pass.has_depth) {
-        track_command_reference(
-            state,
-            record,
-            pass.depth_handle.owner,
-            pass.depth_handle.index,
-            pass.depth_handle.generation,
-        )!;
-    }
-}
-
 fn void record_render_pass(
     CommandRecord* commands,
     PreparedRenderPass* pass,
@@ -646,13 +578,7 @@ fn void? full_begin_render_pass(
         desc,
         "cmd_begin_render_pass",
     )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_render_pass(commands, &pass)!;
+
     record_render_pass(commands, &pass);
 }
 
@@ -1676,17 +1602,6 @@ fn PreparedIndexedDraw? full_prepare_indexed_draw(
     };
 }
 
-fn void? track_indexed_draw(
-    CommandRecord* commands,
-    PreparedIndexedDraw* draw,
-) {
-    return track_span_command_reference(
-        commands.device_state,
-        commands,
-        &draw.index_span,
-    );
-}
-
 fn void record_indexed_draw(
     CommandRecord* commands,
     PreparedIndexedDraw* draw,
@@ -1752,7 +1667,7 @@ fn void? full_draw_indexed(
         instance_count: instance_count,
         index_type:     index_type,
     )!;
-    track_indexed_draw(commands, &draw)!;
+
     record_indexed_draw(commands, &draw);
 }
 
@@ -1821,17 +1736,6 @@ fn PreparedIndirectDraw? full_prepare_indirect_draw(
     };
 }
 
-fn void? track_indirect_draw(
-    CommandRecord* commands,
-    PreparedIndirectDraw* draw,
-) {
-    return track_span_command_reference(
-        commands.device_state,
-        commands,
-        &draw.args_span,
-    );
-}
-
 fn void record_indirect_draw(
     CommandRecord* commands,
     PreparedIndirectDraw* draw,
@@ -1883,7 +1787,7 @@ fn void? full_draw_indirect(
         args:           args,
         draw_count:     draw_count,
     )!;
-    track_indirect_draw(commands, &draw)!;
+
     record_indirect_draw(commands, &draw);
 }
 
@@ -1989,29 +1893,6 @@ fn PreparedIndexedIndirectDraw? full_prepare_indexed_indirect_draw(
     };
 }
 
-fn void? track_indexed_indirect_draw(
-    CommandRecord* commands,
-    PreparedIndexedIndirectDraw* draw,
-) {
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    CommandResourceReference[2] references = {
-        {
-            .owner      = draw.args_span.owner,
-            .index      = draw.args_span.index,
-            .generation = draw.args_span.generation,
-        },
-        {
-            .owner      = draw.index_span.owner,
-            .index      = draw.index_span.index,
-            .generation = draw.index_span.generation,
-        },
-    };
-    preflight_command_references(record, references[..])!;
-    track_span_command_reference(state, record, &draw.args_span)!;
-    track_span_command_reference(state, record, &draw.index_span)!;
-}
-
 fn void record_indexed_indirect_draw(
     CommandRecord* commands,
     PreparedIndexedIndirectDraw* draw,
@@ -2077,13 +1958,7 @@ fn void? full_draw_indexed_indirect(
             index_span:     index_span,
             index_type:     index_type,
         )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_indexed_indirect_draw(commands, &draw)!;
+
     record_indexed_indirect_draw(commands, &draw);
 }
 
@@ -2196,35 +2071,6 @@ fn PreparedIndexedIndirectCountDraw? full_prepare_indexed_indirect_count_draw(
     };
 }
 
-fn void? track_indexed_indirect_count_draw(
-    CommandRecord* commands,
-    PreparedIndexedIndirectCountDraw* draw,
-) {
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    CommandResourceReference[3] references = {
-        {
-            .owner      = draw.args_span.owner,
-            .index      = draw.args_span.index,
-            .generation = draw.args_span.generation,
-        },
-        {
-            .owner      = draw.count_span.owner,
-            .index      = draw.count_span.index,
-            .generation = draw.count_span.generation,
-        },
-        {
-            .owner      = draw.index_span.owner,
-            .index      = draw.index_span.index,
-            .generation = draw.index_span.generation,
-        },
-    };
-    preflight_command_references(record, references[..])!;
-    track_span_command_reference(state, record, &draw.args_span)!;
-    track_span_command_reference(state, record, &draw.count_span)!;
-    track_span_command_reference(state, record, &draw.index_span)!;
-}
-
 fn void record_indexed_indirect_count_draw(
     CommandRecord* commands,
     PreparedIndexedIndirectCountDraw* draw,
@@ -2297,13 +2143,7 @@ fn void? full_draw_indexed_indirect_count(
             index_span:     index_span,
             index_type:     index_type,
         )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_indexed_indirect_count_draw(commands, &draw)!;
+
     record_indexed_indirect_count_draw(commands, &draw);
 }
 
@@ -2433,29 +2273,6 @@ fn PreparedGeneratedDraw? full_prepare_generated_draw(
     return draw;
 }
 
-fn void? track_generated_draw(
-    CommandRecord* commands,
-    PreparedGeneratedDraw* draw,
-) {
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    CommandResourceReference[2] references = {
-        {
-            .owner      = draw.records_span.owner,
-            .index      = draw.records_span.index,
-            .generation = draw.records_span.generation,
-        },
-        {
-            .owner      = draw.count_span.owner,
-            .index      = draw.count_span.index,
-            .generation = draw.count_span.generation,
-        },
-    };
-    preflight_command_references(record, references[..])!;
-    track_span_command_reference(state, record, &draw.records_span)!;
-    track_span_command_reference(state, record, &draw.count_span)!;
-}
-
 fn void? record_generated_draw(
     CommandRecord* commands,
     PreparedGeneratedDraw* draw,
@@ -2502,13 +2319,7 @@ fn void? full_draw_generated(
         max_draw_count: max_draw_count,
     )!;
     if (draw.max_count == 0) return;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_generated_draw(commands, &draw)!;
+
     record_generated_draw(commands, &draw)!;
 }
 
@@ -2617,35 +2428,6 @@ fn PreparedGeneratedIndexedDraw? full_prepare_generated_indexed_draw(
     return draw;
 }
 
-fn void? track_generated_indexed_draw(
-    CommandRecord* commands,
-    PreparedGeneratedIndexedDraw* draw,
-) {
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    CommandResourceReference[3] references = {
-        {
-            .owner      = draw.records_span.owner,
-            .index      = draw.records_span.index,
-            .generation = draw.records_span.generation,
-        },
-        {
-            .owner      = draw.count_span.owner,
-            .index      = draw.count_span.index,
-            .generation = draw.count_span.generation,
-        },
-        {
-            .owner      = draw.index_span.owner,
-            .index      = draw.index_span.index,
-            .generation = draw.index_span.generation,
-        },
-    };
-    preflight_command_references(record, references[..])!;
-    track_span_command_reference(state, record, &draw.records_span)!;
-    track_span_command_reference(state, record, &draw.count_span)!;
-    track_span_command_reference(state, record, &draw.index_span)!;
-}
-
 fn void? record_generated_indexed_draw(
     CommandRecord* commands,
     PreparedGeneratedIndexedDraw* draw,
@@ -2704,13 +2486,7 @@ fn void? full_draw_indexed_generated(
             index_type:     index_type,
         )!;
     if (draw.max_count == 0) return;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_generated_indexed_draw(commands, &draw)!;
+
     record_generated_indexed_draw(commands, &draw)!;
 }
 
@@ -2965,16 +2741,6 @@ fn PreparedMeshIndirectDraw? full_prepare_mesh_indirect_draw(
     return draw;
 }
 
-fn void? track_mesh_indirect_draw(
-    CommandRecord* commands,
-    PreparedMeshIndirectDraw* draw,
-) @private {
-    track_span_command_reference(commands.device_state, commands, &draw.args_span)!;
-    if (draw.counted) {
-        track_span_command_reference(commands.device_state, commands, &draw.count_span)!;
-    }
-}
-
 fn void? trusted_draw_mesh_tasks_indirect(
     CommandRecord* commands,
     gpu::GpuAddress mesh_root,
@@ -3011,13 +2777,7 @@ fn void? full_draw_mesh_tasks_indirect(
         counted:       false,
         operation:     "cmd_draw_mesh_tasks_indirect",
     )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_mesh_indirect_draw(commands, &draw)!;
+
     record_mesh_indirect_draw(commands, &draw);
 }
 
@@ -3059,12 +2819,6 @@ fn void? full_draw_mesh_tasks_indirect_count(
         counted:       true,
         operation:     "cmd_draw_mesh_tasks_indirect_count",
     )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_mesh_indirect_draw(commands, &draw)!;
+
     record_mesh_indirect_draw(commands, &draw);
 }

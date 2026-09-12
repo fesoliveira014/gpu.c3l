@@ -60,7 +60,6 @@ const uint TIMESTAMP_POOL_FREE_NONE = 0;
 struct TimestampPoolSlot {
     vk::QueryPool pool;
     uint          capacity;
-    Atomic{uint}  tracked_command_references;
     char[DEBUG_NAME_CAP] debug_name;
 }
 
@@ -94,7 +93,6 @@ struct TimestampCommandNativeOps @private {
 
 struct LoweredTimestampResolve {
     TimestampPoolSlot*       pool;
-    gpu::TimestampPoolHandle pool_handle;
     uint                     first;
     uint                     count;
     ResolvedSpan             destination;
@@ -305,9 +303,6 @@ fn void? destroy_timestamp_pool_with(
 ) {
     if (table == null || ops == null) return gpu::INVALID_ARGUMENT~;
     TimestampPoolSlot* slot = table.get(handle)!;
-    if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
-        return gpu::RESOURCE_IN_USE~;
-    }
     vk::QueryPool pool = slot.pool;
     table.free(handle)!;
     ops.destroy(ops.user_data, device, pool);
@@ -405,12 +400,6 @@ fn void? vk_destroy_timestamp_pool(
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     TimestampPoolSlot* slot = state.timestamp_pools.get(pool)!;
-    if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
-        drain_completed_submitted_commands(state)!;
-        if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
-            return gpu::RESOURCE_IN_USE~;
-        }
-    }
     vk::QueryPool native_pool = slot.pool;
     state.timestamp_pools.free(pool)!;
     vk::destroy_query_pool(state.device, native_pool, null);
@@ -604,7 +593,6 @@ fn LoweredTimestampResolve? lower_timestamp_resolve(
     validate_timestamp_destination(&resolved, required)!;
     return {
         .pool             = slot,
-        .pool_handle      = pool,
         .first            = first,
         .count            = count,
         .destination      = resolved,
@@ -629,44 +617,6 @@ fn void? validate_full_timestamp_resolve(
         resolved:  &resolve.destination,
         span:      &resolve.destination_span,
         operation: "cmd_resolve_timestamps",
-    )!;
-}
-
-fn void? track_timestamp_pool_reference(
-    CommandRecord* record,
-    gpu::TimestampPoolHandle pool,
-) {
-    return track_command_reference(
-        record.device_state,
-        record,
-        pool.owner,
-        pool.index,
-        pool.generation,
-    );
-}
-
-fn void? track_timestamp_resolve_references(
-    CommandRecord* record,
-    LoweredTimestampResolve* resolve,
-) {
-    CommandResourceReference[2] references = {
-        {
-            .owner      = resolve.pool_handle.owner,
-            .index      = resolve.pool_handle.index,
-            .generation = resolve.pool_handle.generation,
-        },
-        {
-            .owner      = resolve.destination_span.owner,
-            .index      = resolve.destination_span.index,
-            .generation = resolve.destination_span.generation,
-        },
-    };
-    preflight_command_references(record, references[..])!;
-    track_timestamp_pool_reference(record, resolve.pool_handle)!;
-    track_span_command_reference(
-        record.device_state,
-        record,
-        &resolve.destination_span,
     )!;
 }
 
@@ -830,9 +780,7 @@ fn void? full_reset_timestamps_with(
         slot,
         "cmd_reset_timestamps",
     )!;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(record, checkpoint);
-    track_timestamp_pool_reference(record, pool)!;
+
     emit_reset_timestamps_with(record, slot, first, count, ops);
 }
 
@@ -887,9 +835,7 @@ fn void? full_write_timestamp_with(
         "cmd_write_timestamp",
     )!;
     validate_full_timestamp_stage(record, pool, slot, stage)!;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(record, checkpoint);
-    track_timestamp_pool_reference(record, pool)!;
+
     emit_write_timestamp_with(
         record,
         slot,
@@ -945,9 +891,7 @@ fn void? full_resolve_timestamps_with(
         "cmd_resolve_timestamps",
     )!;
     validate_full_timestamp_resolve(record, &resolve)!;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(record, checkpoint);
-    track_timestamp_resolve_references(record, &resolve)!;
+
     emit_resolve_timestamps_with(record, &resolve, ops);
 }
 

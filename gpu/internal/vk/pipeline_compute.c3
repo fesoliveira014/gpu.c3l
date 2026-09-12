@@ -29,7 +29,6 @@ struct PipelineSlot {
     vk::IndirectCommandsLayoutEXT   generated_dispatch_layout;
     gpu::RayTracingPipelineInfo     ray_tracing_info;
     uint                            entry;
-    Atomic{uint}                    tracked_command_references;
 }
 
 struct PipelineCell {
@@ -344,12 +343,6 @@ fn void? vk_destroy_pipeline(
     PipelineSlot* slot = state.pipelines.get(handle)!;
     if (generated_scratch_references_pipeline(state, handle)) {
         return gpu::RESOURCE_IN_USE~;
-    }
-    if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
-        drain_completed_submitted_commands(state)!;
-        if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
-            return gpu::RESOURCE_IN_USE~;
-        }
     }
     uint entry_index = slot.entry;
     state.pipelines.free(handle)!;

@@ -5,6 +5,10 @@
 Allocations, spans, addresses, textures, views, samplers, and acceleration
 structures.
 
+Recording, ending, or submitting commands does not retain application resources.
+Keep them alive and unmodified as required until their last GPU use completes.
+Destroy and update calls do not infer shader use or wait for completion.
+
 ```mermaid
 flowchart LR
     AD[AllocationDesc] -->|allocate_memory| A[GpuAllocation]
@@ -347,6 +351,9 @@ Rules:
 - A clone copies a completed structure into an unbuilt destination made
   from the same descriptor. A cloned BLAS has a new address; a cloned TLAS
   needs its own view.
+- A pending build or clone destination cannot be destroyed or linked to
+  another build or clone until its command is discarded or retired. Failed
+  submission preserves this restriction while the original executable is live.
 - After an indirect build the CPU does not know actual counts; only
   indirect updates or a new direct build may follow.
 - Teardown: wait, destroy views, destroy the TLAS, destroy BLASes that its
@@ -374,6 +381,6 @@ fills an SBT.
 | out of memory | `OUT_OF_HOST_MEMORY`, `OUT_OF_DEVICE_MEMORY` |
 | fixed table full | `SLOT_TABLE_FULL` |
 | heap full | `DESCRIPTOR_HEAP_FULL` |
-| live child or reference | `RESOURCE_IN_USE` |
+| live child or backend operation | `RESOURCE_IN_USE` |
 
 All creation here is thread-safe and transactional.

@@ -130,20 +130,6 @@ fn void? validate_texture_recording_access_only(
     )!;
 }
 
-fn void? track_texture_command_reference(
-    VkDeviceState* state,
-    CommandRecord* record,
-    gpu::TextureHandle handle,
-) @private {
-    return track_command_reference(
-        state,
-        record,
-        handle.owner,
-        handle.index,
-        handle.generation,
-    );
-}
-
 fn gpu::DebugResourceKind span_resource_kind(
     VkDeviceState* state,
     gpu::GpuSpan* span,
@@ -205,20 +191,6 @@ fn void? validate_span_recording_access_only(
         span:        span,
         operation:   operation,
     )!;
-}
-
-fn void? track_span_command_reference(
-    VkDeviceState* state,
-    CommandRecord* record,
-    gpu::GpuSpan* span,
-) @private {
-    return track_command_reference(
-        state,
-        record,
-        span.owner,
-        span.index,
-        span.generation,
-    );
 }
 
 fn void? validate_span_transfer_usage(

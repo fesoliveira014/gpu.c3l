@@ -152,7 +152,7 @@ struct TraceRaysFixture {
     vk::PipelineCell[1]    pipeline_cells;
     vk::PipelineCacheEntry[1] pipeline_entries;
     vk::QueueCompletionState[1] completions;
-    vk::CommandResourceReference[4] references;
+
     vk::CommandScratch     scratch;
 }
 
@@ -215,7 +215,7 @@ fn void init_trace_rays_fixture(TraceRaysFixture* fixture) {
         .key  = { .kind = (int)vk::PipelineKind.RAY_TRACING },
         .used = true,
     };
-    fixture.scratch.references = fixture.references[..];
+
     fixture.completions[0] = {
         .timeline    = (vk::Semaphore)(uptr)0x66,
         .queue_flags = vk::QueueFlagBits.COMPUTE_BIT,
@@ -343,7 +343,6 @@ fn void trusted_indirect_trace_lowers_exact_regions_root_and_address() @test {
     assert(capture.matched
         && capture.pushes == 1
         && capture.indirect_traces == 1);
-    assert(fixture.scratch.reference_count == 0);
 }
 
 fn void indirect_trace_capability_rejects_before_argument_resolution() @test {
@@ -392,7 +391,6 @@ fn void trusted_indirect2_trace_pushes_root_and_exact_address() @test {
     assert(capture.matched
         && capture.pushes == 1
         && capture.indirect2_traces == 1);
-    assert(fixture.scratch.reference_count == 0);
 }
 
 fn void indirect2_capability_rejects_before_argument_resolution() @test {
@@ -523,7 +521,7 @@ fn void full_indirect2_requires_valid_dynamic_stack_state() @test {
     )!!;
 }
 
-fn void full_indirect2_retains_only_pipeline_and_packet_transactionally() @test {
+fn void full_indirect2_emits_pipeline_and_packet() @test {
     TraceRaysFixture fixture;
     init_trace_rays_fixture(&fixture);
     fixture.spans.state.resource_mutex.init()!!;
@@ -546,35 +544,6 @@ fn void full_indirect2_retains_only_pipeline_and_packet_transactionally() @test 
         ops:    &ops,
     )!!;
     assert(capture.matched && capture.indirect2_traces == 1);
-    assert(fixture.scratch.reference_count == 2,
-        "only the pipeline and packet allocation are retained");
-    assert(fixture.pipeline_cells[0].value.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 1);
-    assert(fixture.spans.allocation_cells[0].value
-        .tracked_command_references.load(AtomicOrdering.RELAXED) == 1);
-    assert(fixture.spans.allocation_cells[1].value.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 0,
-        "GPU-authored SBT addresses remain caller-owned");
-    vk::rollback_command_references(&fixture.record, 0);
-
-    fixture.scratch.references = fixture.references[:1];
-    capture.pushes = 0;
-    capture.indirect2_traces = 0;
-    assert(@catch(vk::full_trace_rays_indirect2_with_ops(
-        record: &fixture.record,
-        root:   {},
-        args:   args,
-        ops:    &ops,
-    )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED);
-    assert(fixture.scratch.reference_count == 0);
-    assert(fixture.pipeline_cells[0].value.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 0);
-    assert(fixture.spans.allocation_cells[0].value
-        .tracked_command_references.load(AtomicOrdering.RELAXED) == 0);
-    assert(capture.pushes == 0 && capture.indirect2_traces == 0);
 }
 
 fn void ray_tracing_bind_uses_distinct_native_bind_point_and_cache() @test {
@@ -703,7 +672,7 @@ fn void dynamic_stack_size_sets_only_after_full_validation() @test {
     assert(!fixture.record.ray_tracing_stack_size_set);
 }
 
-fn void trusted_dynamic_stack_size_lowers_without_reference_work() @test {
+fn void trusted_dynamic_stack_size_lowers() @test {
     TraceRaysFixture fixture;
     init_trace_rays_fixture(&fixture);
     RayTracingStackSizeCapture capture = {
@@ -722,7 +691,6 @@ fn void trusted_dynamic_stack_size_lowers_without_reference_work() @test {
     )!!;
     assert(capture.matched && capture.calls == 1);
     assert(fixture.record.ray_tracing_stack_size_set);
-    assert(fixture.scratch.reference_count == 0);
 }
 
 fn void static_ray_bind_invalidates_dynamic_stack_state() @test {
@@ -808,7 +776,7 @@ fn void full_dynamic_trace_requires_current_stack_state() @test {
     )!!;
 }
 
-fn void full_trace_tracks_pipeline_and_unique_sbt_backing() @test {
+fn void full_trace_emits_pipeline_and_sbt() @test {
     TraceRaysFixture fixture;
     init_trace_rays_fixture(&fixture);
     fixture.spans.state.resource_mutex.init()!!;
@@ -831,19 +799,9 @@ fn void full_trace_tracks_pipeline_and_unique_sbt_backing() @test {
     )!!;
 
     assert(capture.matched && capture.traces == 1);
-    assert(fixture.scratch.reference_count == 2,
-        "pipeline plus one deduplicated SBT buffer are retained");
-    assert(fixture.pipeline_cells[0].value.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 1);
-    assert(fixture.spans.allocation_cells[1].value.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 1);
-    vk::rollback_command_references(&fixture.record, 0);
-    assert(fixture.scratch.reference_count == 0);
 }
 
-fn void full_indirect_trace_tracks_pipeline_sbt_and_arguments() @test {
+fn void full_indirect_trace_emits_pipeline_sbt_and_arguments() @test {
     TraceRaysFixture fixture;
     init_trace_rays_fixture(&fixture);
     fixture.spans.state.resource_mutex.init()!!;
@@ -868,17 +826,6 @@ fn void full_indirect_trace_tracks_pipeline_sbt_and_arguments() @test {
         ops:    &ops,
     )!!;
     assert(capture.matched && capture.indirect_traces == 1);
-    assert(fixture.scratch.reference_count == 3,
-        "pipeline, SBT buffer, and indirect allocation are retained");
-    assert(fixture.pipeline_cells[0].value.tracked_command_references.load(
-        AtomicOrdering.RELAXED,
-    ) == 1);
-    assert(fixture.spans.allocation_cells[1].value.tracked_command_references.load(
-        AtomicOrdering.RELAXED,
-    ) == 1);
-    assert(fixture.spans.allocation_cells[0].value
-        .tracked_command_references.load(AtomicOrdering.RELAXED) == 1);
-    vk::rollback_command_references(&fixture.record, 0);
 }
 
 fn void indirect_trace_validates_range_alignment_usage_and_queue() @test {
@@ -973,7 +920,7 @@ fn void indirect_trace_reuses_pipeline_queue_and_render_scope_validation() @test
     )) == gpu::COMMAND_RECORDING_ERROR);
 }
 
-fn void trusted_indirect_trace_repeats_without_reference_work() @test {
+fn void trusted_indirect_trace_repeats() @test {
     TraceRaysFixture fixture;
     init_trace_rays_fixture(&fixture);
     gpu::GpuSpan args = fixture_trace_args(&fixture);
@@ -999,44 +946,6 @@ fn void trusted_indirect_trace_repeats_without_reference_work() @test {
     assert(capture.matched
         && capture.pushes == 64
         && capture.indirect_traces == 64);
-    assert(fixture.scratch.reference_count == 0,
-        "trusted repeated recording performs no reference allocation");
-}
-
-fn void indirect_trace_reference_exhaustion_rolls_back_every_retain() @test {
-    TraceRaysFixture fixture;
-    init_trace_rays_fixture(&fixture);
-    fixture.spans.state.resource_mutex.init()!!;
-    defer (void)fixture.spans.state.resource_mutex.destroy();
-    fixture.scratch.references = fixture.references[:2];
-    gpu::GpuSpan args = fixture_trace_args(&fixture);
-    TraceRaysCapture capture = {
-        .expected_args = 0x2000,
-        .matched       = true,
-    };
-    vk::TraceRaysOps ops = {
-        .user_data      = &capture,
-        .push_root      = &capture_trace_root,
-        .trace_indirect = &capture_trace_rays_indirect,
-    };
-
-    assert(@catch(vk::full_trace_rays_indirect_with_ops(
-        record: &fixture.record,
-        root:   {},
-        table:  &fixture.table,
-        args:   args,
-        ops:    &ops,
-    )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED);
-    assert(fixture.scratch.reference_count == 0);
-    assert(fixture.pipeline_cells[0].value.tracked_command_references.load(
-        AtomicOrdering.RELAXED,
-    ) == 0);
-    assert(fixture.spans.allocation_cells[1].value.tracked_command_references.load(
-        AtomicOrdering.RELAXED,
-    ) == 0);
-    assert(fixture.spans.allocation_cells[0].value
-        .tracked_command_references.load(AtomicOrdering.RELAXED) == 0);
-    assert(capture.pushes == 0 && capture.indirect_traces == 0);
 }
 
 fn void full_trace_validation_rejects_shape_usage_and_dimensions() @test {

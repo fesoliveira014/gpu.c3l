@@ -1041,7 +1041,6 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
             == dispatch_preprocess_count + 1,
         "generated dispatch stays within its reserved preprocess capacity");
 
-    uint dispatch_exhausted_references = record.scratch.reference_count;
     uint dispatch_exhausted_preprocess =
         record.scratch.generated_preprocess_count;
     assert(@catch(gpu::cmd_dispatch_generated(
@@ -1051,8 +1050,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         max_dispatch_count: 1,
     )) == gpu::GENERATED_SCRATCH_EXHAUSTED,
         "generated dispatch exhaustion preserves the exact public fault");
-    assert(record.scratch.reference_count == dispatch_exhausted_references
-        && record.scratch.generated_preprocess_count
+    assert(record.scratch.generated_preprocess_count
             == dispatch_exhausted_preprocess,
         "generated dispatch exhaustion records no partial command");
     record_target_to_attach(&commands, plain_target);
@@ -1086,7 +1084,6 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
             == draw_preprocess_count + 1,
         "generated draw stays within reserved preprocess capacity");
 
-    uint draw_exhausted_references = record.scratch.reference_count;
     uint draw_exhausted_preprocess =
         record.scratch.generated_preprocess_count;
     assert(@catch(gpu::cmd_draw_generated(
@@ -1096,8 +1093,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         max_draw_count: 1,
     )) == gpu::GENERATED_SCRATCH_EXHAUSTED,
         "generated draw exhaustion preserves the exact public fault");
-    assert(record.scratch.reference_count == draw_exhausted_references
-        && record.scratch.generated_preprocess_count
+    assert(record.scratch.generated_preprocess_count
             == draw_exhausted_preprocess,
         "generated draw exhaustion records no partial command");
     gpu::cmd_end_render_pass(&commands)!!;
@@ -1136,7 +1132,6 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
             == indexed_preprocess_count + 1,
         "generated indexed draw stays within reserved preprocess capacity");
 
-    uint indexed_exhausted_references = record.scratch.reference_count;
     uint indexed_exhausted_preprocess =
         record.scratch.generated_preprocess_count;
     assert(@catch(gpu::cmd_draw_indexed_generated(
@@ -1147,8 +1142,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         index_span:    indices.span,
     )) == gpu::GENERATED_SCRATCH_EXHAUSTED,
         "generated indexed-draw exhaustion preserves the exact public fault");
-    assert(record.scratch.reference_count == indexed_exhausted_references
-        && record.scratch.generated_preprocess_count
+    assert(record.scratch.generated_preprocess_count
             == indexed_exhausted_preprocess,
         "generated indexed-draw exhaustion records no partial command");
     gpu::cmd_end_render_pass(&commands)!!;

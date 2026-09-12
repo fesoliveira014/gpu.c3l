@@ -338,7 +338,6 @@ fn void command_allocator_host_allocation_failure_is_transactional() @test {
     };
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 1,
-        .max_resource_references_per_list = 1,
     };
     gpu::internal::vk::CommandAllocatorSlot slot;
     assert(@catch(gpu::internal::vk::initialize_command_allocator_slot(
@@ -350,7 +349,6 @@ fn void command_allocator_host_allocation_failure_is_transactional() @test {
         "allocator host exhaustion returns a public fault");
     assert(slot.command_buffers.ptr == null
         && slot.scratch.ptr == null
-        && slot.reference_storage.ptr == null
         && slot.preprocess_index_storage.ptr == null
         && slot.available.ptr == null
         && slot.reservations.ptr == null
@@ -370,7 +368,6 @@ fn void command_allocator_native_creation_is_transactional() @test {
     };
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 2,
-        .max_resource_references_per_list = 1,
     };
     gpu::Queue queue = { .id = 0 };
     gpu::internal::vk::CommandAllocatorSlot slot;
@@ -426,7 +423,6 @@ fn void command_allocator_preallocates_fixed_acceleration_structure_arrays() @te
     };
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 2,
-        .max_resource_references_per_list = 1,
         .max_acceleration_structure_geometries_per_build = 3,
     };
     gpu::Queue queue = { .id = 0 };
@@ -485,12 +481,11 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
     }};
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 2,
-        .max_resource_references_per_list = 1,
         .max_acceleration_structure_geometries_per_build = 3,
     };
     gpu::Queue queue = { .id = 0 };
 
-    for (uint fail_on = 1; fail_on <= 7; fail_on++) {
+    for (uint fail_on = 1; fail_on <= 6; fail_on++) {
         FailOnNAllocator fail_allocator = { .fail_on = fail_on };
         gpu::internal::vk::VkDeviceState state = {
             .host_allocator = &fail_allocator,
@@ -526,7 +521,6 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
             "native creation begins only after every host allocation succeeds");
         assert(slot.command_buffers.ptr == null
             && slot.scratch.ptr == null
-            && slot.reference_storage.ptr == null
             && slot.preprocess_index_storage.ptr == null
             && slot.acceleration_structure_max_primitive_count_storage.ptr
                 == null
@@ -536,7 +530,7 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
             "host rollback leaves no owned allocator state");
     }
 
-    FailOnNAllocator success_allocator = { .fail_on = 8 };
+    FailOnNAllocator success_allocator = { .fail_on = 7 };
     gpu::internal::vk::VkDeviceState state = {
         .host_allocator = &success_allocator,
         .queue_completions = completions[..],
@@ -559,13 +553,13 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
         slot:  &slot,
         ops:   &ops,
     )!!;
-    assert(success_allocator.attempts == 7
-        && success_allocator.acquires == 7
+    assert(success_allocator.attempts == 6
+        && success_allocator.acquires == 6
         && success_allocator.releases == 0
-        && success_allocator.outstanding == 7,
+        && success_allocator.outstanding == 6,
         "successful creation performs the exact fixed host allocation set");
     gpu::internal::vk::destroy_command_allocator_slot_with_ops(&state, &slot, &ops);
-    assert(success_allocator.releases == 7
+    assert(success_allocator.releases == 6
         && success_allocator.outstanding == 0
         && probe.pool_creates == 1 && probe.pool_destroys == 1
         && probe.buffer_allocations == 0,
@@ -580,7 +574,6 @@ fn void generated_reservation_storage_allocation_is_transactional() @test {
     }};
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 2,
-        .max_resource_references_per_list = 1,
     };
     gpu::Queue queue = { .id = 0 };
 
@@ -689,9 +682,7 @@ fn void command_allocator_defaults_preallocate_exact_storage() @test {
         && slot.scratch.len == slot.command_buffers.len
         && slot.available_count == slot.command_buffers.len,
         "zero capacities eagerly create the documented fixed buffer set");
-    assert(slot.reference_storage.len == 0
-        && slot.scratch[0].references.len == 0,
-        "TRUSTED allocators retain no resource-reference storage");
+
     assert(slot.preprocess_index_storage.len == 0
         && slot.reservations.len == 0
         && slot.scratch[0].generated_preprocess_indices.len == 0,
@@ -949,7 +940,6 @@ fn void command_table_exhaustion_restores_allocator_claim() @test {
     )!!;
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 1,
-        .max_resource_references_per_list = 1,
     };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -981,7 +971,6 @@ fn void command_table_exhaustion_restores_allocator_claim() @test {
         && slot.in_flight_buffers == 0,
         "failed command publication restores the exact allocator claim");
     assert(!scratch.in_use
-        && scratch.reference_count == 0
         && scratch.generated_preprocess_count == 0
         && !slot.recording_thread_set,
         "failed command publication restores scratch and thread ownership");
@@ -1044,7 +1033,6 @@ fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
         && !slot.recording_thread_set,
         "reset failure restores allocator availability and thread ownership");
     assert(!scratch.in_use
-        && scratch.reference_count == 0
         && scratch.generated_preprocess_count == 0,
         "reset failure restores the exact scratch unit");
     assert(token.record == (gpu::internal::vk::CommandRecord*)(uptr)91
@@ -1118,7 +1106,6 @@ fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
         && !slot.recording_thread_set,
         "begin failure restores allocator availability and thread ownership");
     assert(!scratch.in_use
-        && scratch.reference_count == 0
         && scratch.generated_preprocess_count == 0,
         "begin failure restores the exact scratch unit");
     assert(token.record == (gpu::internal::vk::CommandRecord*)(uptr)93
@@ -1201,7 +1188,6 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
         && slot.in_flight_buffers == 0
         && slot.recording_thread_set
         && scratch.in_use
-        && scratch.reference_count == 0
         && scratch.generated_preprocess_count == 0,
         "end failure preserves allocator, thread, and scratch ownership");
     assert(state.commands.next_new == next_new
@@ -1221,39 +1207,4 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
         && scratch.in_use,
         "the same recording succeeds on immediate end retry");
     gpu::internal::vk::vk_discard_commands(state, record, true)!!;
-}
-
-fn void tracking_allocator_wires_non_overlapping_reference_slices() @test {
-    gpu::RuntimeDesc runtime_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
-        .application_name         = "command_allocator_tracking_test",
-    };
-    gpu::Device device = create_test_device(&runtime_desc)!!;
-    defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-    gpu::CommandAllocatorDesc desc = {
-        .command_buffer_capacity          = 2,
-        .max_resource_references_per_list = 3,
-    };
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(
-        &device,
-        queue,
-        &desc,
-    )!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
-        allocator.handle,
-    )!!;
-
-    assert(slot.reference_storage.len == 6
-        && slot.scratch[0].references.len == 3
-        && slot.scratch[1].references.len == 3,
-        "tracking storage scales as buffers times references");
-    assert(slot.scratch[0].references.ptr == slot.reference_storage.ptr
-        && slot.scratch[1].references.ptr == &slot.reference_storage[3],
-        "each command buffer receives stable non-overlapping reference storage");
 }

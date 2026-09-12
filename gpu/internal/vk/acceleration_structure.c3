@@ -164,6 +164,7 @@ fn void set_pending_acceleration_structure_builds(
         cell.value.build_eligibility = state;
         if (clear) {
             cell.value.pending_next = ACCELERATION_STRUCTURE_PENDING_NONE;
+            cell.value.pending_linked.store(false, AtomicOrdering.RELEASE);
         }
         index = next;
     }
@@ -213,6 +214,7 @@ fn void link_pending_acceleration_structure(
         gpu::internal::AccelerationStructureBuildEligibility.PENDING;
     slot.pending_next = record.pending_acceleration_structure_head;
     record.pending_acceleration_structure_head = handle.index;
+    slot.pending_linked.store(true, AtomicOrdering.RELEASE);
 }
 
 fn void? link_pending_acceleration_structure_build(
@@ -222,7 +224,8 @@ fn void? link_pending_acceleration_structure_build(
     bool counts_are_maxima,
 ) {
     AccelerationStructureSlot* slot = prepared.destination;
-    if (slot.build_eligibility
+    if (slot.pending_linked.load(AtomicOrdering.ACQUIRE)
+        || slot.build_eligibility
         != gpu::internal::AccelerationStructureBuildEligibility.UNBUILT) {
         return gpu::RESOURCE_IN_USE~;
     }
@@ -250,54 +253,6 @@ fn void? link_pending_acceleration_structure_build(
         prepared.destination_handle,
         slot,
     );
-}
-
-fn void? track_acceleration_structure_build_references(
-    CommandRecord* record,
-    gpu::AccelerationStructureBuildDesc* desc,
-) {
-    VkDeviceState* state = record.device_state;
-    track_command_reference(
-        state,
-        record,
-        desc.destination.owner,
-        desc.destination.index,
-        desc.destination.generation,
-    )!;
-    foreach (&geometry : desc.geometries) {
-        if (geometry.kind
-            == gpu::AccelerationStructureGeometryKind.TRIANGLES) {
-            track_span_command_reference(
-                state,
-                record,
-                &geometry.triangles.vertices,
-            )!;
-            if (!gpu_span_is_zero(geometry.triangles.indices)) {
-                track_span_command_reference(
-                    state,
-                    record,
-                    &geometry.triangles.indices,
-                )!;
-            }
-            if (!gpu_span_is_zero(geometry.triangles.transform)) {
-                track_span_command_reference(
-                    state,
-                    record,
-                    &geometry.triangles.transform,
-                )!;
-            }
-        } else {
-            track_span_command_reference(
-                state,
-                record,
-                &geometry.aabbs.aabbs,
-            )!;
-        }
-    }
-    if (!gpu_span_is_zero(desc.instances)) {
-        track_span_command_reference(state, record, &desc.instances)!;
-    }
-    track_span_command_reference(state, record, &desc.scratch)!;
 }
 
 fn void acceleration_structure_build_command_real(
@@ -415,7 +370,6 @@ fn void? record_acceleration_structure_build_with_ops(
     gpu::AccelerationStructureBuildDesc* desc,
     bool update,
     bool validate,
-    bool track_references,
     AccelerationStructureBuildCommandOps* ops,
 ) {
     uint geometry_checkpoint =
@@ -427,15 +381,12 @@ fn void? record_acceleration_structure_build_with_ops(
             update,
             validate,
         )!;
-    uint reference_checkpoint = record.scratch.reference_count;
+
     defer catch {
         record.scratch.acceleration_structure_geometry_count =
             geometry_checkpoint;
-        rollback_command_references(record, reference_checkpoint);
     }
-    if (track_references) {
-        track_acceleration_structure_build_references(record, desc)!;
-    }
+
     if (!update) link_pending_acceleration_structure_build(
         record,
         &prepared,
@@ -507,7 +458,6 @@ fn void? record_acceleration_structure_indirect_build_with_ops(
     gpu::GpuSpan ranges,
     bool update,
     bool validate,
-    bool track_references,
     AccelerationStructureIndirectBuildCommandOps* ops,
 ) {
     uint geometry_checkpoint =
@@ -536,16 +486,7 @@ fn void? record_acceleration_structure_indirect_build_with_ops(
         desc,
         &prepared,
     );
-    uint reference_checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(record, reference_checkpoint);
-    if (track_references) {
-        track_acceleration_structure_build_references(record, desc)!;
-        track_span_command_reference(
-            record.device_state,
-            record,
-            &ranges,
-        )!;
-    }
+
     if (!update) {
         link_pending_acceleration_structure_build(
             record:            record,
@@ -592,7 +533,8 @@ prepare_acceleration_structure_clone(
         != gpu::internal::AccelerationStructureBuildEligibility.BUILT) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (destination_slot.build_eligibility
+    if (destination_slot.pending_linked.load(AtomicOrdering.ACQUIRE)
+        || destination_slot.build_eligibility
         != gpu::internal::AccelerationStructureBuildEligibility.UNBUILT) {
         return gpu::RESOURCE_IN_USE~;
     }
@@ -634,7 +576,6 @@ fn void? record_acceleration_structure_clone_with_ops(
     CommandRecord* record,
     gpu::AccelerationStructureHandle source,
     gpu::AccelerationStructureHandle destination,
-    bool track_references,
     AccelerationStructureCloneCommandOps* ops,
 ) {
     PreparedAccelerationStructureClone prepared =
@@ -643,24 +584,7 @@ fn void? record_acceleration_structure_clone_with_ops(
             source,
             destination,
         )!;
-    uint reference_checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(record, reference_checkpoint);
-    if (track_references) {
-        track_command_reference(
-            state:      record.device_state,
-            record:     record,
-            owner:      source.owner,
-            index:      source.index,
-            generation: source.generation,
-        )!;
-        track_command_reference(
-            state:      record.device_state,
-            record:     record,
-            owner:      destination.owner,
-            index:      destination.index,
-            generation: destination.generation,
-        )!;
-    }
+
     emit_acceleration_structure_clone(record, &prepared, ops);
     copy_completed_acceleration_structure_shape(
         prepared.source,
@@ -768,8 +692,9 @@ prepare_acceleration_structure_build_mode(
         : (update
             ? "cmd_update_acceleration_structure"
             : "cmd_build_acceleration_structure");
-    if (!update && destination.build_eligibility
-        != gpu::internal::AccelerationStructureBuildEligibility.UNBUILT) {
+    if (!update && (destination.pending_linked.load(AtomicOrdering.ACQUIRE)
+        || destination.build_eligibility
+            != gpu::internal::AccelerationStructureBuildEligibility.UNBUILT)) {
         return gpu::RESOURCE_IN_USE~;
     }
     if (update
@@ -1073,7 +998,7 @@ struct AccelerationStructureSlot {
     gpu::GpuAllocation                              placement;
     usz                                             placement_offset;
     gpu::internal::NormalizedAccelerationStructureDesc desc;
-    Atomic{uint}                                    tracked_command_references;
+    Atomic{bool}                                    pending_linked;
     uint                                            live_view_count;
     uint                                            built_instance_count;
     bool                                            built_counts_are_maxima;
@@ -1749,7 +1674,7 @@ fn void? vk_destroy_acceleration_structure(
     }
     AccelerationStructureSlot* slot = resolved_slot;
     if (slot.live_view_count > 0
-        || slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0
+        || slot.pending_linked.load(AtomicOrdering.ACQUIRE)
         || slot.build_eligibility
             == gpu::internal::AccelerationStructureBuildEligibility.PENDING) {
         state.resource_mutex.unlock();
@@ -1845,7 +1770,6 @@ fn void? trusted_build_acceleration_structure(
         desc,
         false,
         false,
-        false,
         &ops,
     );
 }
@@ -1862,7 +1786,6 @@ fn void? full_build_acceleration_structure(
         record,
         desc,
         false,
-        true,
         true,
         &ops,
     );
@@ -1881,7 +1804,6 @@ fn void? trusted_update_acceleration_structure(
         desc,
         true,
         false,
-        false,
         &ops,
     );
 }
@@ -1897,7 +1819,6 @@ fn void? full_update_acceleration_structure(
     return record_acceleration_structure_build_with_ops(
         record,
         desc,
-        true,
         true,
         true,
         &ops,
@@ -1919,7 +1840,6 @@ fn void? trusted_build_acceleration_structure_indirect(
         ranges:           ranges,
         update:           false,
         validate:         false,
-        track_references: false,
         ops:              &ops,
     );
 }
@@ -1939,7 +1859,6 @@ fn void? full_build_acceleration_structure_indirect(
         ranges:           ranges,
         update:           false,
         validate:         true,
-        track_references: true,
         ops:              &ops,
     );
 }
@@ -1959,7 +1878,6 @@ fn void? trusted_update_acceleration_structure_indirect(
         ranges:           ranges,
         update:           true,
         validate:         false,
-        track_references: false,
         ops:              &ops,
     );
 }
@@ -1979,7 +1897,6 @@ fn void? full_update_acceleration_structure_indirect(
         ranges:           ranges,
         update:           true,
         validate:         true,
-        track_references: true,
         ops:              &ops,
     );
 }
@@ -1997,7 +1914,6 @@ fn void? trusted_clone_acceleration_structure(
         record:           record,
         source:           source,
         destination:      destination,
-        track_references: false,
         ops:              &ops,
     );
 }
@@ -2015,7 +1931,6 @@ fn void? full_clone_acceleration_structure(
         record:           record,
         source:           source,
         destination:      destination,
-        track_references: true,
         ops:              &ops,
     );
 }

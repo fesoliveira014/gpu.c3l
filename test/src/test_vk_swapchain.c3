@@ -1168,7 +1168,7 @@ fn void swapchain_release_is_immediate_and_retryable() @test {
         .texture         = texture,
         .swapchain_owned = true,
     })!!;
-    state.textures.get(texture)!!.tracked_command_references.add(
+    state.textures.get(texture)!!.internal_references.add(
         1,
         AtomicOrdering.RELAXED,
     );
@@ -1211,7 +1211,7 @@ fn void swapchain_release_is_immediate_and_retryable() @test {
     defer (void)completions[0].retirement_mutex.destroy();
     completions[0].published_sequence.store(1, AtomicOrdering.RELEASE);
     state.queue_completions = completions[..];
-    state.textures.get(texture)!!.tracked_command_references.sub(
+    state.textures.get(texture)!!.internal_references.sub(
         1,
         AtomicOrdering.RELAXED,
     );
@@ -1282,28 +1282,15 @@ fn void swapchain_release_detects_shared_resource_references() @test {
         &slot,
     )!!, "an unused wrapped texture is releasable");
 
-    state.textures.get(texture)!!.tracked_command_references.add(
+    state.textures.get(texture)!!.internal_references.add(
         1,
         AtomicOrdering.RELAXED,
     );
     assert(gpu::internal::vk::swapchain_images_referenced_locked(
         &state,
         &slot,
-    )!!, "recorded or submitted texture use blocks release");
-    state.textures.get(texture)!!.tracked_command_references.sub(
-        1,
-        AtomicOrdering.RELAXED,
-    );
-
-    state.attachment_views.get(attachment_view)!!.tracked_command_references.add(
-        1,
-        AtomicOrdering.RELAXED,
-    );
-    assert(gpu::internal::vk::swapchain_images_referenced_locked(
-        &state,
-        &slot,
-    )!!, "recorded or submitted attachment use blocks release");
-    state.attachment_views.get(attachment_view)!!.tracked_command_references.sub(
+    )!!, "internal texture operations block release");
+    state.textures.get(texture)!!.internal_references.sub(
         1,
         AtomicOrdering.RELAXED,
     );
@@ -1568,28 +1555,11 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     assert(@catch(gpu::cmd_texture_barrier(&commands, &invalid_present))
         == gpu::INVALID_ARGUMENT,
         "public PRESENT state rejects nonempty access");
-    assert(view.tracked_command_references.load(AtomicOrdering.RELAXED) == 1,
-        "recorded rendering retains the borrowed view");
+
     gpu::internal::vk::commit_present_result(live_slot, &acquired, vk::Result.SUCCESS);
 
-    assert(@catch(gpu::internal::vk::vk_resize_swapchain(
-        state:  state,
-        handle: swapchain,
-        width:  8,
-        height: 8,
-    )) == gpu::RESOURCE_IN_USE,
-        "resize rejects a recorded borrowed-view reference");
-    assert(@catch(gpu::internal::vk::vk_destroy_swapchain(state, swapchain))
-        == gpu::RESOURCE_IN_USE,
-        "destruction rejects a recorded borrowed-view reference");
-    assert(view.tracked_command_references.load(AtomicOrdering.RELAXED) == 1
-        && state.textures.get(old_texture)!! == texture
-        && state.attachment_views.get(old_view)!! == view,
-        "failed release attempts preserve the command and borrowed handles");
-
     gpu::discard_commands(&commands)!!;
-    assert(view.tracked_command_references.load(AtomicOrdering.RELAXED) == 0,
-        "discard releases the recorded borrowed-view reference");
+
     gpu::internal::vk::vk_resize_swapchain(
         state:  state,
         handle: swapchain,
@@ -1930,7 +1900,7 @@ fn void wait_present_fences_preserves_image_reference_guards() @test {
     slot.attachment_views[0] = attachment_view;
     slot.present_fences[0] = (vk::Fence)73;
     slot.present_fence_pending[0] = true;
-    state.textures.get(texture)!!.tracked_command_references.add(
+    state.textures.get(texture)!!.internal_references.add(
         1,
         AtomicOrdering.RELAXED,
     );
@@ -1944,7 +1914,7 @@ fn void wait_present_fences_preserves_image_reference_guards() @test {
         reset_fn:   &capture_fence_reset_all,
     )!!;
     assert(
-        state.textures.get(texture)!!.tracked_command_references.load(
+        state.textures.get(texture)!!.internal_references.load(
             AtomicOrdering.RELAXED,
         ) == 1,
         "presentation wait leaves image reference counts unchanged"

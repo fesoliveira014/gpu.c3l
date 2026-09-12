@@ -1198,8 +1198,8 @@ fn DedicatedAccelerationStructure? create_dedicated_acceleration_structure(
     return created;
 }
 
-<* Destroy an acceleration structure without waiting. Live views or tracked
-   commands make destruction retryable.
+<* Destroy an acceleration structure after its final GPU use without waiting.
+   Live views or membership in a pending build list make destruction retryable.
    @param device : "Live device that owns the structure."
    @param acceleration_structure : "Owning structure handle to destroy."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
@@ -1526,7 +1526,7 @@ fn ulong? get_ray_tracing_shader_group_stack_size(
 
 <* Release one returned pipeline handle.
    Preconditions: recorded and submitted use of this handle is complete.
-   Always checked: live identity, ownership, and detected command use.
+   Always checked: live identity and ownership.
    Runtime failures: faults preserve this alias; shared backend state is refcounted.
    @param device : "Live device that owns the pipeline."
    @param pipeline : "Owning pipeline handle to release."
@@ -1567,10 +1567,9 @@ fn usz? get_pipeline_cache_data(Device* device, char[] out) {
 // ---- Commands and rendering ----
 
 <* Create one fixed-capacity command allocator for an exact selected queue.
-   Zero capacities default to 8 command buffers and 64 tracked references per
-   list; acceleration-structure geometry capacity instead stays disabled at
-   zero. Storage scales with their products. Generated-work storage is not
-   configured here and is instead sized by reserve_generated_work.
+   Zero command-buffer capacity defaults to 32; acceleration-structure geometry
+   capacity stays disabled at zero. Storage scales with their product.
+   Generated-work storage is sized by reserve_generated_work.
    Creation may fault for invalid limits, host/device allocation failure, a full
    allocator table, device loss, or a busy/closing device.
    @param device : "Live device that will own the allocator."
@@ -1585,13 +1584,7 @@ fn CommandAllocator? create_command_allocator(Device* device, Queue queue, Comma
     if (normalized.command_buffer_capacity == 0) {
         normalized.command_buffer_capacity = DEFAULT_COMMAND_ALLOCATOR_CAPACITY;
     }
-    if (normalized.max_resource_references_per_list == 0) {
-        normalized.max_resource_references_per_list =
-            DEFAULT_COMMAND_REFERENCES_PER_LIST;
-    }
-    if (normalized.command_buffer_capacity > MAX_COMMAND_ALLOCATOR_CAPACITY
-        || normalized.max_resource_references_per_list
-            > MAX_COMMAND_REFERENCES_PER_LIST) {
+    if (normalized.command_buffer_capacity > MAX_COMMAND_ALLOCATOR_CAPACITY) {
         return INVALID_ARGUMENT~;
     }
     if (normalized.max_acceleration_structure_geometries_per_build > 0) {
@@ -1716,7 +1709,10 @@ fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipe
     );
 }
 
-<* Begin recording through an explicit allocator.
+<* Begin recording through an explicit allocator. Recording, ending, or submitting
+   commands does not retain application resources. Keep them alive and unmodified
+   as required until their last GPU use completes. Destroy and update calls
+   do not infer shader use or wait for completion.
    Preconditions: allocator use follows its threading and queue contract.
    Always checked: live identity, ownership, and fixed-unit availability.
    Runtime failures: DEVICE_BUSY preserves the allocator; success retains its device.
@@ -1739,7 +1735,7 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
     return commands;
 }
 
-<* Finish and consume a recording token.
+<* Finish and consume a recording token without retaining application resources.
    Preconditions: the command list is recording outside a render pass.
    Always checked: token identity and authoritative phase.
    Runtime failures: failure leaves the token recording. The token and all
@@ -1921,11 +1917,11 @@ fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationSt
    span. The command is recorded outside a render pass on a graphics or compute
    queue and inserts no barrier. Order a GPU producer with a barrier whose
    destination contains both `indirect` and `acceleration_structure_build`.
-   FULL retains the destination, every explicit input, scratch, and range span
-   through completion. TRUSTED makes those lifetimes caller preconditions.
+   The caller keeps the destination, inputs, scratch, and range span alive and
+   unmodified as required through their final GPU use under every policy.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, maximum-count inputs, and build scratch."
-   @param ranges : "GPU-authored fixed-stride range records retained under FULL."
+   @param ranges : "Caller-owned GPU-authored fixed-stride range records."
    @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
 fn void? cmd_build_acceleration_structure_indirect(
     CommandList* commands,
@@ -1953,7 +1949,7 @@ fn void? cmd_build_acceleration_structure_indirect(
    explicit input span. The library does not inspect or read back the packet.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, maximum-count inputs, and update scratch."
-   @param ranges : "GPU-authored fixed-stride range records retained under FULL."
+   @param ranges : "Caller-owned GPU-authored fixed-stride range records."
    @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
 fn void? cmd_update_acceleration_structure_indirect(
     CommandList* commands,
@@ -2106,7 +2102,7 @@ fn void? cmd_trace_rays(
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param shader_binding_table : "Borrowed caller-owned direct shader binding table regions."
-   @param args : "Span beginning with one GPU-written TraceRaysIndirectCommand; FULL retains it through completion and TRUSTED requires caller-managed lifetime."
+   @param args : "Caller-owned span beginning with one GPU-written TraceRaysIndirectCommand, valid through completion."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, range, pipeline, support, or device fault." *>
 fn void? cmd_trace_rays_indirect(
@@ -2134,7 +2130,7 @@ fn void? cmd_trace_rays_indirect(
    work.
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address pushed unchanged; zero is valid."
-   @param args : "Span beginning with one GPU-written TraceRaysIndirectCommand2; FULL retains the span but never the raw addresses inside it, and TRUSTED retains neither, so every referenced shader binding table allocation stays caller-owned through completion."
+   @param args : "Caller-owned span beginning with one GPU-written TraceRaysIndirectCommand2; the packet and every shader binding table allocation it addresses must remain valid through completion."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, range, pipeline, support, or device fault." *>
 fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
@@ -2182,7 +2178,7 @@ fn AttachmentViewHandle? create_attachment_view(Device* device, AttachmentViewDe
 
 <* Destroy an attachment view.
    Preconditions: every recorded and submitted use is complete.
-   Always checked: live identity, ownership, and detected command use.
+   Always checked: live identity and ownership.
    Runtime failures: faults preserve the view.
    @param device : "Live device that owns the attachment view."
    @param view : "Owning attachment-view handle to destroy."
@@ -2341,7 +2337,7 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
-   @param index_span : "Non-owning index-data range retained by the command."
+   @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_count : "Indices drawn per instance."
    @param instance_count : "Instances to draw."
    @param index_type : "Index element width; defaults to U32."
@@ -2387,7 +2383,7 @@ fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAdd
    @param commands : "Live recording token inside a render pass."
    @param mesh_root : "Task or mesh stage root address."
    @param fragment_root : "Fragment root address."
-   @param args : "Non-owning record array retained by the command."
+   @param args : "Non-owning record array kept alive by the caller through completion."
    @param draw_count : "Number of records to execute."
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
    @return "Success, or a recoverable command, ownership, bounds, support, pipeline, or device fault." *>
@@ -2408,7 +2404,7 @@ fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_roo
    @param commands : "Live recording token inside a render pass."
    @param mesh_root : "Task or mesh stage root address."
    @param fragment_root : "Fragment root address."
-   @param args : "Non-owning record array retained by the command."
+   @param args : "Non-owning record array kept alive by the caller through completion."
    @param count_span : "Non-owning span holding the GPU-written draw count."
    @param max_draw_count : "Maximum records the GPU count may select."
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
@@ -2435,7 +2431,7 @@ fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress me
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
-   @param args : "Non-owning array of indirect draw records retained by the command."
+   @param args : "Non-owning array of indirect draw records kept alive by the caller through completion."
    @param draw_count : "Number of indirect records to execute."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, pipeline, state, or device fault." *>
@@ -2460,9 +2456,9 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
-   @param args : "Non-owning array of indexed indirect records retained by the command."
+   @param args : "Non-owning array of indexed indirect records kept alive by the caller through completion."
    @param draw_count : "Number of indirect records to execute."
-   @param index_span : "Non-owning index-data range retained by the command."
+   @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, pipeline, state, or device fault." *>
@@ -2490,10 +2486,10 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
-   @param args : "Non-owning array of indexed indirect records retained by the command."
+   @param args : "Non-owning array of indexed indirect records kept alive by the caller through completion."
    @param count_span : "Non-owning span containing the GPU-written draw count."
    @param max_draw_count : "Maximum records the GPU count may select."
-   @param index_span : "Non-owning index-data range retained by the command."
+   @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, support, pipeline, state, or device fault." *>
@@ -2549,7 +2545,7 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
    @param records : "Non-owning GPU-written indexed generated-draw record range."
    @param count_span : "Non-owning span containing the GPU-written draw count."
    @param max_draw_count : "Maximum generated records to execute."
-   @param index_span : "Non-owning index-data range retained by the command."
+   @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
    @return "Success, or a recoverable command, ownership, bounds, support, scratch-capacity, or device fault." *>
 fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
@@ -2839,6 +2835,8 @@ fn double? timestamp_delta_ns(
 }
 
 <* Submit executable command lists and return reusable queue progress.
+   Neither submission nor its completion point retains application resources.
+   Keep them alive and unmodified as required through their last GPU use.
    Preconditions: externally synchronize the queue; every list targets it and
    waits/readiness name valid scopes and live same-device values.
    Always checked: queue/point identity, limits, wait scopes, exact record queue,
@@ -3110,7 +3108,7 @@ fn void? present(Device* device, AcquiredImage* image, CompletionPoint render_co
    failures (DEVICE_BUSY, out-of-host/device memory, device loss, or backend
    failure) also preserve the handle and pending state. This call consumes
    neither the swapchain handle nor an acquired image, waits no completion
-   point, and retires no command references.
+   point, and retires no command units.
    @param device : "Live device that owns the swapchain."
    @param swapchain : "Borrowed swapchain handle whose presentations are waited."
    @param timeout_ns : "Maximum host wait in nanoseconds; TIMEOUT_INFINITE waits without a deadline and zero is nonblocking."

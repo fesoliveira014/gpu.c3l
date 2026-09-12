@@ -20,7 +20,6 @@ stateDiagram-v2
 gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
 gpu::CommandAllocatorDesc desc = {
     .command_buffer_capacity          = 8,    // 0 selects 32
-    .max_resource_references_per_list = 64,   // 0 selects 64; FULL validation only
     .debug_name                       = "frame_allocator",
     .max_acceleration_structure_geometries_per_build = 0,  // >0 enables AS builds
 };
@@ -31,8 +30,7 @@ defer (void)gpu::destroy_command_allocator(&allocator);
 An allocator is bound to one queue and owns `command_buffer_capacity`
 reusable units. Each `begin_commands` takes a unit; the unit returns when
 its submission's completion point retires. A `null` descriptor selects the
-defaults. Maxima: `MAX_COMMAND_ALLOCATOR_CAPACITY` (4,096) units and
-`MAX_COMMAND_REFERENCES_PER_LIST` (4,096) references.
+defaults. `MAX_COMMAND_ALLOCATOR_CAPACITY` limits an allocator to 4,096 units.
 
 One allocator has one recording thread while any recording is live.
 Different allocators record in parallel. `destroy_command_allocator` never
@@ -56,6 +54,10 @@ no-ops after a successful consume and free the unit on an early fault.
 
 Copies of a token are aliases of one record. All aliases are confined to
 the recording thread and die together.
+
+Recording, ending, or submitting commands does not retain application resources.
+Keep them alive and unmodified as required until their last GPU use completes.
+Destroy and update calls do not infer shader use or wait for completion.
 
 ## Transfers
 
@@ -324,9 +326,10 @@ read one `AccelerationStructureIndirectBuildRange` per geometry from
 `ranges_span`. Clone uses no scratch.
 
 None of these insert barriers. Order them with
-`.acceleration_structure_build` on both sides of a `Barrier`. Under `FULL`
-validation the destination and every named span are retained until the
-list retires. Details: [memory and resources](memory_and_resources.md#acceleration-structures).
+`.acceleration_structure_build` on both sides of a `Barrier`. Keep the destination
+and every named span valid through their last GPU use. Pending build destinations
+remain unavailable for destruction or another build/clone until their command is
+discarded or retired, including after failed submission. Details: [memory and resources](memory_and_resources.md#acceleration-structures).
 
 ## Ray tracing commands
 
@@ -380,7 +383,7 @@ No-ops without debug-utils support. Nesting must balance.
 | bad range, count, or descriptor | `INVALID_ARGUMENT` |
 | stale or foreign handle | `INVALID_HANDLE` |
 | unsupported queue operation or capability | `UNSUPPORTED_FEATURE` |
-| reference or geometry capacity exceeded | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` |
+| command-unit or geometry capacity exceeded | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` |
 | generated reservation exceeded | `GENERATED_SCRATCH_EXHAUSTED` |
 | no free unit | `DEVICE_BUSY` |
 

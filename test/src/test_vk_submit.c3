@@ -637,13 +637,7 @@ fn void prove_submission_publication_gap(
     vk::CommandAllocatorSlot* allocator_slot =
         state.command_allocators.get(allocator.handle)!!;
     uint available_while_owned = allocator_slot.available_count;
-    vk::track_command_reference(
-        state:      state,
-        record:     record,
-        owner:      retained.allocation.owner,
-        index:      retained.allocation.index,
-        generation: retained.allocation.generation,
-    )!!;
+
     SubmissionCheckpointGate gate = { .target = checkpoint };
     SubmissionCheckpointWorkerArgs args = {
         .state      = state,
@@ -719,33 +713,6 @@ fn void prove_submission_publication_gap(
     uint expected_batches = native_accepted ? 0 : 1;
     assert(completion.submitted_count == expected_batches,
         "only completed ownership-transfer phases expose a submitted batch");
-    if (!native_accepted) {
-        vk::CommandRecord* submitted = completion.submitted_head;
-        vk::CommandAllocatorSlot* submitted_allocator =
-            state.command_allocators.get(submitted.allocator)!!;
-        vk::CommandScratch* scratch =
-            &submitted_allocator.scratch[submitted.allocator_buffer];
-        vk::CommandResourceReference* reference = &scratch.references[0];
-        assert(scratch.reference_count == 1
-            && reference.owner == retained.allocation.owner
-            && reference.index == retained.allocation.index
-            && reference.generation == retained.allocation.generation,
-            "the submitted batch owns its resource before publication");
-    }
-    if (checkpoint == vk::SubmissionCheckpoint.BATCHES_PUBLISHED) {
-        assert(@catch(gpu::free_allocation(
-            &device,
-            &retained.allocation,
-        )) == gpu::RESOURCE_IN_USE,
-            "submitted ownership rejects an early caller release");
-        assert(retained.allocation.is_valid()
-            && gpu::get_allocation_info(
-                &device,
-                retained.allocation,
-            )!!.size == retained.span.size,
-            "rejected release preserves the token and native allocation");
-    }
-
     gate.release.store(true, AtomicOrdering.RELEASE);
     assert(worker.join()!! == 0 && args.submitted == predicted,
         "submission resumes and returns the reserved point");

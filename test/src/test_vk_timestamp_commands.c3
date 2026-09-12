@@ -110,7 +110,6 @@ fn TimestampCommandNativeOps timestamp_probe_ops(
 
 fn TimestampCommandFixture? create_timestamp_command_fixture(
     gpu::ContractValidation contract,
-    uint reference_capacity,
 ) {
     gpu::RuntimeDesc runtime_desc = {
         .contract_validation = contract,
@@ -167,7 +166,6 @@ fn TimestampCommandFixture? create_timestamp_command_fixture(
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity          = 1,
-        .max_resource_references_per_list = reference_capacity,
     };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         device: &device,
@@ -286,7 +284,6 @@ fn void timestamp_commands_emit_exact_native_parameters() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
             gpu::ContractValidation.FULL,
-            2,
         )!!;
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
@@ -345,28 +342,14 @@ fn void timestamp_commands_emit_exact_native_parameters() @test {
             (uint)vk::QueryResultFlagBits.RESULT_64_BIT
                 | (uint)vk::QueryResultFlagBits.WAIT_BIT
         ));
-    assert(fixture.record.scratch.reference_count == 2);
-    assert(pool_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 1);
-    assert(allocation_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 1);
 
     gpu::discard_commands(&fixture.commands)!!;
-    assert(pool_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 0);
-    assert(allocation_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 0);
 }
 
 fn void timestamp_write_emits_every_stage_mapping() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
             gpu::ContractValidation.FULL,
-            1,
         )!!;
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
@@ -417,14 +400,12 @@ fn void timestamp_write_emits_every_stage_mapping() @test {
             && probe.write_index == i
             && probe.write_stage == expected[i]);
     }
-    assert(fixture.record.scratch.reference_count == 1);
 }
 
 fn void timestamp_transfer_stage_accepts_implicit_graphics_support() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
             gpu::ContractValidation.FULL,
-            1,
         )!!;
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
@@ -453,7 +434,6 @@ fn void timestamp_full_write_rejects_stage_absent_from_recording_queue() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
             gpu::ContractValidation.FULL,
-            1,
         )!!;
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
@@ -474,7 +454,7 @@ fn void timestamp_full_write_rejects_stage_absent_from_recording_queue() @test {
     )) == gpu::INVALID_ARGUMENT,
         "a stage the recording queue family cannot execute is rejected");
     assert(probe.write_calls == 0
-        && fixture.record.scratch.reference_count == 0,
+        ,
         "the rejected stage reaches no native write and tracks nothing");
 
     full_write_timestamp_with(
@@ -495,7 +475,6 @@ fn void timestamp_full_write_rejects_invalid_masks_without_emission() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
             gpu::ContractValidation.FULL,
-            1,
         )!!;
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
@@ -519,14 +498,12 @@ fn void timestamp_full_write_rejects_invalid_masks_without_emission() @test {
         )) == gpu::INVALID_ARGUMENT);
     }
     assert(probe.write_calls == 0);
-    assert(fixture.record.scratch.reference_count == 0);
 }
 
 fn void timestamp_trusted_write_rejects_invalid_masks_without_emission() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
             gpu::ContractValidation.TRUSTED,
-            1,
         )!!;
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
@@ -548,14 +525,12 @@ fn void timestamp_trusted_write_rejects_invalid_masks_without_emission() @test {
         )) == gpu::INVALID_ARGUMENT);
     }
     assert(probe.write_calls == 0);
-    assert(fixture.record.scratch.reference_count == 0);
 }
 
 fn void timestamp_range_validation_prevents_native_emission() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
             gpu::ContractValidation.TRUSTED,
-            1,
         )!!;
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
@@ -606,7 +581,6 @@ fn void timestamp_render_phase_allows_only_writes() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
             gpu::ContractValidation.FULL,
-            1,
         )!!;
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
@@ -668,7 +642,6 @@ fn void timestamp_full_mode_rejects_unsupported_recording_role() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
             gpu::ContractValidation.FULL,
-            2,
         )!!;
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
@@ -701,14 +674,12 @@ fn void timestamp_full_mode_rejects_unsupported_recording_role() @test {
     assert(probe.reset_calls == 0
         && probe.write_calls == 0
         && probe.resolve_calls == 0);
-    assert(fixture.record.scratch.reference_count == 0);
 }
 
 fn void timestamp_destination_validation_is_transactional() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
             gpu::ContractValidation.FULL,
-            2,
         )!!;
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
@@ -765,62 +736,12 @@ fn void timestamp_destination_validation_is_transactional() @test {
     allocation_slot.backing.access = { .graphics };
 
     assert(probe.resolve_calls == 0);
-    assert(fixture.record.scratch.reference_count == 0);
-    assert(allocation_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 0);
 }
 
-fn void timestamp_full_resolve_capacity_rejection_is_transactional() @test {
-    TimestampCommandFixture fixture =
-        create_timestamp_command_fixture(
-            gpu::ContractValidation.FULL,
-            1,
-        )!!;
-    defer destroy_timestamp_command_fixture(&fixture)!!;
-    TimestampCommandProbe probe;
-    TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
-    TimestampPoolSlot* pool_slot =
-        fixture.state.timestamp_pools.get(fixture.pool)!!;
-    AllocationSlot* allocation_slot =
-        fixture.state.allocations.get(fixture.allocation)!!;
-
-    assert(@catch(full_resolve_timestamps_with(
-        record:      fixture.record,
-        pool:        fixture.pool,
-        first:       0,
-        count:       1,
-        destination: fixture.destination,
-        ops:         &ops,
-    )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED);
-    assert(probe.resolve_calls == 0);
-    assert(fixture.record.scratch.reference_count == 0);
-    assert(pool_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 0);
-    assert(allocation_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 0);
-
-    full_reset_timestamps_with(
-        record: fixture.record,
-        pool:   fixture.pool,
-        first:  0,
-        count:  1,
-        ops:    &ops,
-    )!!;
-    assert(probe.reset_calls == 1);
-    assert(fixture.record.scratch.reference_count == 1);
-    assert(pool_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 1);
-}
-
-fn void timestamp_trusted_mode_performs_zero_reference_work() @test {
+fn void timestamp_trusted_mode_emits_commands() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
             gpu::ContractValidation.TRUSTED,
-            1,
         )!!;
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
@@ -856,11 +777,4 @@ fn void timestamp_trusted_mode_performs_zero_reference_work() @test {
     assert(probe.reset_calls == 1
         && probe.write_calls == 1
         && probe.resolve_calls == 1);
-    assert(fixture.record.scratch.reference_count == 0);
-    assert(pool_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 0);
-    assert(allocation_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 0);
 }

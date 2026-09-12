@@ -729,7 +729,7 @@ fn LoweredTextureBarrier? validate_and_lower_resolved_texture_barrier(
     return { .slot = slot, .native = native };
 }
 
-fn LoweredTextureBarrier? validate_track_and_lower_texture_barrier(
+fn LoweredTextureBarrier? validate_and_lower_texture_barrier(
     VkDeviceState* state,
     CommandRecord* record,
     gpu::TextureBarrier* barrier,
@@ -748,11 +748,9 @@ fn LoweredTextureBarrier? validate_track_and_lower_texture_barrier(
         )~;
     }
 
-    TextureSlot*? slot_result = resolve_tracked_texture_command_reference(
-        state,
-        record,
-        barrier.texture,
-    );
+    state.resource_mutex.lock()!!;
+    TextureSlot*? slot_result = state.textures.get(barrier.texture);
+    state.resource_mutex.unlock();
     if (catch handle_fault = slot_result) {
         TextureBarrierRejection rejection = {
             .field     = "TextureBarrier.texture",
@@ -978,9 +976,8 @@ fn void? full_texture_barrier_with_ops(
     if (record == null || record.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(record, checkpoint);
-    LoweredTextureBarrier lowered = validate_track_and_lower_texture_barrier(
+
+    LoweredTextureBarrier lowered = validate_and_lower_texture_barrier(
         state:     state,
         record:    record,
         barrier:   barrier,

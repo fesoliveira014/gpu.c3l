@@ -162,7 +162,7 @@ fn void offscreen_clear_works() @test {
     }
 }
 
-fn void repeated_render_pass_retains_precreated_attachment() @test {
+fn void repeated_render_pass_uses_precreated_attachment() @test {
     gpu::Device device = make_offscreen_test_device();
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle target = make_render_target(&device);
@@ -204,9 +204,6 @@ fn void repeated_render_pass_retains_precreated_attachment() @test {
     gpu::cmd_end_render_pass(&commands)!!;
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_end_render_pass(&commands)!!;
-    assert(@catch(gpu::destroy_attachment_view(&device, target_view))
-        == gpu::RESOURCE_IN_USE,
-        "a recorded attachment cannot be destroyed before command retirement");
 }
 
 fn void offscreen_textured_triangle() @test {

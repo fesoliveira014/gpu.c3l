@@ -66,10 +66,6 @@ struct PreparedTraceRaysState {
     vk::StridedDeviceAddressRegionKHR miss;
     vk::StridedDeviceAddressRegionKHR hit;
     vk::StridedDeviceAddressRegionKHR callable;
-    gpu::GpuSpan                      ray_generation_span;
-    gpu::GpuSpan                      miss_span;
-    gpu::GpuSpan                      hit_span;
-    gpu::GpuSpan                      callable_span;
     gpu::GpuAddress                   root;
 }
 
@@ -81,14 +77,12 @@ struct PreparedTraceRays {
 struct PreparedTraceRaysIndirect {
     PreparedTraceRaysState state;
     ResolvedSpan           args;
-    gpu::GpuSpan           args_span;
 }
 
 struct PreparedTraceRaysIndirect2 {
     BoundPipeline*  pipeline;
     gpu::GpuAddress root;
     ResolvedSpan    args;
-    gpu::GpuSpan    args_span;
 }
 
 fn bool trace_span_is_canonical_empty(gpu::GpuSpan span) {
@@ -233,10 +227,6 @@ fn PreparedTraceRaysState? lower_trace_rays_state(
             record.device_state,
             &table.callable,
         )!,
-        .ray_generation_span = table.ray_generation.span,
-        .miss_span           = table.miss.span,
-        .hit_span            = table.hit.span,
-        .callable_span       = table.callable.span,
         .root                = root,
     };
 }
@@ -335,10 +325,6 @@ fn PreparedTraceRaysState? full_prepare_trace_rays_state(
             ray_generation: false,
             operation:      operation,
         )!,
-        .ray_generation_span = table.ray_generation.span,
-        .miss_span           = table.miss.span,
-        .hit_span            = table.hit.span,
-        .callable_span       = table.callable.span,
         .root                = root,
     };
 }
@@ -456,7 +442,6 @@ fn PreparedTraceRaysIndirect? lower_trace_rays_indirect(
     return {
         .state     = lower_trace_rays_state(record, root, table)!,
         .args      = lower_trace_rays_indirect_args(state, &args)!,
-        .args_span = args,
     };
 }
 
@@ -487,7 +472,6 @@ fn PreparedTraceRaysIndirect? full_prepare_trace_rays_indirect(
             record,
             &args,
         )!,
-        .args_span = args,
     };
 }
 
@@ -548,7 +532,6 @@ fn PreparedTraceRaysIndirect2? lower_trace_rays_indirect2(
         .pipeline  = borrow_bound_pipeline(record)!,
         .root      = root,
         .args      = lower_trace_rays_indirect2_args(state, &args)!,
-        .args_span = args,
     };
 }
 
@@ -577,7 +560,6 @@ fn PreparedTraceRaysIndirect2? full_prepare_trace_rays_indirect2(
             record,
             &args,
         )!,
-        .args_span = args,
     };
 }
 
@@ -899,41 +881,6 @@ fn void record_trace_rays_indirect2_with_ops(
     );
 }
 
-fn void? track_trace_rays_state(
-    CommandRecord* record,
-    PreparedTraceRaysState* trace,
-) {
-    track_bound_pipeline(record, trace.pipeline)!;
-    if (!trace_span_is_canonical_empty(trace.ray_generation_span)) {
-        track_span_command_reference(
-            record.device_state,
-            record,
-            &trace.ray_generation_span,
-        )!;
-    }
-    if (!trace_span_is_canonical_empty(trace.miss_span)) {
-        track_span_command_reference(
-            record.device_state,
-            record,
-            &trace.miss_span,
-        )!;
-    }
-    if (!trace_span_is_canonical_empty(trace.hit_span)) {
-        track_span_command_reference(
-            record.device_state,
-            record,
-            &trace.hit_span,
-        )!;
-    }
-    if (!trace_span_is_canonical_empty(trace.callable_span)) {
-        track_span_command_reference(
-            record.device_state,
-            record,
-            &trace.callable_span,
-        )!;
-    }
-}
-
 fn void? trusted_trace_rays_with_ops(
     CommandRecord* record,
     gpu::GpuAddress root,
@@ -969,9 +916,7 @@ fn void? full_trace_rays_with_ops(
         table:      table,
         dimensions: dimensions,
     )!;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(record, checkpoint);
-    track_trace_rays_state(record, &trace.state)!;
+
     record_trace_rays_with_ops(record, &trace, ops);
 }
 
@@ -1044,14 +989,7 @@ fn void? full_trace_rays_indirect_with_ops(
         table:  table,
         args:   args,
     )!;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(record, checkpoint);
-    track_trace_rays_state(record, &trace.state)!;
-    track_span_command_reference(
-        record.device_state,
-        record,
-        &trace.args_span,
-    )!;
+
     record_trace_rays_indirect_with_ops(record, &trace, ops);
 }
 
@@ -1120,14 +1058,7 @@ fn void? full_trace_rays_indirect2_with_ops(
         root:   root,
         args:   args,
     )!;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(record, checkpoint);
-    track_bound_pipeline(record, trace.pipeline)!;
-    track_span_command_reference(
-        record.device_state,
-        record,
-        &trace.args_span,
-    )!;
+
     record_trace_rays_indirect2_with_ops(record, &trace, ops);
 }
 

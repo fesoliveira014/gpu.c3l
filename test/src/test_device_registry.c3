@@ -510,8 +510,6 @@ fn void command_allocator_public_lifecycle_is_transactional() @test {
         "allocator carries its exact device and queue identity");
     assert(fixture.state.allocator_desc.command_buffer_capacity
             == gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY
-        && fixture.state.allocator_desc.max_resource_references_per_list
-            == gpu::DEFAULT_COMMAND_REFERENCES_PER_LIST
         && fixture.state.allocator_desc
             .max_acceleration_structure_geometries_per_build == 0,
         "zero descriptor fields normalize before backend dispatch");

@@ -1434,7 +1434,7 @@ fn void present_barrier_emission_matches_both_contract_policies() @test {
     );
 }
 
-fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
+fn void texture_barrier_invalid_state_prevents_emission() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
     if (gpu::get_device_caps(&device)!!.unified_layouts) return;
@@ -1457,10 +1457,7 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
         gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* slot = state.textures.get(texture)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    uint references_before = record.scratch.reference_count;
-    uint tracked_references_before = slot.tracked_command_references.load(
-        AtomicOrdering.RELAXED,
-    );
+
     TextureBarrierEmitCapture capture;
     vk::BarrierEmitOps ops = {
         .user_data = &capture,
@@ -1481,14 +1478,9 @@ fn void texture_barrier_invalid_state_rolls_back_post_retain_work() @test {
         &ops,
     ))
             == gpu::INVALID_ARGUMENT,
-        "sampled state without read access faults after retaining the texture");
+        "sampled state without read access faults before emission");
 
     assert(capture.calls == 0, "invalid destination state never reaches emission");
-    assert(record.scratch.reference_count == references_before,
-        "failed state validation rolls back the command reference");
-    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED)
-            == tracked_references_before,
-        "failed state validation rolls back the texture validation reference");
 }
 
 fn void texture_barrier_rejects_unsupported_texture_states() @test {
@@ -1555,7 +1547,7 @@ fn void texture_barrier_stale_handle_rejected() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::CommandRecord* record = vk::resolve_command(&cmd)!!;
-    uint references_before = record.scratch.reference_count;
+
     TextureBarrierEmitCapture emission;
     vk::BarrierEmitOps ops = {
         .user_data = &emission,
@@ -1590,8 +1582,6 @@ fn void texture_barrier_stale_handle_rejected() @test {
         "stale texture diagnostic claims no resolved resource identity");
     assert(emission.calls == 0,
         "stale texture reaches no native emission");
-    assert(record.scratch.reference_count == references_before,
-        "stale texture retains no command reference");
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
@@ -1711,7 +1701,7 @@ fn void attachment_view_publication_failure_rolls_back_cold_view() @test {
     };
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::TextureSlot* texture_slot = state.textures.get(texture)!!;
-    uint references_before = texture_slot.tracked_command_references.load(
+    uint references_before = texture_slot.internal_references.load(
         AtomicOrdering.RELAXED,
     );
     uint next_new = state.attachment_views.next_new;
@@ -1722,7 +1712,7 @@ fn void attachment_view_publication_failure_rolls_back_cold_view() @test {
     assert(@catch(gpu::create_attachment_view(&device, &view_desc))
         == gpu::SLOT_TABLE_FULL,
         "attachment publication capacity faults after cold native creation");
-    assert(texture_slot.tracked_command_references.load(AtomicOrdering.RELAXED)
+    assert(texture_slot.internal_references.load(AtomicOrdering.RELAXED)
         == references_before,
         "failed attachment publication does not retain the texture");
     state.attachment_views.next_new = next_new;
@@ -1759,42 +1749,6 @@ fn void foreign_attachment_view_destroy_rejects_without_consuming() @test {
         "foreign devices cannot consume an attachment-view handle");
     gpu::destroy_attachment_view(&owner, view)!!;
     gpu::destroy_texture(&owner, texture)!!;
-}
-
-fn void recorded_attachment_view_destruction_is_retryable() @test {
-    gpu::Device device = make_texture_test_device();
-    defer destroy_test_device(&device)!!;
-    gpu::TextureDesc desc = {
-        .access    = { .graphics },
-        .width     = 4,
-        .height    = 4,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .color_attach },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    gpu::AttachmentViewDesc view_desc = { .texture = texture };
-    gpu::AttachmentViewHandle view = gpu::create_attachment_view(
-        &device,
-        &view_desc,
-    )!!;
-    gpu::ColorTargetDesc[1] colors = { { .view = view } };
-    gpu::RenderPassDesc pass = {
-        .colors = colors[..],
-        .width  = 4,
-        .height = 4,
-    };
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
-    defer gpu::destroy_command_allocator(&command_allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
-    gpu::cmd_begin_render_pass(&commands, &pass)!!;
-
-    assert(@catch(gpu::destroy_attachment_view(&device, view))
-        == gpu::RESOURCE_IN_USE,
-        "recorded attachment references make destruction retryable");
-    gpu::discard_commands(&commands)!!;
-    gpu::destroy_attachment_view(&device, view)!!;
-    gpu::destroy_texture(&device, texture)!!;
 }
 
 fn void raised_texture_capacity_holds_more_than_default() @test {

@@ -109,7 +109,7 @@ struct TextureSlot {
     bool               cube_compatible;
     uint               live_descriptor_views;
     Atomic{bool}       presented;
-    Atomic{uint}        tracked_command_references;
+    Atomic{uint}        internal_references;
     bool               swapchain_owned;
     bool               sparse;
     gpu::SparseTextureRequirements sparse_requirements;
@@ -561,10 +561,9 @@ fn void forget_pending_texture_init(
     }
 }
 
-<* Unified mode: move the pending textures into a new heap array, retaining a
-   command reference on each live one so destruction waits for the
-   initialization to retire; stale handles are dropped. Takes resource_mutex,
-   so callers must not hold a queue lock. The array belongs to the caller
+<* Unified mode: move the pending textures into a new heap array, pinning each
+   live texture until initialization retires; stale handles are dropped. Takes
+   resource_mutex, so callers must not hold a queue lock. The array belongs to the caller
    until a prologue record takes it. *>
 fn gpu::TextureHandle[] retain_pending_texture_inits(VkDeviceState* state) {
     state.resource_mutex.lock()!!;
@@ -578,7 +577,7 @@ fn gpu::TextureHandle[] retain_pending_texture_inits(VkDeviceState* state) {
     for (uint i = 0; i < total; i++) {
         TextureSlot*? slot = state.textures.get(state.pending_init_textures[i]);
         if (catch err = slot) continue;
-        (void)slot.tracked_command_references.add(1, AtomicOrdering.RELAXED);
+        (void)slot.internal_references.add(1, AtomicOrdering.RELAXED);
         out[count++] = state.pending_init_textures[i];
     }
     state.pending_init_count = 0;
@@ -601,7 +600,7 @@ fn void release_pending_texture_inits(
     foreach (handle : handles) {
         TextureSlot*? slot = state.textures.get(handle);
         if (catch err = slot) continue;
-        (void)slot.tracked_command_references.sub(1, AtomicOrdering.RELAXED);
+        (void)slot.internal_references.sub(1, AtomicOrdering.RELAXED);
     }
     if (restore) {
         state.pending_init_mutex.lock()!!;
@@ -1611,9 +1610,9 @@ fn void? vk_destroy_texture(
     if (texture_has_live_descriptor_views(slot)) {
         return gpu::RESOURCE_IN_USE~;
     }
-    if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
+    if (slot.internal_references.load(AtomicOrdering.RELAXED) > 0) {
         drain_completed_submitted_commands(state)!;
-        if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
+        if (slot.internal_references.load(AtomicOrdering.RELAXED) > 0) {
             return gpu::RESOURCE_IN_USE~;
         }
     }
