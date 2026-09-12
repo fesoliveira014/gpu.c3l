@@ -253,6 +253,9 @@ Functions: `create_command_allocator`, `destroy_command_allocator`,
 `render_geometry_state`, `stencil_face`, `cmd_begin_render_pass`, `cmd_set_graphics_state`,
 `cmd_end_render_pass`.
 
+`cmd_begin_label`, `cmd_end_label`, `cmd_set_viewport`, and `cmd_set_scissor`
+return `void`; see their [recording preconditions](commands_and_rendering.md#command-lists).
+
 ### [Synchronization and submission](synchronization_and_submission.md)
 
 Types: `StageMask`, `TextureLayout`, `TextureAccess`, `TextureState`,

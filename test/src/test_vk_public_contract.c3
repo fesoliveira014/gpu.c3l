@@ -126,21 +126,6 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
         )) == gpu::INVALID_ARGUMENT,
         "cmd_set_graphics_state rejects a null graphics state"
     );
-    assert(
-        @catch(gpu::cmd_set_viewport(&commands, (gpu::Viewport*)null))
-            == gpu::INVALID_ARGUMENT,
-        "cmd_set_viewport rejects a null viewport"
-    );
-    assert(
-        @catch(gpu::cmd_set_scissor(&commands, (gpu::ScissorRect*)null))
-            == gpu::INVALID_ARGUMENT,
-        "cmd_set_scissor rejects a null scissor"
-    );
-    assert(
-        @catch(gpu::cmd_begin_label(&commands, null))
-            == gpu::INVALID_ARGUMENT,
-        "cmd_begin_label rejects a null label"
-    );
 
     gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&commands_executable)!!;

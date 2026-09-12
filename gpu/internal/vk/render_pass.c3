@@ -426,15 +426,11 @@ fn bool graphics_state_settable(gpu::internal::CommandState state) =>
     state == gpu::internal::CommandState.RECORDING
         || state == gpu::internal::CommandState.RECORDING_RENDER_PASS;
 
-fn void? vk_cmd_set_viewport(
+<* Requires a resolved recording command and readable viewport. *>
+fn void vk_cmd_set_viewport(
     CommandRecord* commands,
     gpu::Viewport* viewport,
 ) {
-    if (viewport == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (!graphics_state_settable(record.state)) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
     vk::Viewport native = lower_viewport(viewport);
     emit_viewport(commands, &native);
 }
@@ -572,15 +568,11 @@ fn void? vk_cmd_set_graphics_state(
     record.graphics_state_initialized = true;
 }
 
-fn void? vk_cmd_set_scissor(
+<* Requires a resolved recording command and readable scissor. *>
+fn void vk_cmd_set_scissor(
     CommandRecord* commands,
     gpu::ScissorRect* scissor,
 ) {
-    if (scissor == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (!graphics_state_settable(record.state)) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
     vk::Rect2D native = lower_scissor(scissor);
     emit_scissor(commands, &native);
 }

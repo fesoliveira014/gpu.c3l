@@ -612,8 +612,8 @@ fn void dynamic_viewport_scissor_pixels() @test {
                 gpu::cmd_set_viewport(
                     &cmd,
                     &graphics_state.viewport,
-                )!!;
-                gpu::cmd_set_scissor(&cmd, &half_scissor)!!;
+                );
+                gpu::cmd_set_scissor(&cmd, &half_scissor);
             } else if (i == 3) {
                 gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
             } else if (i == 4) {

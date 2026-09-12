@@ -858,7 +858,7 @@ fn void labels_record_validation_clean() @test {
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
 
-    gpu::cmd_begin_label(&cmd, "resource_setup")!!;
+    gpu::cmd_begin_label(&cmd, "resource_setup");
     gpu::TextureBarrier to_attach = {
         .texture = target,
         .before  = { .layout = gpu::TextureLayout.UNDEFINED },
@@ -869,17 +869,17 @@ fn void labels_record_validation_clean() @test {
         },
     };
     gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
-    gpu::cmd_end_label(&cmd)!!;
+    gpu::cmd_end_label(&cmd);
 
     gpu::ColorTargetDesc[1] colors = {{
         .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = 8, .height = 8 };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    gpu::cmd_begin_label(&cmd, "main_pass", { 0.2f, 0.8f, 0.2f, 1.0f })!!;
-    gpu::cmd_begin_label(&cmd, "nested")!!;
-    gpu::cmd_end_label(&cmd)!!;
-    gpu::cmd_end_label(&cmd)!!;
+    gpu::cmd_begin_label(&cmd, "main_pass", { 0.2f, 0.8f, 0.2f, 1.0f });
+    gpu::cmd_begin_label(&cmd, "nested");
+    gpu::cmd_end_label(&cmd);
+    gpu::cmd_end_label(&cmd);
     gpu::cmd_end_render_pass(&cmd)!!;
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
@@ -889,10 +889,6 @@ fn void labels_record_validation_clean() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit)!!;
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    fault ended = @catch(gpu::cmd_begin_label(&cmd, "too_late"));
-    assert(ended == gpu::INVALID_HANDLE, "labels on a consumed list fault INVALID_HANDLE");
-    fault end_stale = @catch(gpu::cmd_end_label(&cmd));
-    assert(end_stale == gpu::INVALID_HANDLE, "ending a label on a consumed list faults INVALID_HANDLE");
 }
 
 fn void callback_reports_leaks_without_validation() @test {

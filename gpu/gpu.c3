@@ -1798,27 +1798,21 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
     (void)gpu::internal::release_retained_device_pins(&operation);
 }
 
-<* Open a debug-utils label region; a no-op without debug utils.
-   Preconditions: calls are balanced while recording.
-   Always checked: token identity, authoritative phase, and non-null label.
-   @param commands : "Live recording token."
-   @param label : "Borrowed non-null label text used only for the call."
-   @param color : "Optional RGBA label color; the zero value is accepted."
-   @return "Success, or a recoverable command or invalid-argument fault." *>
-fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    if (label == null) return INVALID_ARGUMENT~;
-    return gpu::internal::vk::vk_cmd_begin_label(record, label, color);
+<* Open a balanced label region on the recording thread; no-op without debug utils.
+   Requires a live unconsumed token and readable non-null label text for this call.
+   Invalid token/phase or null label aborts in every build mode. *>
+fn void cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
+    gpu::internal::vk::CommandRecord* record = gpu::internal::required_recording_command(commands);
+    if (label == null) abort("Label is required");
+    gpu::internal::vk::vk_cmd_begin_label(record, label, color);
 }
 
-<* Close a debug-utils label region.
-   Preconditions: a matching label region is open.
-   Always checked: token identity and authoritative recording phase.
-   @param commands : "Live recording token."
-   @return "Success, or a recoverable command-state fault." *>
-fn void? cmd_end_label(CommandList* commands) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return gpu::internal::vk::vk_cmd_end_label(record);
+<* Close a matching label region on the recording thread; no-op without debug utils.
+   Requires a live unconsumed recording token.
+   Invalid token or phase aborts in every build mode. *>
+fn void cmd_end_label(CommandList* commands) {
+    gpu::internal::vk::CommandRecord* record = gpu::internal::required_recording_command(commands);
+    gpu::internal::vk::vk_cmd_end_label(record);
 }
 
 <* Record a buffer-to-buffer copy; surrounding barriers are caller-owned.
@@ -2262,28 +2256,22 @@ fn void? cmd_end_render_pass(CommandList* commands) {
     return gpu::internal::vk::vk_cmd_end_render_pass(record);
 }
 
-<* Set one dynamic viewport before or during a pass.
-   Preconditions: values are finite, representable, within device bounds, and height is nonzero.
-   Always checked: token phase and required pointer.
-   @param commands : "Live recording token."
-   @param viewport : "Borrowed complete viewport state copied into the command stream."
-   @return "Success, or a recoverable command, validation, queue-support, or device fault." *>
-fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    if (viewport == null) return INVALID_ARGUMENT~;
-    return gpu::internal::vk::vk_cmd_set_viewport(record, viewport);
+<* Set a viewport on the recording thread before or during a pass, after complete graphics state.
+   Requires a live unconsumed token and readable viewport: finite, within device bounds, nonzero height.
+   Invalid token/phase or null viewport aborts in every build mode; state is copied for this call. *>
+fn void cmd_set_viewport(CommandList* commands, Viewport* viewport) {
+    gpu::internal::vk::CommandRecord* record = gpu::internal::required_recording_command(commands);
+    if (viewport == null) abort("Viewport is required");
+    gpu::internal::vk::vk_cmd_set_viewport(record, viewport);
 }
 
-<* Set one dynamic scissor before or during a pass; overscan is valid.
-   Preconditions: origin and extent are nonnegative and signed-representable.
-   Always checked: token phase and required pointer.
-   @param commands : "Live recording token."
-   @param scissor : "Borrowed complete scissor state copied into the command stream."
-   @return "Success, or a recoverable command, validation, queue-support, or device fault." *>
-fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    if (scissor == null) return INVALID_ARGUMENT~;
-    return gpu::internal::vk::vk_cmd_set_scissor(record, scissor);
+<* Set a scissor on the recording thread before or during a pass, after complete graphics state.
+   Requires a live unconsumed token and readable scissor: nonnegative, signed-representable origin/extent.
+   Invalid token/phase or null scissor aborts in every build mode; overscan is valid and state is copied. *>
+fn void cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
+    gpu::internal::vk::CommandRecord* record = gpu::internal::required_recording_command(commands);
+    if (scissor == null) abort("Scissor is required");
+    gpu::internal::vk::vk_cmd_set_scissor(record, scissor);
 }
 
 <* Draw with vertex and fragment roots passed unchanged; either may be zero.

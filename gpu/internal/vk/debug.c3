@@ -444,12 +444,10 @@ fn uint report_resource_leaks(VkDeviceState* state) {
     return count;
 }
 
-fn void? vk_cmd_begin_label(CommandRecord* commands, ZString label, float[4] color) @private {
-    if (label == null) return gpu::INVALID_ARGUMENT~;
+<* Requires a resolved recording command and readable non-null label. *>
+fn void vk_cmd_begin_label(CommandRecord* commands, ZString label, float[4] color) @private {
     VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
-    if (record.state != gpu::internal::CommandState.RECORDING
-        && record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
     vk::DebugUtilsLabelEXT info = vk::debug_utils_label_ext();
     info.p_label_name = (char*)label;
@@ -457,11 +455,10 @@ fn void? vk_cmd_begin_label(CommandRecord* commands, ZString label, float[4] col
     state.device_dispatch.debug.cmd_begin_label(record.command_buffer, &info);
 }
 
-fn void? vk_cmd_end_label(CommandRecord* commands) @private {
+<* Requires a resolved recording command and matching open label. *>
+fn void vk_cmd_end_label(CommandRecord* commands) @private {
     VkDeviceState* state = commands.device_state;
     CommandRecord* record = commands;
-    if (record.state != gpu::internal::CommandState.RECORDING
-        && record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     if (!device_dispatch_supports_labels(&state.device_dispatch)) return;
     state.device_dispatch.debug.cmd_end_label(record.command_buffer);
 }
