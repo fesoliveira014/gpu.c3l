@@ -49,7 +49,6 @@ fn void capture_generated_requirements(
 
 fn gpu::Device make_ind_device() {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_indirect_test",
     };
@@ -310,7 +309,6 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
 
 fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "caller_owned_reuse_cross_family",
     };
@@ -1210,49 +1208,6 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     io::printfn("generated-work: EXERCISED");
 }
 
-fn void full_generated_draw_requires_complete_graphics_state() @test {
-    gpu::Device device = make_ind_device();
-    defer destroy_test_device(&device)!!;
-    IndDrawCtx draw = make_ind_draw_ctx(&device);
-    defer destroy_ind_draw_ctx(&device, &draw);
-    gpu::TextureHandle target = make_ind_target(&device);
-    defer gpu::destroy_texture(&device, target)!!;
-    gpu::AttachmentViewHandle view = create_test_attachment_view(
-        &device,
-        target,
-    )!!;
-    defer destroy_test_attachment_view(&device, &view)!!;
-
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator =
-        gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    record_target_to_attach(&commands, target);
-    gpu::ColorTargetDesc[1] colors = {{
-        .view     = view,
-        .load_op  = gpu::LoadOp.CLEAR,
-        .store_op = gpu::StoreOp.STORE,
-    }};
-    gpu::RenderPassDesc pass = {
-        .colors = colors[..],
-        .width  = IND_RT,
-        .height = IND_RT,
-    };
-    gpu::cmd_begin_render_pass(&commands, &pass)!!;
-    bind_test_graphics_pipeline(&commands, draw.pipeline);
-
-    gpu::GpuSpan empty;
-    assert(@catch(gpu::cmd_draw_generated(
-        commands:      &commands,
-        records:       empty,
-        count_span:    empty,
-        max_draw_count: 0,
-    )) == gpu::COMMAND_RECORDING_ERROR,
-        "FULL generated draw requires a complete graphics-state packet");
-}
-
 fn void plain_indirect_draw_from_caller_owned_span() @test {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
@@ -1750,16 +1705,6 @@ fn void indirect_argument_validation() @test {
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     gpu::cmd_set_graphics_state(&cmd, &graphics)!!;
-    gpu::GpuSpan misaligned = args_span.checked_subspan(2, 32)!!;
-    bind_test_graphics_pipeline(&cmd, ctx.pipeline);
-    fault align_fault = @catch(gpu::cmd_draw_indirect(
-        commands:      &cmd,
-        vertex_root:   test_span_address(&device, verts_span),
-        fragment_root: test_span_address(&device, frag_span),
-        args:          misaligned,
-        draw_count:    1,
-    ));
-    assert(align_fault == gpu::INVALID_ARGUMENT, "misaligned args offset faults INVALID_ARGUMENT");
 
     bind_test_graphics_pipeline(&cmd, ctx.pipeline);
     fault overrun = @catch(gpu::cmd_draw_indirect(

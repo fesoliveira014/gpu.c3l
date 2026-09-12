@@ -8,7 +8,6 @@ import std::atomic;
 
 fn gpu::Device make_unified_device(VulkanValidationCapture* capture = null) {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_unified_layouts_test",
         .debug_callback           = capture == null ? null : &capture_vulkan_validation_error,
@@ -32,7 +31,6 @@ fn gpu::TextureHandle make_unified_heap_texture(gpu::Device* device, ZString nam
 
 fn void unified_layouts_caps_and_general_rejection() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_unified_layouts_test",
     };
@@ -53,12 +51,7 @@ fn void unified_layouts_caps_and_general_rejection() @test {
         .before  = { .layout = gpu::TextureLayout.UNDEFINED },
         .after   = { .layout = gpu::TextureLayout.GENERAL, .stages = { .compute }, .access = { .write } },
     };
-    if (explicit_caps.unified_layouts) {
-        gpu::cmd_texture_barrier(&cmd, &general)!!;
-    } else {
-        assert(@catch(gpu::cmd_texture_barrier(&cmd, &general)) == gpu::INVALID_ARGUMENT,
-            "GENERAL requires a device with unified layouts");
-    }
+    if (explicit_caps.unified_layouts) gpu::cmd_texture_barrier(&cmd, &general)!!;
 
     gpu::Device unified = make_unified_device();
     defer destroy_test_device(&unified)!!;
@@ -94,7 +87,7 @@ fn void unified_barrier_lowers_to_general() @test {
         before:  gpu::sampled_at({ .fragment_shader }),
         after:   gpu::storage_at({ .compute }, { .write }),
     )!!;
-    vk::texture_barrier_with_injected_ops(vk::resolve_command(&cmd)!!, &barrier, &ops)!!;
+    vk::vk_cmd_texture_barrier_with_ops(vk::resolve_command(&cmd)!!, &barrier, &ops)!!;
     assert(capture.calls == 1
         && capture.native.old_layout == vk::ImageLayout.GENERAL
         && capture.native.new_layout == vk::ImageLayout.GENERAL,
@@ -110,7 +103,7 @@ fn void unified_barrier_lowers_to_general() @test {
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   gpu::storage_at({ .compute }, { .write }),
     )!!;
-    vk::texture_barrier_with_injected_ops(vk::resolve_command(&cmd)!!, &discard, &ops)!!;
+    vk::vk_cmd_texture_barrier_with_ops(vk::resolve_command(&cmd)!!, &discard, &ops)!!;
     assert(capture.calls == 2
         && capture.native.old_layout == vk::ImageLayout.UNDEFINED
         && capture.native.new_layout == vk::ImageLayout.GENERAL,
@@ -121,20 +114,12 @@ fn void unified_barrier_lowers_to_general() @test {
         before:  gpu::storage_at({ .compute }, { .write }),
         after:   { .layout = gpu::TextureLayout.SAMPLED, .stages = { .compute }, .access = { .read, .write } },
     )!!;
-    vk::texture_barrier_with_injected_ops(vk::resolve_command(&cmd)!!, &sampled_write, &ops)!!;
+    vk::vk_cmd_texture_barrier_with_ops(vk::resolve_command(&cmd)!!, &sampled_write, &ops)!!;
     assert(capture.calls == 3, "layout-specific access rules are lifted in the mode");
     assert(capture.native.dst_access_mask
             == ((vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT
                 | (vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_MEMORY_WRITE_BIT),
         "access follows the stated intent, not the ignored layout label");
-    gpu::TextureBarrier wrong_queue = gpu::texture_transition(
-        texture: texture,
-        before:  gpu::storage_at({ .compute }, { .write }),
-        after:   { .layout = gpu::TextureLayout.SAMPLED, .stages = { .ray_tracing }, .access = { .read } },
-    )!!;
-    assert(@catch(vk::texture_barrier_with_injected_ops(vk::resolve_command(&cmd)!!, &wrong_queue, &ops))
-        == gpu::INVALID_ARGUMENT && capture.calls == 3,
-        "queue support rules stay in the mode");
 }
 
 fn void unified_storage_write_then_sampled_read() @test {

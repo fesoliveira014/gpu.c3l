@@ -628,7 +628,6 @@ fn void? validate_texture_view_increment(
     uint pending_count,
     ZString operation,
 ) @private {
-    if (!contract_uses_full_validation(state.validation_policy)) return;
     uint capacity = (uint)state.shader_heap.descriptors.texture_cells.len;
     if (pending_count > capacity
         || owner.live_descriptor_views > capacity - pending_count) {
@@ -644,8 +643,7 @@ fn void? validate_texture_view_decrement(
     VkDeviceState* state,
     TextureSlot* owner,
 ) @private {
-    if (!contract_uses_full_validation(state.validation_policy)
-        || owner.live_descriptor_views != 0) return;
+    if (owner.live_descriptor_views != 0) return;
     return report_texture_view_owner_invariant_failure(
         state,
         "destroy_texture_view",

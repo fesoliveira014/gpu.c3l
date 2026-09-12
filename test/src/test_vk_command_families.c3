@@ -12,65 +12,7 @@ const char[*] POLICY_MATRIX_VERT_SPIRV =
 const char[*] POLICY_MATRIX_FRAG_SPIRV =
     $embed("shaders/offscreen.frag.spv");
 
-fn void direct_dispatch_rejects_render_pass_under_both_policies() @test {
-    vk::CommandRecord record = {
-        .state = gpu::internal::CommandState.RECORDING_RENDER_PASS,
-    };
-    gpu::ContractValidation[2] contracts = {
-        gpu::ContractValidation.TRUSTED,
-        gpu::ContractValidation.FULL,
-    };
-    foreach (contract : contracts) {
-        vk::DeviceValidationPolicy policy = { .contract = contract };
-        vk::CommandOps* ops = vk::select_command_ops(policy);
-        assert(@catch(ops.dispatch(&record, (gpu::GpuAddress)0, { 1, 1, 1 }))
-            == gpu::COMMAND_RECORDING_ERROR,
-            "compute dispatch rejects a render pass before pipeline lookup or native emission");
-        assert(record.state == gpu::internal::CommandState.RECORDING_RENDER_PASS);
-    }
-}
-
-fn void trace_rays_uses_policy_specific_command_entries() @test {
-    gpu::internal::vk::DeviceValidationPolicy policy;
-    gpu::internal::vk::CommandOps* trusted =
-        gpu::internal::vk::select_command_ops(policy);
-    policy.contract = gpu::ContractValidation.FULL;
-    gpu::internal::vk::CommandOps* full =
-        gpu::internal::vk::select_command_ops(policy);
-
-    assert(trusted.trace_rays != null);
-    assert(full.trace_rays != null);
-    assert((uptr)trusted.trace_rays != (uptr)full.trace_rays);
-}
-
-fn void full_invalid_barrier_is_rejected() @test {
-    PolicyDiagnosticCapture capture;
-    gpu::RuntimeDesc desc = policy_runtime_desc(
-        contract:      gpu::ContractValidation.FULL,
-        vulkan_layers: false,
-        callback:      false,
-        debug_names:   false,
-        capture:       &capture,
-    );
-    gpu::Device device = create_test_device(&desc)!!;
-    defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(
-        &device,
-        queue,
-    )!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer gpu::discard_commands(&commands)!!;
-    assert(@catch(gpu::cmd_barrier(&commands, null))
-        == gpu::INVALID_ARGUMENT,
-        "full mode rejects a null barrier");
-}
-
-fn gpu::PipelineHandle create_policy_matrix_compute_pipeline(
+fn gpu::PipelineHandle create_command_family_compute_pipeline(
     gpu::Device* device,
 ) {
     gpu::ShaderDesc shader_desc = {
@@ -83,7 +25,7 @@ fn gpu::PipelineHandle create_policy_matrix_compute_pipeline(
     return gpu::create_compute_pipeline(device, &pipeline_desc)!!;
 }
 
-fn gpu::PipelineHandle create_policy_matrix_graphics_pipeline(
+fn gpu::PipelineHandle create_command_family_graphics_pipeline(
     gpu::Device* device,
 ) {
     gpu::ShaderDesc vertex_desc = {
@@ -107,10 +49,9 @@ fn gpu::PipelineHandle create_policy_matrix_graphics_pipeline(
     return gpu::create_graphics_pipeline(device, &pipeline_desc)!!;
 }
 
-fn void trusted_generated_dispatch_with_graphics_pipeline_faults_defined() @test {
-    PolicyDiagnosticCapture capture;
-    gpu::RuntimeDesc desc = policy_runtime_desc(
-        contract:      gpu::ContractValidation.TRUSTED,
+fn void generated_dispatch_requires_native_layout() @test {
+    RuntimeDiagnosticCapture capture;
+    gpu::RuntimeDesc desc = diagnostic_runtime_desc(
         vulkan_layers: false,
         callback:      false,
         debug_names:   false,
@@ -119,16 +60,16 @@ fn void trusted_generated_dispatch_with_graphics_pipeline_faults_defined() @test
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::PipelineHandle pipeline =
-        create_policy_matrix_graphics_pipeline(&device);
+        create_command_family_graphics_pipeline(&device);
     defer gpu::destroy_pipeline(&device, pipeline)!!;
-    OwnedSpan indirect = policy_span(
+    OwnedSpan indirect = command_family_span(
         &device,
         { .graphics },
-        "trusted_generated_wrong_pipeline",
+        "missing_generated_layout",
     );
     defer free_owned_span(&device, &indirect)!!;
 
-    vk::VkDeviceState* state = policy_device_state(&device);
+    vk::VkDeviceState* state = diagnostic_device_state(&device);
     bool generated_work_enabled = state.generated_work.enabled;
     uint generated_work_limit = state.caps.max_generated_work_count;
     state.generated_work.enabled = true;
@@ -158,12 +99,12 @@ fn void trusted_generated_dispatch_with_graphics_pipeline_faults_defined() @test
         max_dispatch_count: 1,
     ));
     assert(wrong_pipeline == gpu::BACKEND_ERROR,
-        "TRUSTED generated dispatch keeps null native lowering defined");
+        "Generated dispatch rejects a missing native layout");
     assert(commands.is_valid(),
         "rejected generated dispatch preserves the recording token");
 }
 
-fn gpu::TextureHandle create_policy_matrix_transfer_texture(
+fn gpu::TextureHandle create_command_family_transfer_texture(
     gpu::Device* device,
 ) {
     gpu::TextureDesc desc = {
@@ -176,7 +117,7 @@ fn gpu::TextureHandle create_policy_matrix_transfer_texture(
     return gpu::create_texture(device, &desc)!!;
 }
 
-fn gpu::TextureHandle create_policy_matrix_target(gpu::Device* device) {
+fn gpu::TextureHandle create_command_family_target(gpu::Device* device) {
     gpu::TextureDesc desc = {
         .width  = 8,
         .height = 8,
@@ -187,7 +128,7 @@ fn gpu::TextureHandle create_policy_matrix_target(gpu::Device* device) {
     return gpu::create_texture(device, &desc)!!;
 }
 
-fn void exercise_policy_matrix_transfer(
+fn void exercise_command_family_transfer(
     gpu::CommandAllocator* allocator,
     OwnedSpan* source,
     OwnedSpan* destination,
@@ -231,7 +172,7 @@ fn void exercise_policy_matrix_transfer(
     gpu::discard_commands(&commands)!!;
 }
 
-fn void exercise_policy_matrix_synchronization(
+fn void exercise_command_family_synchronization(
     gpu::CommandAllocator* allocator,
     gpu::TextureHandle texture,
 ) {
@@ -256,7 +197,7 @@ fn void exercise_policy_matrix_synchronization(
     gpu::discard_commands(&commands)!!;
 }
 
-fn void exercise_policy_matrix_compute(
+fn void exercise_command_family_compute(
     gpu::CommandAllocator* allocator,
     vk::VkDeviceState* state,
     gpu::PipelineHandle pipeline,
@@ -287,7 +228,7 @@ fn void exercise_policy_matrix_compute(
     gpu::discard_commands(&commands)!!;
 }
 
-fn void exercise_policy_matrix_render(
+fn void exercise_command_family_render(
     gpu::CommandAllocator* allocator,
     vk::VkDeviceState* state,
     gpu::PipelineHandle pipeline,
@@ -395,22 +336,20 @@ fn void exercise_policy_matrix_render(
     gpu::discard_commands(&commands)!!;
 }
 
-fn void exercise_policy_matrix_labels(
+fn void exercise_command_family_labels(
     gpu::CommandAllocator* allocator,
 ) {
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
-    gpu::cmd_begin_label(&commands, "policy_matrix")!!;
+    gpu::cmd_begin_label(&commands, "command_family")!!;
     gpu::cmd_end_label(&commands)!!;
     gpu::discard_commands(&commands)!!;
 }
 
 fn void exercise_command_families(
-    gpu::ContractValidation contract,
     bool vulkan_layers,
 ) {
-    PolicyDiagnosticCapture capture;
-    gpu::RuntimeDesc desc = policy_runtime_desc(
-        contract:      contract,
+    RuntimeDiagnosticCapture capture;
+    gpu::RuntimeDesc desc = diagnostic_runtime_desc(
         vulkan_layers: vulkan_layers,
         callback:      true,
         debug_names:   true,
@@ -424,42 +363,42 @@ fn void exercise_command_families(
         queue,
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
-    vk::VkDeviceState* state = policy_device_state(&device);
+    vk::VkDeviceState* state = diagnostic_device_state(&device);
 
     gpu::PipelineHandle compute =
-        create_policy_matrix_compute_pipeline(&device);
+        create_command_family_compute_pipeline(&device);
     defer gpu::destroy_pipeline(&device, compute)!!;
     gpu::PipelineHandle graphics =
-        create_policy_matrix_graphics_pipeline(&device);
+        create_command_family_graphics_pipeline(&device);
     defer gpu::destroy_pipeline(&device, graphics)!!;
-    OwnedSpan source = policy_span(
+    OwnedSpan source = command_family_span(
         &device,
         { .graphics },
-        "policy_matrix_source",
+        "command_family_source",
     );
     defer free_owned_span(&device, &source)!!;
-    OwnedSpan destination = policy_span(
+    OwnedSpan destination = command_family_span(
         &device,
         { .graphics },
-        "policy_matrix_destination",
+        "command_family_destination",
     );
     defer free_owned_span(&device, &destination)!!;
-    OwnedSpan indirect = policy_span(
+    OwnedSpan indirect = command_family_span(
         &device,
         { .graphics },
-        "policy_matrix_indirect",
+        "command_family_indirect",
     );
     defer free_owned_span(&device, &indirect)!!;
-    OwnedSpan indices = policy_span(
+    OwnedSpan indices = command_family_span(
         &device,
         { .graphics },
-        "policy_matrix_indices",
+        "command_family_indices",
     );
     defer free_owned_span(&device, &indices)!!;
     gpu::TextureHandle transfer_texture =
-        create_policy_matrix_transfer_texture(&device);
+        create_command_family_transfer_texture(&device);
     defer gpu::destroy_texture(&device, transfer_texture)!!;
-    gpu::TextureHandle target = create_policy_matrix_target(&device);
+    gpu::TextureHandle target = create_command_family_target(&device);
     defer gpu::destroy_texture(&device, target)!!;
     gpu::AttachmentViewHandle target_view = create_test_attachment_view(
         &device,
@@ -478,20 +417,20 @@ fn void exercise_command_families(
     };
 
     capture.calls = 0;
-    exercise_policy_matrix_transfer(
+    exercise_command_family_transfer(
         allocator:   &allocator,
         source:      &source,
         destination: &destination,
         texture:     transfer_texture,
     );
-    exercise_policy_matrix_synchronization(&allocator, transfer_texture);
-    exercise_policy_matrix_compute(
+    exercise_command_family_synchronization(&allocator, transfer_texture);
+    exercise_command_family_compute(
         allocator: &allocator,
         state:     state,
         pipeline:  compute,
         indirect:  &indirect,
     );
-    exercise_policy_matrix_render(
+    exercise_command_family_render(
         allocator: &allocator,
         state:     state,
         pipeline:  graphics,
@@ -499,20 +438,16 @@ fn void exercise_command_families(
         indices:   &indices,
         indirect:  &indirect,
     );
-    exercise_policy_matrix_labels(&allocator);
+    exercise_command_family_labels(&allocator);
     assert(capture.calls == 0,
         "recorded command families raise no recording diagnostic");
 }
 
-fn void command_families_run_under_each_contract_and_layer_mode() @test {
-    gpu::ContractValidation[2] contracts = {
-        gpu::ContractValidation.TRUSTED,
-        gpu::ContractValidation.FULL,
-    };
+fn void command_families_run_with_and_without_layers() @test {
     bool[2] layer_values = { false, true };
-    foreach (contract : contracts) {
+    {
         foreach (vulkan_layers : layer_values) {
-            exercise_command_families(contract, vulkan_layers);
+            exercise_command_families(vulkan_layers);
         }
     }
 }

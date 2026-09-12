@@ -8,16 +8,13 @@ import std::atomic;
 
 struct PreparedRenderPass {
     AttachmentViewSlot*[gpu::MAX_COLOR_ATTACHMENTS] color_slots;
-    AttachmentViewSlot*[gpu::MAX_COLOR_ATTACHMENTS] resolve_slots;
     vk::RenderingAttachmentInfo[gpu::MAX_COLOR_ATTACHMENTS] attachments;
     AttachmentViewSlot*       depth_view;
     vk::RenderingAttachmentInfo depth_attachment;
     vk::RenderingAttachmentInfo stencil_attachment;
-    RenderCompatibility       compatibility;
     uint                      width;
     uint                      height;
     uint                      color_count;
-    bool                      has_depth;
     bool                      has_depth_aspect;
     bool                      has_stencil_aspect;
 }
@@ -110,11 +107,6 @@ struct PreparedMeshIndirectDraw {
     gpu::GpuAddress fragment_root;
     uint            draw_count;
     bool            counted;
-}
-
-struct DynamicStateRejection {
-    ZString field;
-    ZString invariant;
 }
 
 fn vk::AttachmentLoadOp load_op_to_vk(gpu::LoadOp op) @private {
@@ -297,19 +289,11 @@ fn PreparedRenderPass? lower_render_pass(
         .width       = desc.width,
         .height      = desc.height,
         .color_count = (uint)desc.colors.len,
-        .has_depth   = desc.depth != null,
     };
-    pass.compatibility.color_count = pass.color_count;
-    bool samples_initialized;
     foreach (i, &target : desc.colors) {
         AttachmentViewSlot* view = state.attachment_views.get(target.view)!;
         if (view.native == null) return gpu::INVALID_RESOURCE_STATE~;
         pass.color_slots[i] = view;
-        pass.compatibility.color_formats[i] = view.format;
-        if (!samples_initialized) {
-            pass.compatibility.sample_count = view.sample_count;
-            samples_initialized = true;
-        }
         vk::RenderingAttachmentInfo* attachment = &pass.attachments[i];
         *attachment = vk::rendering_attachment_info();
         attachment.image_view = view.native;
@@ -330,7 +314,6 @@ fn PreparedRenderPass? lower_render_pass(
                 target.resolve_view,
             )!;
             if (resolve.native == null) return gpu::INVALID_RESOURCE_STATE~;
-            pass.resolve_slots[i] = resolve;
             attachment.resolve_mode = color_resolve_mode(view.format);
             attachment.resolve_image_view = resolve.native;
             attachment.resolve_image_layout = texture_layout_to_vk(
@@ -347,10 +330,6 @@ fn PreparedRenderPass? lower_render_pass(
         )!;
         if (depth.native == null) return gpu::INVALID_RESOURCE_STATE~;
         pass.depth_view = depth;
-        pass.compatibility.depth_format = depth.format;
-        if (!samples_initialized) {
-            pass.compatibility.sample_count = depth.sample_count;
-        }
         vk::ImageLayout layout = texture_layout_to_vk(
             gpu::TextureLayout.DEPTH_ATTACHMENT,
             depth.format,
@@ -390,130 +369,6 @@ fn PreparedRenderPass? lower_render_pass(
     return pass;
 }
 
-fn void? validate_render_pass_desc_fields(
-    VkDeviceState* state,
-    gpu::RenderPassDesc* desc,
-) {
-    if (!gpu::internal::render_pass_desc_valid(desc)
-        || desc.colors.len > state.caps.max_color_attachments) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-}
-
-
-fn PreparedRenderPass? full_prepare_render_pass(
-    CommandRecord* commands,
-    gpu::RenderPassDesc* desc,
-    ZString operation,
-) {
-    if (commands == null || desc == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (record == null || record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = commands.device_state;
-    validate_render_pass_desc_fields(state, desc)!;
-    PreparedRenderPass pass = lower_render_pass(commands, desc)!;
-
-    foreach (i, &target : desc.colors) {
-        AttachmentViewSlot* view = pass.color_slots[i];
-        TextureSlot* texture = state.textures.get(view.texture)!;
-        validate_texture_queue_access(
-            state:       state,
-            queue_roles: record.queue.roles,
-            slot:        texture,
-            handle:      view.texture,
-            operation:   operation,
-        )!;
-        if (!texture.usage.color_attach) {
-            return report_contract_failure(
-                state:               state,
-                operation:           operation,
-                public_fault:        gpu::INVALID_ARGUMENT,
-                resource_kind:       gpu::DebugResourceKind.TEXTURE,
-                has_public_identity: true,
-                index:               view.texture.index,
-                generation:          view.texture.generation,
-                debug_name:          slot_name(&texture.debug_name[0]),
-                rejected_field:      "TextureUsage.color_attach",
-                invariant:           "color attachment must include color_attach usage",
-                backend_text:        null,
-            )~;
-        }
-        if (pass.width > view.width || pass.height > view.height) {
-            ZString rejected_field = pass.width > view.width
-                ? "RenderPassDesc.width"
-                : "RenderPassDesc.height";
-            return report_contract_failure(
-                state:               state,
-                operation:           operation,
-                public_fault:        gpu::INVALID_ARGUMENT,
-                resource_kind:       gpu::DebugResourceKind.TEXTURE,
-                has_public_identity: true,
-                index:               view.texture.index,
-                generation:          view.texture.generation,
-                debug_name:          slot_name(&texture.debug_name[0]),
-                rejected_field:      rejected_field,
-                invariant:           "render area must fit every color attachment mip",
-                backend_text:        null,
-            )~;
-        }
-        if (i > 0
-            && view.sample_count != pass.compatibility.sample_count) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-
-        AttachmentViewSlot* resolve = pass.resolve_slots[i];
-        if (resolve != null) {
-            TextureSlot* resolve_texture = state.textures.get(
-                resolve.texture,
-            )!;
-            validate_texture_queue_access(
-                state:       state,
-                queue_roles: record.queue.roles,
-                slot:        resolve_texture,
-                handle:      resolve.texture,
-                operation:   operation,
-            )!;
-            if (view.sample_count == gpu::SampleCount.ONE
-                || !resolve_texture.usage.color_attach
-                || resolve.sample_count != gpu::SampleCount.ONE
-                || resolve.format != view.format
-                || pass.width > resolve.width
-                || pass.height > resolve.height) {
-                return gpu::INVALID_ARGUMENT~;
-            }
-        }
-    }
-
-    if (pass.has_depth) {
-        AttachmentViewSlot* depth = pass.depth_view;
-        TextureSlot* depth_texture = state.textures.get(depth.texture)!;
-        validate_texture_queue_access(
-            state:       state,
-            queue_roles: record.queue.roles,
-            slot:        depth_texture,
-            handle:      depth.texture,
-            operation:   operation,
-        )!;
-        if (!depth_texture.usage.depth_attach
-            || pass.width > depth.width
-            || pass.height > depth.height) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-        if (pass.color_count > 0
-            && depth.sample_count != pass.compatibility.sample_count) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-    }
-    validate_active_pipeline_render_compatibility(
-        state,
-        record,
-        &pass.compatibility,
-    )!;
-    return pass;
-}
-
 fn void record_render_pass(
     CommandRecord* commands,
     PreparedRenderPass* pass,
@@ -537,221 +392,15 @@ fn void record_render_pass(
         rendering.p_stencil_attachment = &pass.stencil_attachment;
     }
     vk::cmd_begin_rendering(cb, &rendering);
-    record.active_render = pass.compatibility;
     record.state = gpu::internal::CommandState.RECORDING_RENDER_PASS;
 }
 
-fn void? trusted_begin_render_pass(
+fn void? vk_cmd_begin_render_pass(
     CommandRecord* commands,
     gpu::RenderPassDesc* desc,
 ) {
     PreparedRenderPass pass = lower_render_pass(commands, desc)!;
     record_render_pass(commands, &pass);
-}
-
-fn void? full_begin_render_pass(
-    CommandRecord* commands,
-    gpu::RenderPassDesc* desc,
-) {
-    PreparedRenderPass pass = full_prepare_render_pass(
-        commands,
-        desc,
-        "cmd_begin_render_pass",
-    )!;
-
-    record_render_pass(commands, &pass);
-}
-
-fn fault report_dynamic_state_rejection(
-    VkDeviceState* state,
-    ZString operation,
-    DynamicStateRejection rejection,
-) @private {
-    return report_contract_failure(
-        state:               state,
-        operation:           operation,
-        public_fault:        gpu::INVALID_ARGUMENT,
-        resource_kind:       gpu::DebugResourceKind.NONE,
-        has_public_identity: false,
-        index:               0,
-        generation:          0,
-        debug_name:          null,
-        rejected_field:      rejection.field,
-        invariant:           rejection.invariant,
-        backend_text:        null,
-    );
-}
-
-fn void? reject_dynamic_state(
-    VkDeviceState* state,
-    ZString operation,
-    ZString field,
-    ZString invariant,
-) @private {
-    DynamicStateRejection rejection = {
-        .field     = field,
-        .invariant = invariant,
-    };
-    return report_dynamic_state_rejection(state, operation, rejection)~;
-}
-
-fn void? validate_viewport(
-    VkDeviceState* state,
-    ZString operation,
-    gpu::Viewport* viewport,
-) @private {
-    if (!math::is_finite(viewport.x)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.x",
-            invariant: "coordinate must be finite",
-        );
-    }
-    if (!math::is_finite(viewport.y)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.y",
-            invariant: "coordinate must be finite",
-        );
-    }
-    if (!math::is_finite(viewport.width)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.width",
-            invariant: "dimension must be finite",
-        );
-    }
-    if (!math::is_finite(viewport.height)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.height",
-            invariant: "dimension must be finite",
-        );
-    }
-    if (!math::is_finite(viewport.min_depth)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.min_depth",
-            invariant: "depth endpoint must be finite and in [0, 1]",
-        );
-    }
-    if (!math::is_finite(viewport.max_depth)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.max_depth",
-            invariant: "depth endpoint must be finite and in [0, 1]",
-        );
-    }
-    if (viewport.width <= 0.0f) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.width",
-            invariant: "width must be positive",
-        );
-    }
-    if (viewport.height == 0.0f) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.height",
-            invariant: "height must be nonzero by library policy",
-        );
-    }
-    if (viewport.width > (float)state.viewport_limits.max_width) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.width",
-            invariant: "width must not exceed the selected device maximum",
-        );
-    }
-    if (viewport.height > (float)state.viewport_limits.max_height
-        || viewport.height < -(float)state.viewport_limits.max_height) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.height",
-            invariant: "absolute height must not exceed the selected device maximum",
-        );
-    }
-
-    float right = viewport.x + viewport.width;
-    float end_y = viewport.y + viewport.height;
-    if (!math::is_finite(right)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.x + Viewport.width",
-            invariant: "computed endpoint must be finite",
-        );
-    }
-    if (!math::is_finite(end_y)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.y + Viewport.height",
-            invariant: "computed endpoint must be finite",
-        );
-    }
-    if (viewport.x < state.viewport_limits.min_bound
-        || viewport.x > state.viewport_limits.max_bound) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.x",
-            invariant: "coordinate must fit the selected device viewport bounds",
-        );
-    }
-    if (right < state.viewport_limits.min_bound
-        || right > state.viewport_limits.max_bound) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.x + Viewport.width",
-            invariant: "endpoint must fit the selected device viewport bounds",
-        );
-    }
-    if (viewport.y < state.viewport_limits.min_bound
-        || viewport.y > state.viewport_limits.max_bound) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.y",
-            invariant: "coordinate must fit the selected device viewport bounds",
-        );
-    }
-    if (end_y < state.viewport_limits.min_bound
-        || end_y > state.viewport_limits.max_bound) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.y + Viewport.height",
-            invariant: "endpoint must fit the selected device viewport bounds",
-        );
-    }
-    if (viewport.min_depth < 0.0f || viewport.min_depth > 1.0f) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.min_depth",
-            invariant: "depth endpoint must be in [0, 1]",
-        );
-    }
-    if (viewport.max_depth < 0.0f || viewport.max_depth > 1.0f) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "Viewport.max_depth",
-            invariant: "depth endpoint must be in [0, 1]",
-        );
-    }
 }
 
 fn vk::Viewport lower_viewport(gpu::Viewport* viewport) {
@@ -777,11 +426,7 @@ fn bool graphics_state_settable(gpu::internal::CommandState state) =>
     state == gpu::internal::CommandState.RECORDING
         || state == gpu::internal::CommandState.RECORDING_RENDER_PASS;
 
-fn void? validate_graphics_state_queue(CommandRecord* record) @private {
-    if (!record.queue.roles.graphics) return gpu::INVALID_ARGUMENT~;
-}
-
-fn void? trusted_set_viewport(
+fn void? vk_cmd_set_viewport(
     CommandRecord* commands,
     gpu::Viewport* viewport,
 ) {
@@ -794,63 +439,6 @@ fn void? trusted_set_viewport(
     emit_viewport(commands, &native);
 }
 
-fn void? full_set_viewport(
-    CommandRecord* commands,
-    gpu::Viewport* viewport,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    if (!graphics_state_settable(record.state)) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    validate_graphics_state_queue(record)!;
-    validate_viewport(state, "cmd_set_viewport", viewport)!;
-    vk::Viewport native = lower_viewport(viewport);
-    emit_viewport(commands, &native);
-}
-
-fn void? validate_scissor(
-    VkDeviceState* state,
-    ZString operation,
-    gpu::ScissorRect* scissor,
-) @private {
-    if (scissor.x < 0 || scissor.y < 0
-        || scissor.width < 0 || scissor.height < 0) {
-        ZString field = scissor.x < 0
-            ? "ScissorRect.x"
-            : scissor.y < 0
-                ? "ScissorRect.y"
-                : scissor.width < 0
-                    ? "ScissorRect.width"
-                    : "ScissorRect.height";
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     field,
-            invariant: "scissor fields must be nonnegative",
-        );
-    }
-    long right = (long)scissor.x + (long)scissor.width;
-    long bottom = (long)scissor.y + (long)scissor.height;
-    if (right > int::max) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "ScissorRect.x + ScissorRect.width",
-            invariant: "endpoint must fit signed native coordinate range",
-        );
-    }
-    if (bottom > int::max) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "ScissorRect.y + ScissorRect.height",
-            invariant: "endpoint must fit signed native coordinate range",
-        );
-    }
-}
-
 fn vk::Rect2D lower_scissor(gpu::ScissorRect* scissor) {
     return {
         .offset = { .x = scissor.x, .y = scissor.y },
@@ -861,169 +449,10 @@ fn vk::Rect2D lower_scissor(gpu::ScissorRect* scissor) {
     };
 }
 
-fn void? validate_raster_state(
-    VkDeviceState* state,
-    ZString operation,
-    gpu::DynamicRasterState* raster,
-) @private {
-    if (raster == null) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "GraphicsState.raster",
-            invariant: "raster state must not be null",
-        );
-    }
-    if (!primitive_topology_valid(raster.topology)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "GraphicsState.raster.topology",
-            invariant: "topology must be defined",
-        );
-    }
-    if (!cull_mode_valid(raster.cull_mode)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "GraphicsState.raster.cull_mode",
-            invariant: "cull mode must be defined",
-        );
-    }
-    if (!front_face_valid(raster.front_face)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "GraphicsState.raster.front_face",
-            invariant: "front face must be defined",
-        );
-    }
-    if (raster.depth_bias_enable
-        && !math::is_finite(raster.depth_bias_constant)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "GraphicsState.raster.depth_bias_constant",
-            invariant: "enabled depth bias value must be finite",
-        );
-    }
-    if (raster.depth_bias_enable
-        && !math::is_finite(raster.depth_bias_slope)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "GraphicsState.raster.depth_bias_slope",
-            invariant: "enabled depth bias value must be finite",
-        );
-    }
-    if (raster.depth_bias_enable
-        && !math::is_finite(raster.depth_bias_clamp)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "GraphicsState.raster.depth_bias_clamp",
-            invariant: "enabled depth bias value must be finite",
-        );
-    }
-}
-
-fn void? validate_depth_state(
-    VkDeviceState* state,
-    ZString operation,
-    gpu::DepthState* depth,
-) @private {
-    if (depth == null) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "GraphicsState.depth",
-            invariant: "depth state must not be null",
-        );
-    }
-    if (!compare_op_valid(depth.compare)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     "GraphicsState.depth.compare",
-            invariant: "compare operation must be defined",
-        );
-    }
-}
-
-fn bool stencil_face_valid(gpu::StencilFaceState* face) @private {
-    return compare_op_valid(face.compare)
-        && stencil_op_valid(face.fail)
-        && stencil_op_valid(face.pass)
-        && stencil_op_valid(face.depth_fail);
-}
-
-fn bool stencil_state_valid(gpu::StencilState* stencil) @private {
-    return !stencil.test_enable
-        || (stencil_face_valid(&stencil.front) && stencil_face_valid(&stencil.back));
-}
-
-fn void? validate_stencil_face(
-    VkDeviceState* state,
-    ZString operation,
-    gpu::StencilFaceState* face,
-    ZString field,
-) @private {
-    if (!stencil_face_valid(face)) {
-        return reject_dynamic_state(
-            state:     state,
-            operation: operation,
-            field:     field,
-            invariant: "stencil compare and operations must be defined",
-        );
-    }
-}
-
-fn void? validate_stencil_state(
-    VkDeviceState* state,
-    ZString operation,
-    gpu::StencilState* stencil,
-) @private {
-    if (!stencil.test_enable) return;
-    validate_stencil_face(
-        state:     state,
-        operation: operation,
-        face:      &stencil.front,
-        field:     "GraphicsState.stencil.front",
-    )!;
-    validate_stencil_face(
-        state:     state,
-        operation: operation,
-        face:      &stencil.back,
-        field:     "GraphicsState.stencil.back",
-    )!;
-}
-
-<* FULL only: an enabled stencil test on a pipeline without a stencil aspect
-   is legal and does nothing. *>
-fn void note_stencil_without_aspect(
-    VkDeviceState* state,
-    CommandRecord* record,
-    ZString operation,
-    gpu::StencilState* stencil,
-) @private {
-    if (!stencil.test_enable) return;
-    BoundPipeline*? bound = borrow_bound_pipeline(record);
-    if (catch err = bound) return;
-    BoundPipeline* pipeline = bound;
-    if (gpu::internal::format_has_stencil(pipeline.render.depth_format)) return;
-    report_state_diagnostic(
-        state:          state,
-        category:       { .performance },
-        operation:      operation,
-        rejected_field: "GraphicsState.stencil.test_enable",
-        invariant:      "stencil test has no effect without a stencil aspect in the bound pipeline",
-    );
-}
-
 fn LoweredGraphicsState? lower_graphics_state(
     gpu::GraphicsState* state,
 ) {
-    if (state == null || !stencil_state_valid(&state.stencil)) return gpu::INVALID_ARGUMENT~;
+    if (state == null) return gpu::INVALID_ARGUMENT~;
     return {
         .viewport = lower_viewport(&state.viewport),
         .scissor  = lower_scissor(&state.scissor),
@@ -1031,50 +460,6 @@ fn LoweredGraphicsState? lower_graphics_state(
         .depth    = state.depth,
         .stencil  = state.stencil,
         .color    = lower_color_state(&state.color)!,
-    };
-}
-
-fn LoweredGraphicsState? full_prepare_graphics_state(
-    VkDeviceState* device,
-    CommandRecord* record,
-    ZString operation,
-    gpu::GraphicsState* state,
-) @private {
-    if (state == null) {
-        DynamicStateRejection rejection = {
-            .field     = "GraphicsState",
-            .invariant = "graphics state must not be null",
-        };
-        return report_dynamic_state_rejection(
-            device,
-            operation,
-            rejection,
-        )~;
-    }
-    validate_viewport(device, operation, &state.viewport)!;
-    validate_scissor(device, operation, &state.scissor)!;
-    validate_raster_state(device, operation, &state.raster)!;
-    validate_depth_state(device, operation, &state.depth)!;
-    validate_stencil_state(device, operation, &state.stencil)!;
-    note_stencil_without_aspect(
-        state:     device,
-        record:    record,
-        operation: operation,
-        stencil:   &state.stencil,
-    );
-    LoweredColorState color = full_prepare_color_state(
-        state:     device,
-        record:    record,
-        color:     &state.color,
-        operation: operation,
-    )!;
-    return {
-        .viewport = lower_viewport(&state.viewport),
-        .scissor  = lower_scissor(&state.scissor),
-        .raster   = state.raster,
-        .depth    = state.depth,
-        .stencil  = state.stencil,
-        .color    = color,
     };
 }
 
@@ -1096,29 +481,6 @@ fn void emit_graphics_state(
     emit_depth_state(commands, &state.depth);
     emit_stencil_state(commands, &state.stencil);
     emit_color_state(commands, &state.color);
-}
-
-fn ColorCompatibility color_compatibility(
-    RenderCompatibility* render,
-) @private {
-    ColorCompatibility compatibility = {
-        .count = render.color_count,
-    };
-    for (uint i = 0; i < render.color_count; i++) {
-        compatibility.formats[i] = render.color_formats[i];
-    }
-    return compatibility;
-}
-
-fn bool color_compatibility_matches(
-    ColorCompatibility* color,
-    RenderCompatibility* render,
-) @private {
-    if (color.count != render.color_count) return false;
-    for (uint i = 0; i < color.count; i++) {
-        if (color.formats[i] != render.color_formats[i]) return false;
-    }
-    return true;
 }
 
 fn LoweredColorState? lower_color_state(
@@ -1196,107 +558,7 @@ fn void emit_color_state(
     );
 }
 
-fn fault color_state_rejection(
-    VkDeviceState* state,
-    ZString operation,
-    ZString field,
-    ZString invariant,
-) @private {
-    DynamicStateRejection rejection = {
-        .field     = field,
-        .invariant = invariant,
-    };
-    return report_dynamic_state_rejection(
-        state,
-        operation,
-        rejection,
-    );
-}
-
-fn LoweredColorState? full_prepare_color_state(
-    VkDeviceState* state,
-    CommandRecord* record,
-    gpu::ColorState* color,
-    ZString operation,
-) @private {
-    if (!record.logical_pipeline.handle.is_valid()) {
-        return report_contract_failure(
-            state:               state,
-            operation:           operation,
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.PIPELINE,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "pipeline",
-            invariant:           "the required pipeline bind point must be active",
-            backend_text:        null,
-        )~;
-    }
-    BoundPipeline* pipeline = active_bound_pipeline(
-        state:         state,
-        record:        record,
-        expected_kind: PipelineKind.GRAPHICS,
-        operation:     operation,
-        any_raster:    true,
-    )!;
-    if (color.targets.len != pipeline.render.color_count) {
-        return color_state_rejection(
-            state:     state,
-            operation: operation,
-            field:     "GraphicsState.color.targets",
-            invariant: "target count must match the selected graphics pipeline",
-        )~;
-    }
-    if (record.state
-            == gpu::internal::CommandState.RECORDING_RENDER_PASS) {
-        if (catch compatibility_fault =
-            validate_pipeline_render_compatibility(
-                pipeline,
-                &record.active_render,
-            )) {
-            return color_state_rejection(
-                state:     state,
-                operation: operation,
-                field:     "pipeline",
-                invariant: "selected pipeline formats must match the active render pass",
-            )~;
-        }
-    }
-    foreach (i, &target : color.targets) {
-        if (!blend_state_valid(&target.blend)) {
-            return color_state_rejection(
-                state:     state,
-                operation: operation,
-                field:     "GraphicsState.color.targets.blend",
-                invariant: "enabled blend factors and operations must be defined",
-            )~;
-        }
-        if (!color_write_mask_valid(target.write_mask)) {
-            return color_state_rejection(
-                state:     state,
-                operation: operation,
-                field:     "GraphicsState.color.targets.write_mask",
-                invariant: "write mask may contain only RGBA channel bits",
-            )~;
-        }
-        if (target.blend.enable
-            && color_format_is_integer(
-                pipeline.render.color_formats[i],
-            )) {
-            return color_state_rejection(
-                state:     state,
-                operation: operation,
-                field:     "GraphicsState.color.targets.blend.enable",
-                invariant: "integer color targets do not support blending",
-            )~;
-        }
-    }
-    return lower_color_state(color);
-}
-
-fn void? trusted_set_graphics_state(
+fn void? vk_cmd_set_graphics_state(
     CommandRecord* commands,
     gpu::GraphicsState* state,
 ) {
@@ -1307,33 +569,10 @@ fn void? trusted_set_graphics_state(
     }
     LoweredGraphicsState graphics = lower_graphics_state(state)!;
     emit_graphics_state(commands, &graphics);
-}
-
-fn void? full_set_graphics_state(
-    CommandRecord* commands,
-    gpu::GraphicsState* state,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    VkDeviceState* device = commands.device_state;
-    CommandRecord* record = commands;
-    if (!graphics_state_settable(record.state)) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    validate_graphics_state_queue(record)!;
-    LoweredGraphicsState graphics = full_prepare_graphics_state(
-        device:    device,
-        record:    record,
-        operation: "cmd_set_graphics_state",
-        state:     state,
-    )!;
-    emit_graphics_state(commands, &graphics);
     record.graphics_state_initialized = true;
-    record.color_state =
-        color_compatibility(&record.logical_pipeline.render);
-    record.color_state_initialized = true;
 }
 
-fn void? trusted_set_scissor(
+fn void? vk_cmd_set_scissor(
     CommandRecord* commands,
     gpu::ScissorRect* scissor,
 ) {
@@ -1346,62 +585,11 @@ fn void? trusted_set_scissor(
     emit_scissor(commands, &native);
 }
 
-fn void? full_set_scissor(
-    CommandRecord* commands,
-    gpu::ScissorRect* scissor,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    if (!graphics_state_settable(record.state)) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    validate_graphics_state_queue(record)!;
-    validate_scissor(state, "cmd_set_scissor", scissor)!;
-    vk::Rect2D native = lower_scissor(scissor);
-    emit_scissor(commands, &native);
-}
-
 fn void? vk_cmd_end_render_pass(CommandRecord* commands) @private {
     CommandRecord* record = commands;
     if (record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) return gpu::COMMAND_RECORDING_ERROR~;
     vk::cmd_end_rendering(record.command_buffer);
-    record.active_render = {};
     record.state = gpu::internal::CommandState.RECORDING;
-}
-
-fn void? validate_color_execution_state(
-    CommandRecord* record,
-    BoundPipeline* pipeline,
-) @private {
-    if (pipeline.render.color_count == 0) return;
-    if (!record.color_state_initialized
-        || !color_compatibility_matches(
-            &record.color_state,
-            &pipeline.render,
-        )) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-}
-
-fn BoundPipeline*? validate_graphics_execution_state(
-    VkDeviceState* state,
-    CommandRecord* record,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    ZString operation,
-) @private {
-    BoundPipeline* pipeline = active_bound_pipeline(
-        state:         state,
-        record:        record,
-        expected_kind: PipelineKind.GRAPHICS,
-        operation:     operation,
-    )!;
-    if (!record.graphics_state_initialized) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    validate_color_execution_state(record, pipeline)!;
-    return pipeline;
 }
 
 fn void push_graphics_roots(
@@ -1453,7 +641,7 @@ fn void record_draw(
     );
 }
 
-fn void? trusted_draw(
+fn void? vk_cmd_draw(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -1464,43 +652,13 @@ fn void? trusted_draw(
     if (record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    BoundPipeline* pipeline = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!;
+    BoundPipeline* pipeline = borrow_bound_pipeline(record)!;
     record_draw(
         commands:      commands,
         pipeline:      pipeline,
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
         vertex_count:  vertex_count,
-        instance_count: instance_count,
-    );
-}
-
-fn void? full_draw(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    uint vertex_count,
-    uint instance_count,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (record == null || record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = commands.device_state;
-    BoundPipeline* pipeline = validate_graphics_execution_state(
-        state:         state,
-        record:        record,
-        vertex_root:   vertex_root,
-        fragment_root: fragment_root,
-        operation:     "cmd_draw",
-    )!;
-    record_draw(
-        commands:       commands,
-        pipeline:       pipeline,
-        vertex_root:    vertex_root,
-        fragment_root:  fragment_root,
-        vertex_count:   vertex_count,
         instance_count: instance_count,
     );
 }
@@ -1520,16 +678,15 @@ fn PreparedIndexedDraw? lower_indexed_draw(
     }
     VkDeviceState* state = commands.device_state;
     usz required = gpu::internal::indirect_argument_bytes(
-        argument_size: trusted_index_element_size(index_type),
+        argument_size: index_element_bytes(index_type),
         count:         index_count,
         max_count:     uint::max,
     )!;
     return {
-        .pipeline      = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
-        .index         = lower_index_span(
+        .pipeline      = borrow_bound_pipeline(record)!,
+        .index         = resolve_span_slot(
             state:      state,
             span:       &index_span,
-            index_type: index_type,
             required:   required,
         )!,
         .vertex_root   = vertex_root,
@@ -1537,46 +694,6 @@ fn PreparedIndexedDraw? lower_indexed_draw(
         .index_count   = index_count,
         .instance_count = instance_count,
         .index_type    = index_type,
-    };
-}
-
-fn PreparedIndexedDraw? full_prepare_indexed_draw(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan index_span,
-    uint index_count,
-    uint instance_count,
-    gpu::IndexType index_type,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (record == null || record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = commands.device_state;
-    usz index_size = index_element_size(index_type)!;
-    return {
-        .pipeline = validate_graphics_execution_state(
-            state:         state,
-            record:        record,
-            vertex_root:   vertex_root,
-            fragment_root: fragment_root,
-            operation:     "cmd_draw_indexed",
-        )!,
-        .index = validate_and_lower_index_span(
-            state:      state,
-            record:     record,
-            span:       &index_span,
-            index_type: index_type,
-            required:   (usz)index_count * index_size,
-            operation:  "cmd_draw_indexed",
-        )!,
-        .vertex_root    = vertex_root,
-        .fragment_root  = fragment_root,
-        .index_count    = index_count,
-        .instance_count = instance_count,
-        .index_type     = index_type,
     };
 }
 
@@ -1606,7 +723,7 @@ fn void record_indexed_draw(
     );
 }
 
-fn void? trusted_draw_indexed(
+fn void? vk_cmd_draw_indexed(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -1627,28 +744,6 @@ fn void? trusted_draw_indexed(
     record_indexed_draw(commands, &draw);
 }
 
-fn void? full_draw_indexed(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan index_span,
-    uint index_count,
-    uint instance_count,
-    gpu::IndexType index_type,
-) {
-    PreparedIndexedDraw draw = full_prepare_indexed_draw(
-        commands:       commands,
-        vertex_root:    vertex_root,
-        fragment_root:  fragment_root,
-        index_span:     index_span,
-        index_count:    index_count,
-        instance_count: instance_count,
-        index_type:     index_type,
-    )!;
-
-    record_indexed_draw(commands, &draw);
-}
-
 fn PreparedIndirectDraw? lower_indirect_draw(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
@@ -1662,49 +757,12 @@ fn PreparedIndirectDraw? lower_indirect_draw(
     }
     VkDeviceState* state = commands.device_state;
     return {
-        .pipeline = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
+        .pipeline = borrow_bound_pipeline(record)!,
         .args = lower_indirect_span(
             state:    state,
             span:     &args,
             arg_size: gpu::DrawIndirectCommand::size,
             count:    draw_count,
-        )!,
-        .vertex_root   = vertex_root,
-        .fragment_root = fragment_root,
-        .draw_count    = draw_count,
-    };
-}
-
-fn PreparedIndirectDraw? full_prepare_indirect_draw(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    uint draw_count,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (record == null || record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = commands.device_state;
-    return {
-        .pipeline = validate_graphics_execution_state(
-            state:         state,
-            record:        record,
-            vertex_root:   vertex_root,
-            fragment_root: fragment_root,
-            operation:     "cmd_draw_indirect",
-        )!,
-        .args = validate_and_lower_indirect_span(
-            state:          state,
-            record:         record,
-            span:           &args,
-            arg_size:       gpu::DrawIndirectCommand::size,
-            count:          draw_count,
-            operation:      "cmd_draw_indirect",
-            rejected_field: "draw_count",
-            max_count:      state.caps.max_draw_indirect_count,
         )!,
         .vertex_root   = vertex_root,
         .fragment_root = fragment_root,
@@ -1732,7 +790,7 @@ fn void record_indirect_draw(
     );
 }
 
-fn void? trusted_draw_indirect(
+fn void? vk_cmd_draw_indirect(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -1746,24 +804,6 @@ fn void? trusted_draw_indirect(
         args:           args,
         draw_count:     draw_count,
     )!;
-    record_indirect_draw(commands, &draw);
-}
-
-fn void? full_draw_indirect(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    uint draw_count,
-) {
-    PreparedIndirectDraw draw = full_prepare_indirect_draw(
-        commands:       commands,
-        vertex_root:    vertex_root,
-        fragment_root:  fragment_root,
-        args:           args,
-        draw_count:     draw_count,
-    )!;
-
     record_indirect_draw(commands, &draw);
 }
 
@@ -1797,66 +837,17 @@ fn PreparedIndexedIndirectDraw? lower_indexed_indirect_draw(
     }
     VkDeviceState* state = commands.device_state;
     return {
-        .pipeline = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
+        .pipeline = borrow_bound_pipeline(record)!,
         .args = lower_indirect_span(
             state:    state,
             span:     &args,
             arg_size: gpu::DrawIndexedIndirectCommand::size,
             count:    draw_count,
         )!,
-        .index = lower_index_span(
+        .index = resolve_span_slot(
             state:      state,
             span:       &index_span,
-            index_type: index_type,
             required:   0,
-        )!,
-        .vertex_root    = vertex_root,
-        .fragment_root  = fragment_root,
-        .draw_count     = draw_count,
-        .index_type     = index_type,
-    };
-}
-
-fn PreparedIndexedIndirectDraw? full_prepare_indexed_indirect_draw(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    uint draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (record == null || record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = commands.device_state;
-    return {
-        .pipeline = validate_graphics_execution_state(
-            state:         state,
-            record:        record,
-            vertex_root:   vertex_root,
-            fragment_root: fragment_root,
-            operation:     "cmd_draw_indexed_indirect",
-        )!,
-        .args = validate_and_lower_indirect_span(
-            state:          state,
-            record:         record,
-            span:           &args,
-            arg_size:       gpu::DrawIndexedIndirectCommand::size,
-            count:          draw_count,
-            operation:      "cmd_draw_indexed_indirect",
-            rejected_field: "draw_count",
-            max_count:      state.caps.max_draw_indirect_count,
-        )!,
-        .index = validate_and_lower_index_span(
-            state:      state,
-            record:     record,
-            span:       &index_span,
-            index_type: index_type,
-            required:   0,
-            operation:  "cmd_draw_indexed_indirect",
         )!,
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
@@ -1890,7 +881,7 @@ fn void record_indexed_indirect_draw(
     );
 }
 
-fn void? trusted_draw_indexed_indirect(
+fn void? vk_cmd_draw_indexed_indirect(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -1908,29 +899,6 @@ fn void? trusted_draw_indexed_indirect(
         index_span:     index_span,
         index_type:     index_type,
     )!;
-    record_indexed_indirect_draw(commands, &draw);
-}
-
-fn void? full_draw_indexed_indirect(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    uint draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-) {
-    PreparedIndexedIndirectDraw draw =
-        full_prepare_indexed_indirect_draw(
-            commands:       commands,
-            vertex_root:    vertex_root,
-            fragment_root:  fragment_root,
-            args:           args,
-            draw_count:     draw_count,
-            index_span:     index_span,
-            index_type:     index_type,
-        )!;
-
     record_indexed_indirect_draw(commands, &draw);
 }
 
@@ -1953,7 +921,7 @@ fn PreparedIndexedIndirectCountDraw? lower_indexed_indirect_count_draw(
     VkDeviceState* state = commands.device_state;
     if (!state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
     return {
-        .pipeline = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
+        .pipeline = borrow_bound_pipeline(record)!,
         .args = lower_indirect_span(
             state:    state,
             span:     &args,
@@ -1966,69 +934,10 @@ fn PreparedIndexedIndirectCountDraw? lower_indexed_indirect_count_draw(
             arg_size: uint::size,
             count:    1,
         )!,
-        .index = lower_index_span(
+        .index = resolve_span_slot(
             state:      state,
             span:       &index_span,
-            index_type: index_type,
             required:   0,
-        )!,
-        .vertex_root    = vertex_root,
-        .fragment_root  = fragment_root,
-        .max_draw_count = max_draw_count,
-        .index_type     = index_type,
-    };
-}
-
-fn PreparedIndexedIndirectCountDraw? full_prepare_indexed_indirect_count_draw(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (record == null || record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = commands.device_state;
-    if (!state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
-    return {
-        .pipeline = validate_graphics_execution_state(
-            state:         state,
-            record:        record,
-            vertex_root:   vertex_root,
-            fragment_root: fragment_root,
-            operation:     "cmd_draw_indexed_indirect_count",
-        )!,
-        .args = validate_and_lower_indirect_span(
-            state:          state,
-            record:         record,
-            span:           &args,
-            arg_size:       gpu::DrawIndexedIndirectCommand::size,
-            count:          max_draw_count,
-            operation:      "cmd_draw_indexed_indirect_count",
-            rejected_field: "args",
-        )!,
-        .count = validate_and_lower_indirect_span(
-            state:          state,
-            record:         record,
-            span:           &count_span,
-            arg_size:       uint::size,
-            count:          1,
-            operation:      "cmd_draw_indexed_indirect_count",
-            rejected_field: "count_span",
-        )!,
-        .index = validate_and_lower_index_span(
-            state:      state,
-            record:     record,
-            span:       &index_span,
-            index_type: index_type,
-            required:   0,
-            operation:  "cmd_draw_indexed_indirect_count",
         )!,
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
@@ -2064,7 +973,7 @@ fn void record_indexed_indirect_count_draw(
     );
 }
 
-fn void? trusted_draw_indexed_indirect_count(
+fn void? vk_cmd_draw_indexed_indirect_count(
     CommandRecord* commands,
     gpu::GpuAddress vertex_root,
     gpu::GpuAddress fragment_root,
@@ -2088,71 +997,6 @@ fn void? trusted_draw_indexed_indirect_count(
     record_indexed_indirect_count_draw(commands, &draw);
 }
 
-fn void? full_draw_indexed_indirect_count(
-    CommandRecord* commands,
-    gpu::GpuAddress vertex_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-) {
-    PreparedIndexedIndirectCountDraw draw =
-        full_prepare_indexed_indirect_count_draw(
-            commands:       commands,
-            vertex_root:    vertex_root,
-            fragment_root:  fragment_root,
-            args:           args,
-            count_span:     count_span,
-            max_draw_count: max_draw_count,
-            index_span:     index_span,
-            index_type:     index_type,
-        )!;
-
-    record_indexed_indirect_count_draw(commands, &draw);
-}
-
-fn BoundPipeline*? validate_generated_graphics_execution_state(
-    VkDeviceState* state,
-    CommandRecord* record,
-    ZString operation,
-) @private {
-    BoundPipeline* pipeline = active_bound_pipeline(
-        state:         state,
-        record:        record,
-        expected_kind: PipelineKind.GRAPHICS,
-        operation:     operation,
-    )!;
-    if (!record.graphics_state_initialized) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    validate_color_execution_state(record, pipeline)!;
-    return pipeline;
-}
-
-fn void? validate_color_execution_state_for_test(
-    VkDeviceState* state,
-    CommandRecord* record,
-    bool generated,
-) @feat(TESTING) {
-    if (generated) {
-        (void)validate_generated_graphics_execution_state(
-            state,
-            record,
-            "cmd_draw_generated",
-        )!;
-        return;
-    }
-    (void)validate_graphics_execution_state(
-        state:         state,
-        record:        record,
-        vertex_root:   {},
-        fragment_root: {},
-        operation:     "cmd_draw",
-    )!;
-}
-
 fn vk::ShaderStageFlags generated_graphics_shader_stages() =>
     (vk::ShaderStageFlags)((uint)vk::ShaderStageFlagBits.VERTEX_BIT
         | (uint)vk::ShaderStageFlagBits.FRAGMENT_BIT);
@@ -2169,7 +1013,7 @@ fn PreparedGeneratedDraw? lower_generated_draw(
     }
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedDraw draw = {
-        .pipeline     = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
+        .pipeline     = borrow_bound_pipeline(record)!,
         .layout       = state.generated_draw_layout,
         .max_count    = max_draw_count,
     };
@@ -2187,50 +1031,6 @@ fn PreparedGeneratedDraw? lower_generated_draw(
         span:     &count_span,
         arg_size: uint::size,
         count:    1,
-    )!;
-    return draw;
-}
-
-fn PreparedGeneratedDraw? full_prepare_generated_draw(
-    CommandRecord* commands,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (record == null || record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = commands.device_state;
-    PreparedGeneratedDraw draw = {
-        .pipeline = validate_generated_graphics_execution_state(
-            state,
-            record,
-            "cmd_draw_generated",
-        )!,
-        .layout       = state.generated_draw_layout,
-        .max_count    = max_draw_count,
-    };
-    if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
-    if (max_draw_count == 0) return draw;
-    draw.layout = required_generated_work_layout(draw.layout)!;
-    draw.records = validate_and_lower_generated_work_records(
-        state:       state,
-        record:      record,
-        records:     &records,
-        record_size: gpu::GeneratedDrawRecord::size,
-        max_count:   max_draw_count,
-        operation:   "cmd_draw_generated",
-    )!;
-    draw.count = validate_and_lower_indirect_span(
-        state:          state,
-        record:         record,
-        span:           &count_span,
-        arg_size:       uint::size,
-        count:          1,
-        operation:      "cmd_draw_generated",
-        rejected_field: "count_span",
     )!;
     return draw;
 }
@@ -2253,7 +1053,7 @@ fn void? record_generated_draw(
     )!;
 }
 
-fn void? trusted_draw_generated(
+fn void? vk_cmd_draw_generated(
     CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
@@ -2265,23 +1065,6 @@ fn void? trusted_draw_generated(
         count_span:     count_span,
         max_draw_count: max_draw_count,
     )!;
-    record_generated_draw(commands, &draw)!;
-}
-
-fn void? full_draw_generated(
-    CommandRecord* commands,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-) {
-    PreparedGeneratedDraw draw = full_prepare_generated_draw(
-        commands:       commands,
-        records:        records,
-        count_span:     count_span,
-        max_draw_count: max_draw_count,
-    )!;
-    if (draw.max_count == 0) return;
-
     record_generated_draw(commands, &draw)!;
 }
 
@@ -2299,7 +1082,7 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
     }
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedIndexedDraw draw = {
-        .pipeline     = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
+        .pipeline     = borrow_bound_pipeline(record)!,
         .layout       = state.generated_indexed_draw_layout,
         .max_count    = max_draw_count,
         .index_type   = index_type,
@@ -2319,67 +1102,10 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
         arg_size: uint::size,
         count:    1,
     )!;
-    draw.index = lower_index_span(
+    draw.index = resolve_span_slot(
         state:      state,
         span:       &index_span,
-        index_type: index_type,
         required:   0,
-    )!;
-    return draw;
-}
-
-fn PreparedGeneratedIndexedDraw? full_prepare_generated_indexed_draw(
-    CommandRecord* commands,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (record == null || record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = commands.device_state;
-    (void)index_element_size(index_type)!;
-    PreparedGeneratedIndexedDraw draw = {
-        .pipeline = validate_generated_graphics_execution_state(
-            state,
-            record,
-            "cmd_draw_indexed_generated",
-        )!,
-        .layout       = state.generated_indexed_draw_layout,
-        .max_count    = max_draw_count,
-        .index_type   = index_type,
-    };
-    if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
-    if (max_draw_count == 0) return draw;
-    draw.layout = required_generated_work_layout(draw.layout)!;
-    draw.records = validate_and_lower_generated_work_records(
-        state:       state,
-        record:      record,
-        records:     &records,
-        record_size: gpu::GeneratedDrawIndexedRecord::size,
-        max_count:   max_draw_count,
-        operation:   "cmd_draw_indexed_generated",
-    )!;
-    draw.count = validate_and_lower_indirect_span(
-        state:          state,
-        record:         record,
-        span:           &count_span,
-        arg_size:       uint::size,
-        count:          1,
-        operation:      "cmd_draw_indexed_generated",
-        rejected_field: "count_span",
-    )!;
-    draw.index = validate_and_lower_index_span(
-        state:      state,
-        record:     record,
-        span:       &index_span,
-        index_type: index_type,
-        required:   0,
-        operation:  "cmd_draw_indexed_generated",
     )!;
     return draw;
 }
@@ -2405,7 +1131,7 @@ fn void? record_generated_indexed_draw(
     )!;
 }
 
-fn void? trusted_draw_indexed_generated(
+fn void? vk_cmd_draw_indexed_generated(
     CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
@@ -2422,89 +1148,6 @@ fn void? trusted_draw_indexed_generated(
         index_type:     index_type,
     )!;
     record_generated_indexed_draw(commands, &draw)!;
-}
-
-fn void? full_draw_indexed_generated(
-    CommandRecord* commands,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-    gpu::GpuSpan index_span,
-    gpu::IndexType index_type,
-) {
-    PreparedGeneratedIndexedDraw draw =
-        full_prepare_generated_indexed_draw(
-            commands:       commands,
-            records:        records,
-            count_span:     count_span,
-            max_draw_count: max_draw_count,
-            index_span:     index_span,
-            index_type:     index_type,
-        )!;
-    if (draw.max_count == 0) return;
-
-    record_generated_indexed_draw(commands, &draw)!;
-}
-
-
-fn BoundPipeline*? validate_mesh_execution_state(
-    VkDeviceState* state,
-    CommandRecord* record,
-    ZString operation,
-) @private {
-    BoundPipeline* pipeline = active_bound_pipeline(
-        state:         state,
-        record:        record,
-        expected_kind: PipelineKind.MESH,
-        operation:     operation,
-    )!;
-    if (!record.graphics_state_initialized) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    validate_color_execution_state(record, pipeline)!;
-    return pipeline;
-}
-
-<* Always checked: each axis within the per-axis limit and the product
-   within the total limit of the stage that launches the groups. *>
-fn bool mesh_groups_within_caps(
-    VkDeviceState* state,
-    BoundPipeline* pipeline,
-    gpu::Vec3u groups,
-) @private {
-    gpu::MeshShaderCaps* caps = &state.mesh_shader_caps;
-    gpu::Vec3u limit = pipeline.mesh_task_stage
-        ? caps.max_task_work_group_count
-        : caps.max_mesh_work_group_count;
-    uint total = pipeline.mesh_task_stage
-        ? caps.max_task_work_group_total_count
-        : caps.max_mesh_work_group_total_count;
-    if (groups.x > limit.x || groups.y > limit.y || groups.z > limit.z) return false;
-    if (groups.x == 0 || groups.y == 0 || groups.z == 0) return true;
-    ulong plane = (ulong)groups.x * groups.y;
-    return plane <= total && plane * groups.z <= total;
-}
-
-fn void? validate_mesh_groups(
-    VkDeviceState* state,
-    BoundPipeline* pipeline,
-    gpu::Vec3u groups,
-    ZString operation,
-) @private {
-    if (mesh_groups_within_caps(state, pipeline, groups)) return;
-    return report_contract_failure(
-        state:               state,
-        operation:           operation,
-        public_fault:        gpu::INVALID_ARGUMENT,
-        resource_kind:       gpu::DebugResourceKind.PIPELINE,
-        has_public_identity: true,
-        index:               pipeline.handle.index,
-        generation:          pipeline.handle.generation,
-        debug_name:          null,
-        rejected_field:      "groups",
-        invariant:           "work-group counts must fit the DeviceCaps.mesh_shaders axis and total limits",
-        backend_text:        null,
-    )~;
 }
 
 fn void record_mesh_draw(CommandRecord* record, PreparedMeshDraw* draw) @private {
@@ -2554,7 +1197,7 @@ fn void record_mesh_indirect_draw(
     );
 }
 
-fn void? trusted_draw_mesh_tasks(
+fn void? vk_cmd_draw_mesh_tasks(
     CommandRecord* commands,
     gpu::GpuAddress mesh_root,
     gpu::GpuAddress fragment_root,
@@ -2567,40 +1210,11 @@ fn void? trusted_draw_mesh_tasks(
     VkDeviceState* state = record.device_state;
     if (!state.mesh_shaders_enabled) return gpu::UNSUPPORTED_FEATURE~;
     PreparedMeshDraw draw = {
-        .pipeline      = borrow_bound_pipeline_of_kind(record, PipelineKind.MESH)!,
+        .pipeline      = borrow_bound_pipeline(record)!,
         .mesh_root     = mesh_root,
         .fragment_root = fragment_root,
         .groups        = groups,
     };
-    if (!mesh_groups_within_caps(state, draw.pipeline, groups)) return gpu::INVALID_ARGUMENT~;
-    record_mesh_draw(record, &draw);
-}
-
-fn void? full_draw_mesh_tasks(
-    CommandRecord* commands,
-    gpu::GpuAddress mesh_root,
-    gpu::GpuAddress fragment_root,
-    gpu::Vec3u groups,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = commands.device_state;
-    if (!state.mesh_shaders_enabled) return gpu::UNSUPPORTED_FEATURE~;
-    PreparedMeshDraw draw = {
-        .pipeline      = validate_mesh_execution_state(state, record, "cmd_draw_mesh_tasks")!,
-        .mesh_root     = mesh_root,
-        .fragment_root = fragment_root,
-        .groups        = groups,
-    };
-    validate_mesh_groups(
-        state:     state,
-        pipeline:  draw.pipeline,
-        groups:    groups,
-        operation: "cmd_draw_mesh_tasks",
-    )!;
     record_mesh_draw(record, &draw);
 }
 
@@ -2621,7 +1235,7 @@ fn PreparedMeshIndirectDraw? lower_mesh_indirect_draw(
     if (!state.mesh_shaders_enabled) return gpu::UNSUPPORTED_FEATURE~;
     if (counted && !state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
     PreparedMeshIndirectDraw draw = {
-        .pipeline = borrow_bound_pipeline_of_kind(record, PipelineKind.MESH)!,
+        .pipeline = borrow_bound_pipeline(record)!,
         .args = lower_indirect_span(
             state:    state,
             span:     &args,
@@ -2644,56 +1258,7 @@ fn PreparedMeshIndirectDraw? lower_mesh_indirect_draw(
     return draw;
 }
 
-fn PreparedMeshIndirectDraw? full_prepare_mesh_indirect_draw(
-    CommandRecord* commands,
-    gpu::GpuAddress mesh_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    gpu::GpuSpan count_span,
-    uint draw_count,
-    bool counted,
-    ZString operation,
-) @private {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = commands.device_state;
-    if (!state.mesh_shaders_enabled) return gpu::UNSUPPORTED_FEATURE~;
-    if (counted && !state.draw_indirect_count) return gpu::UNSUPPORTED_FEATURE~;
-    PreparedMeshIndirectDraw draw = {
-        .pipeline = validate_mesh_execution_state(state, record, operation)!,
-        .args = validate_and_lower_indirect_span(
-            state:          state,
-            record:         record,
-            span:           &args,
-            arg_size:       gpu::DrawMeshTasksIndirectCommand::size,
-            count:          draw_count,
-            operation:      operation,
-            rejected_field: counted ? "args" : "draw_count",
-            max_count:      counted ? uint::max : state.caps.max_draw_indirect_count,
-        )!,
-        .mesh_root     = mesh_root,
-        .fragment_root = fragment_root,
-        .draw_count    = draw_count,
-        .counted       = counted,
-    };
-    if (counted) {
-        draw.count = validate_and_lower_indirect_span(
-            state:          state,
-            record:         record,
-            span:           &count_span,
-            arg_size:       uint::size,
-            count:          1,
-            operation:      operation,
-            rejected_field: "count_span",
-        )!;
-    }
-    return draw;
-}
-
-fn void? trusted_draw_mesh_tasks_indirect(
+fn void? vk_cmd_draw_mesh_tasks_indirect(
     CommandRecord* commands,
     gpu::GpuAddress mesh_root,
     gpu::GpuAddress fragment_root,
@@ -2712,28 +1277,7 @@ fn void? trusted_draw_mesh_tasks_indirect(
     record_mesh_indirect_draw(commands, &draw);
 }
 
-fn void? full_draw_mesh_tasks_indirect(
-    CommandRecord* commands,
-    gpu::GpuAddress mesh_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    uint draw_count,
-) {
-    PreparedMeshIndirectDraw draw = full_prepare_mesh_indirect_draw(
-        commands:      commands,
-        mesh_root:     mesh_root,
-        fragment_root: fragment_root,
-        args:          args,
-        count_span:    {},
-        draw_count:    draw_count,
-        counted:       false,
-        operation:     "cmd_draw_mesh_tasks_indirect",
-    )!;
-
-    record_mesh_indirect_draw(commands, &draw);
-}
-
-fn void? trusted_draw_mesh_tasks_indirect_count(
+fn void? vk_cmd_draw_mesh_tasks_indirect_count(
     CommandRecord* commands,
     gpu::GpuAddress mesh_root,
     gpu::GpuAddress fragment_root,
@@ -2750,27 +1294,5 @@ fn void? trusted_draw_mesh_tasks_indirect_count(
         draw_count:    max_draw_count,
         counted:       true,
     )!;
-    record_mesh_indirect_draw(commands, &draw);
-}
-
-fn void? full_draw_mesh_tasks_indirect_count(
-    CommandRecord* commands,
-    gpu::GpuAddress mesh_root,
-    gpu::GpuAddress fragment_root,
-    gpu::GpuSpan args,
-    gpu::GpuSpan count_span,
-    uint max_draw_count,
-) {
-    PreparedMeshIndirectDraw draw = full_prepare_mesh_indirect_draw(
-        commands:      commands,
-        mesh_root:     mesh_root,
-        fragment_root: fragment_root,
-        args:          args,
-        count_span:    count_span,
-        draw_count:    max_draw_count,
-        counted:       true,
-        operation:     "cmd_draw_mesh_tasks_indirect_count",
-    )!;
-
     record_mesh_indirect_draw(commands, &draw);
 }

@@ -96,7 +96,6 @@ struct LoweredTimestampResolve {
     uint                     first;
     uint                     count;
     ResolvedSpan             destination;
-    gpu::GpuSpan             destination_span;
 }
 
 fn gpu::TimestampPoolHandle? TimestampPoolTable.alloc(
@@ -183,14 +182,6 @@ fn usz? timestamp_result_bytes(uint count) {
     return (usz)count * ulong::size;
 }
 
-fn bool timestamp_stage_mask_valid(gpu::StageMask stage) {
-    uint raw = (uint)stage;
-    return gpu::internal::stage_mask_valid(stage)
-        && !stage.host
-        && !stage.present
-        && (raw & (raw - 1)) == 0;
-}
-
 fn vk::PipelineStageFlags2 timestamp_stage_to_vk(
     gpu::StageMask stage,
 ) {
@@ -242,31 +233,7 @@ fn vk::PipelineStageFlags2 timestamp_stage_to_vk(
         return (vk::PipelineStageFlags2)
             vk::PipelineStageFlagBits2.STAGE_2_INDEX_INPUT_BIT;
     }
-    unreachable();
-}
-
-fn bool timestamp_destination_valid(
-    usz offset,
-    usz size,
-    usz required,
-) {
-    return required > 0
-        && offset % ulong::size == 0
-        && size >= required;
-}
-
-fn void? validate_timestamp_destination(
-    ResolvedSpan* resolved,
-    usz required,
-) {
-    if (resolved == null
-        || !timestamp_destination_valid(
-            resolved.offset,
-            resolved.size,
-            required,
-        )) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    return vk::PipelineStageFlagBits2.STAGE_2_NONE;
 }
 
 fn gpu::TimestampPoolHandle? create_timestamp_pool_with(
@@ -446,58 +413,6 @@ fn void destroy_timestamp_pool_table(VkDeviceState* state) {
     state.timestamp_pools = {};
 }
 
-fn fault report_timestamp_command_failure(
-    VkDeviceState* state,
-    ZString operation,
-    gpu::TimestampPoolHandle pool,
-    TimestampPoolSlot* slot,
-    fault public_fault,
-    ZString rejected_field,
-    ZString invariant,
-) {
-    return report_contract_failure(
-        state:               state,
-        operation:           operation,
-        public_fault:        public_fault,
-        resource_kind:       gpu::DebugResourceKind.TIMESTAMP_POOL,
-        has_public_identity: slot != null,
-        index:               slot == null ? 0 : pool.index,
-        generation:          slot == null ? 0 : pool.generation,
-        debug_name:          slot == null
-            ? null
-            : slot_name(&slot.debug_name[0]),
-        rejected_field:      rejected_field,
-        invariant:           invariant,
-        backend_text:        null,
-    );
-}
-
-fn void? validate_full_timestamp_phase(
-    CommandRecord* record,
-    gpu::TimestampPoolHandle pool,
-    bool allow_render,
-    ZString operation,
-) {
-    bool recording = record.state == gpu::internal::CommandState.RECORDING;
-    if (allow_render) {
-        recording = recording
-            || record.state
-                == gpu::internal::CommandState.RECORDING_RENDER_PASS;
-    }
-    if (recording) return;
-    return report_timestamp_command_failure(
-        state:           record.device_state,
-        operation:       operation,
-        pool:            pool,
-        slot:            null,
-        public_fault:    gpu::COMMAND_RECORDING_ERROR,
-        rejected_field: "CommandList.state",
-        invariant:       allow_render
-            ? "command must be recording"
-            : "command must be recording outside a render pass",
-    )~;
-}
-
 fn TimestampPoolSlot*? lower_timestamp_pool_range(
     CommandRecord* record,
     gpu::TimestampPoolHandle pool,
@@ -516,56 +431,6 @@ fn TimestampPoolSlot*? lower_timestamp_pool_range(
         record.device_state.timestamp_pools.get(pool)!;
     validate_timestamp_range(slot.capacity, first, count)!;
     return slot;
-}
-
-fn void? validate_full_timestamp_queue(
-    CommandRecord* record,
-    gpu::TimestampPoolHandle pool,
-    TimestampPoolSlot* slot,
-    ZString operation,
-) {
-    if (gpu::internal::queue_access_intersects(
-        record.device_state.caps.timestamps.queues,
-        record.queue.roles,
-    )) return;
-    return report_timestamp_command_failure(
-        state:           record.device_state,
-        operation:       operation,
-        pool:            pool,
-        slot:            slot,
-        public_fault:    gpu::UNSUPPORTED_FEATURE,
-        rejected_field: "CommandList.queue",
-        invariant:       "recording queue must advertise timestamp support",
-    )~;
-}
-
-fn void? validate_full_timestamp_stage(
-    CommandRecord* record,
-    gpu::TimestampPoolHandle pool,
-    TimestampPoolSlot* slot,
-    gpu::StageMask stage,
-) {
-    QueueCompletionState* completion = queue_completion_state(
-        record.device_state,
-        record.queue.id,
-    )!;
-    if (timestamp_stage_mask_valid(stage)
-        && barrier_stage_mask_supported(
-            stages:                stage,
-            flags:                 completion.queue_flags,
-            ray_queries:           record.device_state.acceleration_structures_enabled,
-            ray_tracing_pipelines: record.device_state.ray_tracing_pipelines_enabled,
-            mesh_shaders:          record.device_state.mesh_shaders_enabled,
-        )) return;
-    return report_timestamp_command_failure(
-        state:           record.device_state,
-        operation:       "cmd_write_timestamp",
-        pool:            pool,
-        slot:            slot,
-        public_fault:    gpu::INVALID_ARGUMENT,
-        rejected_field: "stage",
-        invariant:       "must name exactly one executable stage supported by the recording queue",
-    )~;
 }
 
 fn LoweredTimestampResolve? lower_timestamp_resolve(
@@ -590,34 +455,12 @@ fn LoweredTimestampResolve? lower_timestamp_resolve(
         operation:      "cmd_resolve_timestamps",
         rejected_field: "dst",
     )!;
-    validate_timestamp_destination(&resolved, required)!;
     return {
         .pool             = slot,
         .first            = first,
         .count            = count,
         .destination      = resolved,
-        .destination_span = destination,
     };
-}
-
-fn void? validate_full_timestamp_resolve(
-    CommandRecord* record,
-    LoweredTimestampResolve* resolve,
-) {
-    validate_span_transfer_usage(
-        state:     record.device_state,
-        resolved:  &resolve.destination,
-        span:      &resolve.destination_span,
-        source:    false,
-        operation: "cmd_resolve_timestamps",
-    )!;
-    validate_span_recording_access_only(
-        state:     record.device_state,
-        record:    record,
-        resolved:  &resolve.destination,
-        span:      &resolve.destination_span,
-        operation: "cmd_resolve_timestamps",
-    )!;
 }
 
 fn void reset_timestamp_real(
@@ -737,7 +580,7 @@ fn void emit_resolve_timestamps_with(
     );
 }
 
-fn void? trusted_reset_timestamps_with(
+fn void? vk_cmd_reset_timestamps_with(
     CommandRecord* record,
     gpu::TimestampPoolHandle pool,
     uint first,
@@ -754,44 +597,13 @@ fn void? trusted_reset_timestamps_with(
     emit_reset_timestamps_with(record, slot, first, count, ops);
 }
 
-fn void? full_reset_timestamps_with(
-    CommandRecord* record,
-    gpu::TimestampPoolHandle pool,
-    uint first,
-    uint count,
-    TimestampCommandNativeOps* ops,
-) {
-    validate_full_timestamp_phase(
-        record,
-        pool,
-        false,
-        "cmd_reset_timestamps",
-    )!;
-    TimestampPoolSlot* slot = lower_timestamp_pool_range(
-        record,
-        pool,
-        first,
-        count,
-        false,
-    )!;
-    validate_full_timestamp_queue(
-        record,
-        pool,
-        slot,
-        "cmd_reset_timestamps",
-    )!;
-
-    emit_reset_timestamps_with(record, slot, first, count, ops);
-}
-
-fn void? trusted_write_timestamp_with(
+fn void? vk_cmd_write_timestamp_with(
     CommandRecord* record,
     gpu::TimestampPoolHandle pool,
     uint index,
     gpu::StageMask stage,
     TimestampCommandNativeOps* ops,
 ) {
-    if (!timestamp_stage_mask_valid(stage)) return gpu::INVALID_ARGUMENT~;
     TimestampPoolSlot* slot = lower_timestamp_pool_range(
         record,
         pool,
@@ -808,44 +620,7 @@ fn void? trusted_write_timestamp_with(
     );
 }
 
-fn void? full_write_timestamp_with(
-    CommandRecord* record,
-    gpu::TimestampPoolHandle pool,
-    uint index,
-    gpu::StageMask stage,
-    TimestampCommandNativeOps* ops,
-) {
-    validate_full_timestamp_phase(
-        record,
-        pool,
-        true,
-        "cmd_write_timestamp",
-    )!;
-    TimestampPoolSlot* slot = lower_timestamp_pool_range(
-        record,
-        pool,
-        index,
-        1,
-        true,
-    )!;
-    validate_full_timestamp_queue(
-        record,
-        pool,
-        slot,
-        "cmd_write_timestamp",
-    )!;
-    validate_full_timestamp_stage(record, pool, slot, stage)!;
-
-    emit_write_timestamp_with(
-        record,
-        slot,
-        index,
-        timestamp_stage_to_vk(stage),
-        ops,
-    );
-}
-
-fn void? trusted_resolve_timestamps_with(
+fn void? vk_cmd_resolve_timestamps_with(
     CommandRecord* record,
     gpu::TimestampPoolHandle pool,
     uint first,
@@ -863,79 +638,27 @@ fn void? trusted_resolve_timestamps_with(
     emit_resolve_timestamps_with(record, &resolve, ops);
 }
 
-fn void? full_resolve_timestamps_with(
-    CommandRecord* record,
-    gpu::TimestampPoolHandle pool,
-    uint first,
-    uint count,
-    gpu::GpuSpan destination,
-    TimestampCommandNativeOps* ops,
-) {
-    validate_full_timestamp_phase(
-        record,
-        pool,
-        false,
-        "cmd_resolve_timestamps",
-    )!;
-    LoweredTimestampResolve resolve = lower_timestamp_resolve(
-        record,
-        pool,
-        first,
-        count,
-        destination,
-    )!;
-    validate_full_timestamp_queue(
-        record,
-        pool,
-        resolve.pool,
-        "cmd_resolve_timestamps",
-    )!;
-    validate_full_timestamp_resolve(record, &resolve)!;
-
-    emit_resolve_timestamps_with(record, &resolve, ops);
-}
-
-fn void? trusted_reset_timestamps(
+fn void? vk_cmd_reset_timestamps(
     CommandRecord* record,
     gpu::TimestampPoolHandle pool,
     uint first,
     uint count,
 ) {
     TimestampCommandNativeOps ops = timestamp_command_native_ops();
-    return trusted_reset_timestamps_with(record, pool, first, count, &ops);
+    return vk_cmd_reset_timestamps_with(record, pool, first, count, &ops);
 }
 
-fn void? full_reset_timestamps(
-    CommandRecord* record,
-    gpu::TimestampPoolHandle pool,
-    uint first,
-    uint count,
-) {
-    TimestampCommandNativeOps ops = timestamp_command_native_ops();
-    return full_reset_timestamps_with(record, pool, first, count, &ops);
-}
-
-fn void? trusted_write_timestamp(
+fn void? vk_cmd_write_timestamp(
     CommandRecord* record,
     gpu::TimestampPoolHandle pool,
     uint index,
     gpu::StageMask stage,
 ) {
     TimestampCommandNativeOps ops = timestamp_command_native_ops();
-    return trusted_write_timestamp_with(record, pool, index, stage, &ops);
+    return vk_cmd_write_timestamp_with(record, pool, index, stage, &ops);
 }
 
-fn void? full_write_timestamp(
-    CommandRecord* record,
-    gpu::TimestampPoolHandle pool,
-    uint index,
-    gpu::StageMask stage,
-) {
-    TimestampCommandNativeOps ops = timestamp_command_native_ops();
-    return full_write_timestamp_with(record, pool, index, stage, &ops);
-}
-
-fn void? trusted_resolve_timestamps(
+fn void? vk_cmd_resolve_timestamps(
     CommandRecord* record,
     gpu::TimestampPoolHandle pool,
     uint first,
@@ -943,25 +666,7 @@ fn void? trusted_resolve_timestamps(
     gpu::GpuSpan destination,
 ) {
     TimestampCommandNativeOps ops = timestamp_command_native_ops();
-    return trusted_resolve_timestamps_with(
-        record,
-        pool,
-        first,
-        count,
-        destination,
-        &ops,
-    );
-}
-
-fn void? full_resolve_timestamps(
-    CommandRecord* record,
-    gpu::TimestampPoolHandle pool,
-    uint first,
-    uint count,
-    gpu::GpuSpan destination,
-) {
-    TimestampCommandNativeOps ops = timestamp_command_native_ops();
-    return full_resolve_timestamps_with(
+    return vk_cmd_resolve_timestamps_with(
         record,
         pool,
         first,

@@ -46,7 +46,6 @@ fn vk::Result capture_diagnostic_reset(
 fn void wsi_presentation_gate_diagnostic() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_wsi_diagnostic_gate_test",
         .debug_callback    = &capture_wsi_diagnostic,
@@ -81,8 +80,7 @@ fn void wsi_presentation_gate_diagnostic() @test {
 fn void wsi_backend_result_diagnostic_preserves_mapping() @test {
     WsiDiagnosticCapture capture;
     gpu::internal::vk::VkDeviceState state = {
-        .validation_policy = { .contract = gpu::ContractValidation.FULL },
-        .debug_callback  = &capture_wsi_diagnostic,
+                .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
     gpu::internal::vk::WsiDiagnosticContext context = {
@@ -116,7 +114,6 @@ fn void wsi_backend_result_diagnostic_preserves_mapping() @test {
 fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_wsi_stale_handle_test",
         .debug_callback    = &capture_wsi_diagnostic,
@@ -204,8 +201,7 @@ fn void expect_wsi_result(
 ) {
     WsiDiagnosticCapture capture;
     gpu::internal::vk::VkDeviceState state = {
-        .validation_policy = { .contract = gpu::ContractValidation.FULL },
-        .debug_callback  = &capture_wsi_diagnostic,
+                .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
     gpu::internal::vk::WsiDiagnosticContext context = {
@@ -239,8 +235,7 @@ fn void expect_wsi_result(
 fn void expect_silent_wsi_result(vk::Result result) {
     WsiDiagnosticCapture capture;
     gpu::internal::vk::VkDeviceState state = {
-        .validation_policy = { .contract = gpu::ContractValidation.FULL },
-        .debug_callback  = &capture_wsi_diagnostic,
+                .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
     gpu::internal::vk::WsiDiagnosticContext context = {
@@ -324,8 +319,7 @@ fn void all_specialized_wsi_results_use_one_mapping_seam() @test {
 fn void wrapped_image_failure_is_backend_with_swapchain_identity() @test {
     WsiDiagnosticCapture capture;
     gpu::internal::vk::VkDeviceState state = {
-        .validation_policy = { .contract = gpu::ContractValidation.FULL },
-        .debug_callback  = &capture_wsi_diagnostic,
+                .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
     gpu::internal::vk::WsiDiagnosticContext context = {
@@ -354,8 +348,7 @@ fn void wrapped_image_failure_is_backend_with_swapchain_identity() @test {
 fn void wsi_lifecycle_diagnostics_are_contract_failures() @test {
     WsiDiagnosticCapture capture;
     gpu::internal::vk::VkDeviceState state = {
-        .validation_policy = { .contract = gpu::ContractValidation.FULL },
-        .debug_callback  = &capture_wsi_diagnostic,
+                .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
     gpu::internal::vk::WsiDiagnosticContext context = {
@@ -402,8 +395,7 @@ fn void wsi_lifecycle_diagnostics_are_contract_failures() @test {
 fn void capability_failures_are_backend_only_and_success_is_silent() @test {
     WsiDiagnosticCapture capture;
     gpu::internal::vk::VkDeviceState state = {
-        .validation_policy = { .contract = gpu::ContractValidation.FULL },
-        .debug_callback  = &capture_wsi_diagnostic,
+                .debug_callback  = &capture_wsi_diagnostic,
         .debug_user_data = &capture,
     };
     gpu::internal::vk::WsiDiagnosticContext context = {
@@ -443,8 +435,7 @@ fn void wait_timeout_is_diagnostic_clean_and_retryable() @test {
     WsiDiagnosticCapture capture = {};
     gpu::internal::vk::VkDeviceState state = {
         .device            = (vk::Device)1,
-        .validation_policy = { .contract = gpu::ContractValidation.FULL },
-        .debug_callback    = &capture_wsi_diagnostic,
+                .debug_callback    = &capture_wsi_diagnostic,
         .debug_user_data   = &capture,
     };
     gpu::internal::vk::SwapchainSlot slot = { .image_count = 1 };
@@ -461,7 +452,7 @@ fn void wait_timeout_is_diagnostic_clean_and_retryable() @test {
     ));
     assert(timeout == gpu::WAIT_TIMEOUT, "timeout remains the retryable public fault");
     assert(capture.calls == 0 && capture.last.rejected_field == null,
-        "WAIT_TIMEOUT emits no FULL-validation error diagnostic");
+        "WAIT_TIMEOUT emits no error diagnostic");
     assert(slot.present_fence_pending[0],
         "diagnostic-clean timeout preserves the pending presentation");
 

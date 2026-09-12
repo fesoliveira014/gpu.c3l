@@ -93,7 +93,6 @@ fn void reset_acquire_capture(vk::Result result, uint image_index = 0) {
     captured_acquire_image_index = image_index;
 }
 
-
 fn void initialize_acquisition_fixture(AcquisitionFixture* fixture) {
     if (!fixture.device.is_valid()) {
         fixture.device = { .index = 1, .generation = 1 };
@@ -553,7 +552,6 @@ fn void extent_clamp_rules() @test {
 
 fn void swapchain_requires_a_presentation_request() @test {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_swapchain_gate_test",
     };
@@ -699,7 +697,6 @@ fn void swapchain_present_guard_lifecycle() @test {
 fn void present_path_guards_precede_native_mutation() @test {
     WsiDiagnosticCapture capture;
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_present_guard_test",
         .debug_callback    = &capture_wsi_diagnostic,
@@ -1151,8 +1148,7 @@ fn void acquire_semaphores_retire_before_reuse() @test {
 fn void swapchain_release_is_immediate_and_retryable() @test {
     WsiDiagnosticCapture capture;
     gpu::internal::vk::VkDeviceState state = {
-        .validation_policy = { .contract = gpu::ContractValidation.FULL },
-        .debug_callback     = &capture_wsi_diagnostic,
+                .debug_callback     = &capture_wsi_diagnostic,
         .debug_user_data    = &capture,
     };
     state.resource_mutex.init()!!;
@@ -1471,7 +1467,6 @@ fn void restore_borrowed_swapchain(BorrowedSwapchainFixture* fixture) {
 
 fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "borrowed_swapchain_view_lifecycle_test",
     };
@@ -1545,16 +1540,6 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
         .after = { .layout = gpu::TextureLayout.PRESENT },
     };
     gpu::cmd_texture_barrier(&commands, &to_present)!!;
-    gpu::TextureBarrier invalid_present = to_present;
-    invalid_present.after.stages = { .color_output };
-    assert(@catch(gpu::cmd_texture_barrier(&commands, &invalid_present))
-        == gpu::INVALID_ARGUMENT,
-        "public PRESENT state rejects nonempty stages");
-    invalid_present.after = { .layout = gpu::TextureLayout.PRESENT };
-    invalid_present.after.access = { .read };
-    assert(@catch(gpu::cmd_texture_barrier(&commands, &invalid_present))
-        == gpu::INVALID_ARGUMENT,
-        "public PRESENT state rejects nonempty access");
 
     gpu::internal::vk::commit_present_result(live_slot, &acquired, vk::Result.SUCCESS);
 
@@ -1995,7 +1980,6 @@ fn void swapchain_acquisition_sequence_never_wraps() @test {
     assert(exhausted == gpu::SLOT_TABLE_FULL, "acquisition identity faults before wrapping");
 }
 
-
 fn void swapchain_image_usage_mapping() @test {
     gpu::TextureUsage color_only = gpu::internal::vk::swapchain_image_usage((uint)vk::ImageUsageFlagBits.COLOR_ATTACHMENT_BIT);
     assert(color_only.color_attach && !color_only.transfer_src, "ungranted transfer_src does not carry over");
@@ -2120,7 +2104,6 @@ fn void acquired_image_reports_prior_state() @test {
 
 fn void swapchain_info_query_rejects_invalid_handle() @test {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_swapchain_info_invalid_handle_test",
     };
@@ -2157,7 +2140,6 @@ fn vk::Result capture_unified_submit(
 
 fn void unified_swapchain_submit_wraps_application_lists() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "unified_swapchain_submit_test",
     };

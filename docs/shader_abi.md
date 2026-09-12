@@ -66,9 +66,8 @@ a trailing `char[] inline_root` (default empty). `@inline_root(&value)`
 borrows a value as bytes for the call; the command copies them immediately.
 The length must be a multiple of 4, at most `INLINE_ROOT_CAPACITY`, and fit
 `ROOT_PUSH_CAPACITY` after the bound pipeline's header, else
-`INVALID_ARGUMENT`. Under `ContractValidation.FULL` a payload longer than the
-bound pipeline's reflected push block reports a `public_contract` diagnostic
-on `inline_root`. Payload byte `n` is block byte `header + n`; a member that
+`INVALID_ARGUMENT`. The application must also fit the payload within the
+bound pipeline's reflected push block. Payload byte `n` is block byte `header + n`; a member that
 needs 16-byte alignment in a compute block therefore sits after 8 bytes of
 payload padding.
 

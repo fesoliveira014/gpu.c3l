@@ -856,7 +856,7 @@ fn void on_debug_message(gpu::DebugMessage* message, void* user_data) {
     io::printfn("[%s] %s: %s", message.severity, message.operation, message.invariant);
 }
 
-gpu::RuntimeDesc desc = gpu::full_validation_runtime_desc();
+gpu::RuntimeDesc desc = { .enable_vulkan_validation = true };
 desc.debug_callback     = &on_debug_message;
 desc.enable_debug_names = true;
 gpu::Runtime runtime = gpu::create_runtime(&desc)!;

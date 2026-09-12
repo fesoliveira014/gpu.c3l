@@ -20,7 +20,7 @@ Record with every result:
 - OS and CPU;
 - GPU, driver, and Vulkan loader;
 - C3 version and build mode;
-- contract validation policy and whether Vulkan validation layers are on;
+- whether Vulkan validation layers are on;
 - queue topology, including which roles alias (report `QueueInfo`);
 - display environment for presentation targets;
 - arguments, warm-up, sample count, and the statistic reported.
@@ -63,7 +63,7 @@ device-lifetime allocator state.
 - A lavapipe pipeline-cache blob may be only a header. Use the blob size to
   tell driver behavior from cache plumbing.
 - Xvfb has no vblank; FIFO timing there is structural only.
-- Compare `FULL` and `TRUSTED` validation separately.
+- Record whether Vulkan validation was enabled.
 - Never promote a measurement into a public guarantee. The contract is
   qualitative: bounded fixed scratch, independent allocators, no hidden waits.
 

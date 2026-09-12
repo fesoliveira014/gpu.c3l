@@ -68,7 +68,7 @@ exactly when its destroy call returns without a fault.
 
 ```c3
 fn void? handles_and_ownership() {
-    gpu::RuntimeDesc runtime_desc = gpu::full_validation_runtime_desc();
+    gpu::RuntimeDesc runtime_desc = { .enable_vulkan_validation = true };
     runtime_desc.application_name = "concepts";
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer (void)gpu::destroy_runtime(&runtime);
@@ -643,12 +643,10 @@ Contract: [Presentation](architecture.md#presentation).
 
 ## Validation and diagnostics
 
-Everything above puts rules on the application. Validation checks them.
-`ContractValidation.FULL` checks ownership, generations, and command semantics,
-and reports the operation, the field, and the invariant that a
-call violated. `TRUSTED` checks only what host safety needs. Both are
-independent of the Vulkan validation layer, which `enable_vulkan_validation`
-switches on.
+Applications own valid GPU usage, ordering, and resource lifetimes. The
+library protects its host structures, resolves handles safely, and reports
+actual operational failures. `enable_vulkan_validation` requests Vulkan
+diagnostics during development; it does not prove all application usage.
 
 Messages arrive through a callback set on `RuntimeDesc`, synchronously, from
 whichever thread made the call:
@@ -659,16 +657,16 @@ fn void report(gpu::DebugMessage* message, void* user_data) {
 }
 
 fn gpu::Runtime? validation_and_diagnostics() {
-    gpu::RuntimeDesc desc = gpu::full_validation_runtime_desc();
+    gpu::RuntimeDesc desc = { .enable_vulkan_validation = true };
     desc.application_name = "concepts";
     desc.debug_callback = &report;
     return gpu::create_runtime(&desc);
 }
 ```
 
-Develop with `full_validation_runtime_desc`. Ship with a zero `RuntimeDesc`,
-which selects `TRUSTED` and no layer. Neither mode tracks memory reached
-through a `GpuAddress` or a shader index; those remain your promise.
+Enable Vulkan validation explicitly during development. A zero `RuntimeDesc`
+leaves it disabled. Memory reached through a `GpuAddress` or a shader index
+remains the application's responsibility.
 
 Contract: [Diagnostics and cost](architecture.md#diagnostics-and-cost).
 

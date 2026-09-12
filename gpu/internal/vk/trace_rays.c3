@@ -93,33 +93,6 @@ fn bool trace_span_is_canonical_empty(gpu::GpuSpan span) {
         && span.size == 0;
 }
 
-fn void? validate_trace_dimensions(
-    VkDeviceState* state,
-    gpu::Vec3u dimensions,
-    bool validate_limit,
-) {
-    if (dimensions.x == 0 || dimensions.y == 0 || dimensions.z == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    ulong xy = (ulong)dimensions.x * dimensions.y;
-    if (dimensions.z > 0 && xy > ulong::max / dimensions.z) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    ulong invocations = xy * dimensions.z;
-    if (validate_limit
-        && (invocations
-                > state.caps.ray_tracing_pipelines
-                    .max_ray_dispatch_invocation_count
-            || dimensions.x
-                > state.caps.ray_tracing_pipelines.max_ray_dispatch_dimensions.x
-            || dimensions.y
-                > state.caps.ray_tracing_pipelines.max_ray_dispatch_dimensions.y
-            || dimensions.z
-                > state.caps.ray_tracing_pipelines.max_ray_dispatch_dimensions.z)) {
-            return gpu::INVALID_ARGUMENT~;
-    }
-}
-
 fn vk::StridedDeviceAddressRegionKHR? lower_trace_region(
     VkDeviceState* state,
     gpu::RayTracingShaderBindingTableRegion* region,
@@ -140,71 +113,12 @@ fn vk::StridedDeviceAddressRegionKHR? lower_trace_region(
     };
 }
 
-fn vk::StridedDeviceAddressRegionKHR? validate_and_lower_trace_region(
-    VkDeviceState* state,
-    CommandRecord* record,
-    gpu::RayTracingShaderBindingTableRegion* region,
-    bool ray_generation,
-    ZString operation,
-) {
-    bool empty = trace_span_is_canonical_empty(region.span);
-    if (empty) {
-        if (ray_generation || region.stride != 0) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-        return {};
-    }
-    if (region.span.size == 0 || region.stride == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    gpu::RayTracingPipelineCaps caps =
-        state.caps.ray_tracing_pipelines;
-    if (caps.shader_group_handle_size == 0
-        || caps.shader_group_handle_alignment == 0
-        || caps.shader_group_base_alignment == 0
-        || caps.max_shader_group_stride == 0
-        || region.stride < caps.shader_group_handle_size
-        || region.stride % caps.shader_group_handle_alignment != 0
-        || region.stride > caps.max_shader_group_stride
-        || region.span.size % region.stride != 0
-        || (ray_generation && region.span.size != region.stride)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    ResolvedSpan resolved = resolve_span_slot(
-        state:          state,
-        span:           &region.span,
-        required:       region.span.size,
-        operation:      operation,
-        rejected_field: "shader_binding_table",
-    )!;
-    validate_span_recording_access_only(
-        state:     state,
-        record:    record,
-        resolved:  &resolved,
-        span:      &region.span,
-        operation: operation,
-    )!;
-    if (!resolved.slot.usage.shader_binding_table
-        || (ulong)resolved.address == 0
-        || (ulong)resolved.address % caps.shader_group_base_alignment != 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    return {
-        .device_address = (vk::DeviceAddress)(ulong)resolved.address,
-        .stride         = (vk::DeviceSize)region.stride,
-        .size           = (vk::DeviceSize)region.span.size,
-    };
-}
-
 fn PreparedTraceRaysState? lower_trace_rays_state(
     CommandRecord* record,
     gpu::GpuAddress root,
     gpu::RayTracingShaderBindingTable* table,
 ) {
     if (record == null || table == null) return gpu::INVALID_ARGUMENT~;
-    if (record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
     if (record.device_state == null
         || !record.device_state.ray_tracing_pipelines_enabled) {
         return gpu::UNSUPPORTED_FEATURE~;
@@ -231,104 +145,6 @@ fn PreparedTraceRaysState? lower_trace_rays_state(
     };
 }
 
-fn bool trace_rays_queue_supported(VkDeviceState* state, uint queue_id) {
-    if (state == null
-        || state.queue_completions.ptr == null
-        || queue_id >= state.queue_completions.len) {
-        return false;
-    }
-    QueueCompletionState* completion = &state.queue_completions[queue_id];
-    return completion.bound
-        && completion.timeline != null
-        && queue_flags_include(
-            completion.queue_flags,
-            vk::QueueFlagBits.COMPUTE_BIT,
-        );
-}
-
-fn BoundPipeline*? full_prepare_trace_pipeline(
-    CommandRecord* record,
-    ZString operation,
-) {
-    if (record == null) return gpu::INVALID_ARGUMENT~;
-    if (record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = record.device_state;
-    if (state == null || !state.ray_tracing_pipelines_enabled) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
-    if ((!record.queue.roles.graphics && !record.queue.roles.compute)
-        || !trace_rays_queue_supported(state, record.queue.id)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    BoundPipeline* pipeline = &record.logical_pipeline;
-    if (!pipeline.handle.is_valid()
-        || pipeline.kind != PipelineKind.RAY_TRACING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    if (pipeline.dynamic_ray_tracing_stack_size
-        && !record.ray_tracing_stack_size_set) {
-        return report_contract_failure(
-            state:               state,
-            operation:           operation,
-            public_fault:        gpu::INVALID_RESOURCE_STATE,
-            resource_kind:       gpu::DebugResourceKind.PIPELINE,
-            has_public_identity: true,
-            index:               pipeline.handle.index,
-            generation:          pipeline.handle.generation,
-            debug_name:          null,
-            rejected_field:      "pipeline_stack_size",
-            invariant:           "dynamic ray-tracing stack size must be set before tracing",
-            backend_text:        null,
-        )~;
-    }
-    return pipeline;
-}
-
-fn PreparedTraceRaysState? full_prepare_trace_rays_state(
-    CommandRecord* record,
-    gpu::GpuAddress root,
-    gpu::RayTracingShaderBindingTable* table,
-    ZString operation,
-) {
-    if (record == null || table == null) return gpu::INVALID_ARGUMENT~;
-    VkDeviceState* state = record.device_state;
-    BoundPipeline* pipeline = full_prepare_trace_pipeline(record, operation)!;
-    return {
-        .pipeline            = pipeline,
-        .ray_generation      = validate_and_lower_trace_region(
-            state:          state,
-            record:         record,
-            region:         &table.ray_generation,
-            ray_generation: true,
-            operation:      operation,
-        )!,
-        .miss                = validate_and_lower_trace_region(
-            state:          state,
-            record:         record,
-            region:         &table.miss,
-            ray_generation: false,
-            operation:      operation,
-        )!,
-        .hit                 = validate_and_lower_trace_region(
-            state:          state,
-            record:         record,
-            region:         &table.hit,
-            ray_generation: false,
-            operation:      operation,
-        )!,
-        .callable            = validate_and_lower_trace_region(
-            state:          state,
-            record:         record,
-            region:         &table.callable,
-            ray_generation: false,
-            operation:      operation,
-        )!,
-        .root                = root,
-    };
-}
-
 fn PreparedTraceRays? lower_trace_rays(
     CommandRecord* record,
     gpu::GpuAddress root,
@@ -336,51 +152,12 @@ fn PreparedTraceRays? lower_trace_rays(
     gpu::Vec3u dimensions,
 ) {
     if (record == null || table == null) return gpu::INVALID_ARGUMENT~;
-    if (record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
     if (record.device_state == null
         || !record.device_state.ray_tracing_pipelines_enabled) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
-    validate_trace_dimensions(record.device_state, dimensions, false)!;
     return {
         .state      = lower_trace_rays_state(record, root, table)!,
-        .dimensions = dimensions,
-    };
-}
-
-fn PreparedTraceRays? full_prepare_trace_rays(
-    CommandRecord* record,
-    gpu::GpuAddress root,
-    gpu::RayTracingShaderBindingTable* table,
-    gpu::Vec3u dimensions,
-) {
-    if (record == null || table == null) return gpu::INVALID_ARGUMENT~;
-    if (record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = record.device_state;
-    if (state == null || !state.ray_tracing_pipelines_enabled) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
-    if ((!record.queue.roles.graphics && !record.queue.roles.compute)
-        || !trace_rays_queue_supported(state, record.queue.id)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    BoundPipeline* pipeline = &record.logical_pipeline;
-    if (!pipeline.handle.is_valid()
-        || pipeline.kind != PipelineKind.RAY_TRACING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    validate_trace_dimensions(record.device_state, dimensions, true)!;
-    return {
-        .state = full_prepare_trace_rays_state(
-            record:    record,
-            root:      root,
-            table:     table,
-            operation: "cmd_trace_rays",
-        )!,
         .dimensions = dimensions,
     };
 }
@@ -394,33 +171,6 @@ fn ResolvedSpan? lower_trace_rays_indirect_args(
         args,
         gpu::TraceRaysIndirectCommand::size,
     )!;
-    if ((ulong)resolved.address % 4 != 0) return gpu::INVALID_ARGUMENT~;
-    return resolved;
-}
-
-fn ResolvedSpan? validate_and_lower_trace_rays_indirect_args(
-    VkDeviceState* state,
-    CommandRecord* record,
-    gpu::GpuSpan* args,
-) {
-    ResolvedSpan resolved = resolve_span_slot(
-        state:          state,
-        span:           args,
-        required:       gpu::TraceRaysIndirectCommand::size,
-        operation:      "cmd_trace_rays_indirect",
-        rejected_field: "args",
-    )!;
-    validate_span_recording_access_only(
-        state:     state,
-        record:    record,
-        resolved:  &resolved,
-        span:      args,
-        operation: "cmd_trace_rays_indirect",
-    )!;
-    if (!resolved.slot.usage.indirect
-        || (ulong)resolved.address % 4 != 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     return resolved;
 }
 
@@ -431,9 +181,6 @@ fn PreparedTraceRaysIndirect? lower_trace_rays_indirect(
     gpu::GpuSpan args,
 ) {
     if (record == null) return gpu::INVALID_ARGUMENT~;
-    if (record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
     VkDeviceState* state = record.device_state;
     if (state == null
         || !state.caps.ray_tracing_pipelines.indirect_dispatch) {
@@ -442,36 +189,6 @@ fn PreparedTraceRaysIndirect? lower_trace_rays_indirect(
     return {
         .state     = lower_trace_rays_state(record, root, table)!,
         .args      = lower_trace_rays_indirect_args(state, &args)!,
-    };
-}
-
-fn PreparedTraceRaysIndirect? full_prepare_trace_rays_indirect(
-    CommandRecord* record,
-    gpu::GpuAddress root,
-    gpu::RayTracingShaderBindingTable* table,
-    gpu::GpuSpan args,
-) {
-    if (record == null) return gpu::INVALID_ARGUMENT~;
-    if (record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = record.device_state;
-    if (state == null
-        || !state.caps.ray_tracing_pipelines.indirect_dispatch) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
-    return {
-        .state = full_prepare_trace_rays_state(
-            record:    record,
-            root:      root,
-            table:     table,
-            operation: "cmd_trace_rays_indirect",
-        )!,
-        .args = validate_and_lower_trace_rays_indirect_args(
-            state,
-            record,
-            &args,
-        )!,
     };
 }
 
@@ -484,33 +201,6 @@ fn ResolvedSpan? lower_trace_rays_indirect2_args(
         args,
         gpu::TraceRaysIndirectCommand2::size,
     )!;
-    if ((ulong)resolved.address % 4 != 0) return gpu::INVALID_ARGUMENT~;
-    return resolved;
-}
-
-fn ResolvedSpan? validate_and_lower_trace_rays_indirect2_args(
-    VkDeviceState* state,
-    CommandRecord* record,
-    gpu::GpuSpan* args,
-) {
-    ResolvedSpan resolved = resolve_span_slot(
-        state:          state,
-        span:           args,
-        required:       gpu::TraceRaysIndirectCommand2::size,
-        operation:      "cmd_trace_rays_indirect2",
-        rejected_field: "args",
-    )!;
-    validate_span_recording_access_only(
-        state:     state,
-        record:    record,
-        resolved:  &resolved,
-        span:      args,
-        operation: "cmd_trace_rays_indirect2",
-    )!;
-    if (!resolved.slot.usage.indirect
-        || (ulong)resolved.address % 4 != 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     return resolved;
 }
 
@@ -520,9 +210,6 @@ fn PreparedTraceRaysIndirect2? lower_trace_rays_indirect2(
     gpu::GpuSpan args,
 ) {
     if (record == null) return gpu::INVALID_ARGUMENT~;
-    if (record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
     VkDeviceState* state = record.device_state;
     if (state == null
         || !state.caps.ray_tracing_pipelines.indirect2_dispatch) {
@@ -532,34 +219,6 @@ fn PreparedTraceRaysIndirect2? lower_trace_rays_indirect2(
         .pipeline  = borrow_bound_pipeline(record)!,
         .root      = root,
         .args      = lower_trace_rays_indirect2_args(state, &args)!,
-    };
-}
-
-fn PreparedTraceRaysIndirect2? full_prepare_trace_rays_indirect2(
-    CommandRecord* record,
-    gpu::GpuAddress root,
-    gpu::GpuSpan args,
-) {
-    if (record == null) return gpu::INVALID_ARGUMENT~;
-    if (record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = record.device_state;
-    if (state == null
-        || !state.caps.ray_tracing_pipelines.indirect2_dispatch) {
-        return gpu::UNSUPPORTED_FEATURE~;
-    }
-    return {
-        .pipeline = full_prepare_trace_pipeline(
-            record,
-            "cmd_trace_rays_indirect2",
-        )!,
-        .root = root,
-        .args = validate_and_lower_trace_rays_indirect2_args(
-            state,
-            record,
-            &args,
-        )!,
     };
 }
 
@@ -671,7 +330,7 @@ fn RayTracingStackSizeOps ray_tracing_stack_size_ops_real(
     };
 }
 
-fn void? trusted_set_ray_tracing_pipeline_stack_size_with_ops(
+fn void? vk_cmd_set_ray_tracing_pipeline_stack_size_with_ops(
     CommandRecord* record,
     ulong pipeline_stack_size,
     RayTracingStackSizeOps* ops,
@@ -679,132 +338,26 @@ fn void? trusted_set_ray_tracing_pipeline_stack_size_with_ops(
     if (record == null || ops == null || ops.set == null) {
         return gpu::INVALID_ARGUMENT~;
     }
+    if (pipeline_stack_size > uint::max) return gpu::INVALID_ARGUMENT~;
     ops.set(
         ops.user_data,
         record.command_buffer,
         (uint)pipeline_stack_size,
     );
-    record.ray_tracing_stack_size_set = true;
 }
 
-fn void? full_set_ray_tracing_pipeline_stack_size_with_ops(
+fn void? vk_cmd_set_ray_tracing_pipeline_stack_size(
     CommandRecord* record,
     ulong pipeline_stack_size,
-    RayTracingStackSizeOps* ops,
 ) {
-    if (record == null || ops == null || ops.set == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (record.state != gpu::internal::CommandState.RECORDING) {
-        return report_contract_failure(
-            state:               record.device_state,
-            operation:           "cmd_set_ray_tracing_pipeline_stack_size",
-            public_fault:        gpu::COMMAND_RECORDING_ERROR,
-            resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
-            has_public_identity: record.identity.is_valid(),
-            index:               record.identity.index,
-            generation:          record.identity.generation,
-            debug_name:          null,
-            rejected_field:      "CommandList.state",
-            invariant:           "command must be recording outside a render pass",
-            backend_text:        null,
-        )~;
-    }
-    VkDeviceState* state = record.device_state;
-    if (state == null || !state.ray_tracing_pipelines_enabled) {
+    if (record.device_state == null
+        || !record.device_state.ray_tracing_pipelines_enabled
+        || record.device_state.ray_tracing_pipeline_operations.cmd_set_stack_size == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
-    if ((!record.queue.roles.graphics && !record.queue.roles.compute)
-        || !trace_rays_queue_supported(state, record.queue.id)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "cmd_set_ray_tracing_pipeline_stack_size",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.NONE,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "CommandList.queue",
-            invariant:           "selected queue family must support compute operations",
-            backend_text:        null,
-        )~;
-    }
-    BoundPipeline* pipeline = &record.logical_pipeline;
-    if (!pipeline.handle.is_valid()) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "cmd_set_ray_tracing_pipeline_stack_size",
-            public_fault:        gpu::COMMAND_RECORDING_ERROR,
-            resource_kind:       gpu::DebugResourceKind.PIPELINE,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "pipeline",
-            invariant:           "a dynamic-stack ray-tracing pipeline must be active",
-            backend_text:        null,
-        )~;
-    }
-    if (pipeline.kind != PipelineKind.RAY_TRACING
-        || !pipeline.dynamic_ray_tracing_stack_size) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "cmd_set_ray_tracing_pipeline_stack_size",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.PIPELINE,
-            has_public_identity: true,
-            index:               pipeline.handle.index,
-            generation:          pipeline.handle.generation,
-            debug_name:          null,
-            rejected_field:      "pipeline",
-            invariant:           "active pipeline must be a dynamic-stack ray-tracing pipeline",
-            backend_text:        null,
-        )~;
-    }
-    if (pipeline_stack_size > uint::max) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "cmd_set_ray_tracing_pipeline_stack_size",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.NONE,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "pipeline_stack_size",
-            invariant:           "stack size must be representable by uint",
-            backend_text:        null,
-        )~;
-    }
-    ops.set(
-        ops.user_data,
-        record.command_buffer,
-        (uint)pipeline_stack_size,
-    );
-    record.ray_tracing_stack_size_set = true;
-}
-
-fn void? trusted_set_ray_tracing_pipeline_stack_size(
-    CommandRecord* record,
-    ulong pipeline_stack_size,
-) {
     RayTracingStackSizeOps ops =
         ray_tracing_stack_size_ops_real(record.device_state);
-    return trusted_set_ray_tracing_pipeline_stack_size_with_ops(
-        record,
-        pipeline_stack_size,
-        &ops,
-    );
-}
-
-fn void? full_set_ray_tracing_pipeline_stack_size(
-    CommandRecord* record,
-    ulong pipeline_stack_size,
-) {
-    RayTracingStackSizeOps ops =
-        ray_tracing_stack_size_ops_real(record.device_state);
-    return full_set_ray_tracing_pipeline_stack_size_with_ops(
+    return vk_cmd_set_ray_tracing_pipeline_stack_size_with_ops(
         record,
         pipeline_stack_size,
         &ops,
@@ -881,7 +434,7 @@ fn void record_trace_rays_indirect2_with_ops(
     );
 }
 
-fn void? trusted_trace_rays_with_ops(
+fn void? vk_cmd_trace_rays_with_ops(
     CommandRecord* record,
     gpu::GpuAddress root,
     gpu::RayTracingShaderBindingTable* table,
@@ -900,34 +453,18 @@ fn void? trusted_trace_rays_with_ops(
     record_trace_rays_with_ops(record, &trace, ops);
 }
 
-fn void? full_trace_rays_with_ops(
+fn void? vk_cmd_trace_rays(
     CommandRecord* record,
     gpu::GpuAddress root,
     gpu::RayTracingShaderBindingTable* table,
     gpu::Vec3u dimensions,
-    TraceRaysOps* ops,
 ) {
-    if (ops == null || ops.push_root == null || ops.trace == null) {
-        return gpu::INVALID_ARGUMENT~;
+    if (record.device_state == null
+        || record.device_state.ray_tracing_pipeline_operations.cmd_trace_rays == null) {
+        return gpu::UNSUPPORTED_FEATURE~;
     }
-    PreparedTraceRays trace = full_prepare_trace_rays(
-        record:     record,
-        root:       root,
-        table:      table,
-        dimensions: dimensions,
-    )!;
-
-    record_trace_rays_with_ops(record, &trace, ops);
-}
-
-fn void? trusted_trace_rays(
-    CommandRecord* record,
-    gpu::GpuAddress root,
-    gpu::RayTracingShaderBindingTable* table,
-    gpu::Vec3u dimensions,
-) {
     TraceRaysOps ops = trace_rays_ops_real(record.device_state);
-    return trusted_trace_rays_with_ops(
+    return vk_cmd_trace_rays_with_ops(
         record:     record,
         root:       root,
         table:      table,
@@ -936,23 +473,7 @@ fn void? trusted_trace_rays(
     );
 }
 
-fn void? full_trace_rays(
-    CommandRecord* record,
-    gpu::GpuAddress root,
-    gpu::RayTracingShaderBindingTable* table,
-    gpu::Vec3u dimensions,
-) {
-    TraceRaysOps ops = trace_rays_ops_real(record.device_state);
-    return full_trace_rays_with_ops(
-        record:     record,
-        root:       root,
-        table:      table,
-        dimensions: dimensions,
-        ops:        &ops,
-    );
-}
-
-fn void? trusted_trace_rays_indirect_with_ops(
+fn void? vk_cmd_trace_rays_indirect_with_ops(
     CommandRecord* record,
     gpu::GpuAddress root,
     gpu::RayTracingShaderBindingTable* table,
@@ -972,35 +493,18 @@ fn void? trusted_trace_rays_indirect_with_ops(
     record_trace_rays_indirect_with_ops(record, &trace, ops);
 }
 
-fn void? full_trace_rays_indirect_with_ops(
+fn void? vk_cmd_trace_rays_indirect(
     CommandRecord* record,
     gpu::GpuAddress root,
     gpu::RayTracingShaderBindingTable* table,
     gpu::GpuSpan args,
-    TraceRaysOps* ops,
 ) {
-    if (ops == null || ops.push_root == null
-        || ops.trace_indirect == null) {
-        return gpu::INVALID_ARGUMENT~;
+    if (record.device_state == null
+        || record.device_state.ray_tracing_pipeline_operations.cmd_trace_rays_indirect == null) {
+        return gpu::UNSUPPORTED_FEATURE~;
     }
-    PreparedTraceRaysIndirect trace = full_prepare_trace_rays_indirect(
-        record: record,
-        root:   root,
-        table:  table,
-        args:   args,
-    )!;
-
-    record_trace_rays_indirect_with_ops(record, &trace, ops);
-}
-
-fn void? trusted_trace_rays_indirect(
-    CommandRecord* record,
-    gpu::GpuAddress root,
-    gpu::RayTracingShaderBindingTable* table,
-    gpu::GpuSpan args,
-) {
     TraceRaysOps ops = trace_rays_ops_real(record.device_state);
-    return trusted_trace_rays_indirect_with_ops(
+    return vk_cmd_trace_rays_indirect_with_ops(
         record: record,
         root:   root,
         table:  table,
@@ -1009,23 +513,7 @@ fn void? trusted_trace_rays_indirect(
     );
 }
 
-fn void? full_trace_rays_indirect(
-    CommandRecord* record,
-    gpu::GpuAddress root,
-    gpu::RayTracingShaderBindingTable* table,
-    gpu::GpuSpan args,
-) {
-    TraceRaysOps ops = trace_rays_ops_real(record.device_state);
-    return full_trace_rays_indirect_with_ops(
-        record: record,
-        root:   root,
-        table:  table,
-        args:   args,
-        ops:    &ops,
-    );
-}
-
-fn void? trusted_trace_rays_indirect2_with_ops(
+fn void? vk_cmd_trace_rays_indirect2_with_ops(
     CommandRecord* record,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
@@ -1043,46 +531,17 @@ fn void? trusted_trace_rays_indirect2_with_ops(
     record_trace_rays_indirect2_with_ops(record, &trace, ops);
 }
 
-fn void? full_trace_rays_indirect2_with_ops(
+fn void? vk_cmd_trace_rays_indirect2(
     CommandRecord* record,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
-    TraceRaysOps* ops,
 ) {
-    if (ops == null || ops.push_root == null
-        || ops.trace_indirect2 == null) {
-        return gpu::INVALID_ARGUMENT~;
+    if (record.device_state == null
+        || record.device_state.ray_tracing_pipeline_operations.cmd_trace_rays_indirect2 == null) {
+        return gpu::UNSUPPORTED_FEATURE~;
     }
-    PreparedTraceRaysIndirect2 trace = full_prepare_trace_rays_indirect2(
-        record: record,
-        root:   root,
-        args:   args,
-    )!;
-
-    record_trace_rays_indirect2_with_ops(record, &trace, ops);
-}
-
-fn void? trusted_trace_rays_indirect2(
-    CommandRecord* record,
-    gpu::GpuAddress root,
-    gpu::GpuSpan args,
-) {
     TraceRaysOps ops = trace_rays_ops_real(record.device_state);
-    return trusted_trace_rays_indirect2_with_ops(
-        record: record,
-        root:   root,
-        args:   args,
-        ops:    &ops,
-    );
-}
-
-fn void? full_trace_rays_indirect2(
-    CommandRecord* record,
-    gpu::GpuAddress root,
-    gpu::GpuSpan args,
-) {
-    TraceRaysOps ops = trace_rays_ops_real(record.device_state);
-    return full_trace_rays_indirect2_with_ops(
+    return vk_cmd_trace_rays_indirect2_with_ops(
         record: record,
         root:   root,
         args:   args,

@@ -79,7 +79,8 @@ gpu::TextureBufferCopyDesc readback = { .texture = texture, .dst = readback_span
 gpu::cmd_copy_texture_to_buffer(&commands, &readback)!;
 ```
 
-Copies validate bounds, usage, and queue support. They do not transition
+Applications supply valid usage, alignment, bounds, and queue access. Copies
+resolve library handles and protect argument lowering. They do not transition
 textures or make results host-visible; record a barrier for each.
 
 Regions are in texels. The buffer side holds tightly packed rows unless
@@ -177,10 +178,8 @@ gpu::cmd_set_scissor(&commands, &clip)!;
 
 `cmd_set_graphics_state` applies the whole packet. `cmd_set_viewport` and
 `cmd_set_scissor` override one field each after a complete state exists. An
-enabled stencil test with an undefined `CompareOp` or `StencilOp` faults
-`INVALID_ARGUMENT` under every policy. Under `FULL`, an enabled stencil
-test on a pipeline without a stencil aspect reports a `performance`
-diagnostic without faulting. The application must ensure that a stencil
+enabled stencil test requires valid `CompareOp` and `StencilOp` values and
+a compatible stencil attachment. The application must ensure that a stencil
 `LOAD` reads defined contents; a `DONT_CARE` store leaves them undefined.
 The library does not track stencil content history.
 Binding a pipeline or beginning a pass does not reset state. Fields are
@@ -233,7 +232,6 @@ gpu::cmd_draw_indexed_indirect_count(
 Indirect draw counts must fit `DeviceCaps.max_draw_indirect_count`;
 `cmd_draw_indexed_indirect_count` needs `DeviceCaps.draw_indirect_count`.
 
-
 ## Mesh draws
 
 ```c3
@@ -265,7 +263,7 @@ gpu::cmd_draw_mesh_tasks_indirect_count(
 Mesh draws need a bound mesh pipeline, a render pass, and a complete
 graphics state. `groups` are task work groups when the pipeline has a task
 shader, else mesh work groups; each axis and the product must fit the
-`DeviceCaps.mesh_shaders` limits in every validation mode.
+`DeviceCaps.mesh_shaders` limits.
 Indirect records are 12-byte `DrawMeshTasksIndirectCommand` values made
 visible with a barrier to `.indirect`; the count form needs
 `DeviceCaps.draw_indirect_count`.
@@ -378,11 +376,11 @@ No-ops without debug-utils support. Nesting must balance.
 
 | Cause | Fault |
 |---|---|
-| wrong token phase, unbalanced pass, or no bound pipeline | `COMMAND_RECORDING_ERROR` |
-| state contradicts prior state | `INVALID_RESOURCE_STATE` |
+| wrong token phase or unbalanced pass | `COMMAND_RECORDING_ERROR` |
+| unusable pipeline snapshot or incompatible implementation state | `INVALID_RESOURCE_STATE` |
 | bad range, count, or descriptor | `INVALID_ARGUMENT` |
 | stale or foreign handle | `INVALID_HANDLE` |
-| unsupported queue operation or capability | `UNSUPPORTED_FEATURE` |
+| unavailable capability or native procedure | `UNSUPPORTED_FEATURE` |
 | command-unit or geometry capacity exceeded | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` |
 | generated reservation exceeded | `GENERATED_SCRATCH_EXHAUSTED` |
 | no free unit | `DEVICE_BUSY` |

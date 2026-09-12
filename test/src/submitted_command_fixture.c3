@@ -25,7 +25,6 @@ fn gpu::internal::vk::CommandRecord* submitted_command_fixture_record(
     )!!;
     gpu::internal::vk::CommandRecord* record = state.commands.claim(
         device:       gpu::DEVICE_INVALID,
-        ops:          null,
         device_state: state,
         value: {
             .allocator        = allocator,

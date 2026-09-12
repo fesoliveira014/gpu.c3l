@@ -1331,8 +1331,6 @@ fn void sparse_backing_resolution_checks_every_live_compatibility_rule() @test {
         allocation_offset: 0,
         size:              4096,
     )) == gpu::INVALID_HANDLE);
-    fixture.state.validation_policy.contract =
-        gpu::ContractValidation.TRUSTED;
     fixture.allocation_cells[0].value = original;
     fixture.allocation_cells[0].value.memory_class =
         gpu::MemoryClass.GPU_PRIVATE;
@@ -1343,7 +1341,7 @@ fn void sparse_backing_resolution_checks_every_live_compatibility_rule() @test {
         allocation_offset: 0,
         size:              4096,
     )) == gpu::INVALID_ARGUMENT,
-        "TRUSTED mode keeps sparse allocation safety validation");
+        "Sparse backing resolution keeps allocation safety checks");
 }
 
 fn void sparse_bind_host_allocation_failure_sweep_is_transactional() @test {
@@ -1983,7 +1981,6 @@ fn bool run_real_sparse_bind_dimension(
 
 fn void real_sparse_bind_use_and_unbind_when_supported() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation = gpu::ContractValidation.TRUSTED,
         .application_name    = "gpu_sparse_bind_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;

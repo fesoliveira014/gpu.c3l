@@ -104,7 +104,6 @@ fn gpu::Device? create_ray_tracing_test_device(
 ) {
     gpu::RuntimeDesc runtime_desc = {
         .application_name = "gpu_ray_tracing_test",
-        .contract_validation = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .debug_callback = &capture_trace_validation_error,
         .debug_user_data = validation,

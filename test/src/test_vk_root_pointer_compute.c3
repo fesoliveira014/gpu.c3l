@@ -54,7 +54,6 @@ fn void dispatch_root_probe(
 fn void root_pointer_compute_readback() @test {
     const uint COUNT = 256;
     gpu::RuntimeDesc device_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_root_pointer_test",
     };
@@ -155,7 +154,6 @@ fn Vec4f transform_column_major(Mat4f* m, Vec4f v) {
 
 fn void matrix_and_array_root_round_trips() @test {
     gpu::RuntimeDesc device_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_matrix_root_test",
     };
@@ -223,7 +221,6 @@ fn void direct_reference_root_runtime_evidence() @test {
     const uint INPUT_VALUE = 0x1357_9bdf;
     const uint XOR_VALUE = 0xa5a5_5a5a;
     gpu::RuntimeDesc device_desc = {
-        .contract_validation       = gpu::ContractValidation.FULL,
         .enable_vulkan_validation  = true,
         .application_name          = "gpu_root_reference_evidence",
     };
@@ -293,7 +290,6 @@ fn void direct_reference_root_runtime_evidence() @test {
 fn void signed_root_runtime_evidence() @test {
     const uint EXPECTED = 0xc3a5_f17e;
     gpu::RuntimeDesc device_desc = {
-        .contract_validation       = gpu::ContractValidation.FULL,
         .enable_vulkan_validation  = true,
         .application_name          = "gpu_signed_root_evidence",
     };
@@ -335,7 +331,6 @@ fn void signed_root_runtime_evidence() @test {
 fn void inline_root_payload_reaches_shader() @test {
     const uint COUNT = 128;
     gpu::RuntimeDesc device_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_inline_root_test",
     };

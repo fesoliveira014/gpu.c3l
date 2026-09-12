@@ -25,7 +25,6 @@ const usz CACHE_RT_BYTES = CACHE_RT_SIZE * CACHE_RT_SIZE * 4;
 
 fn gpu::Device make_cache_test_device() {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_pipeline_cache_test",
     };
@@ -34,7 +33,6 @@ fn gpu::Device make_cache_test_device() {
 
 fn gpu::Device make_cache_test_device_with_capacity(uint pipeline_capacity) {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .pipeline_capacity = pipeline_capacity,
         .application_name  = "gpu_pipeline_cache_capacity_test",
@@ -221,7 +219,7 @@ fn int record_generated_dispatch(void* raw_args) {
             .read      = &capture_generated_layout_read,
         };
         if (catch dispatch_fault =
-            vk::trusted_dispatch_generated_with_layout_read_ops(
+            vk::vk_cmd_dispatch_generated_with_layout_read_ops(
                 commands:           record,
                 records:            args.records,
                 count_span:         args.count,

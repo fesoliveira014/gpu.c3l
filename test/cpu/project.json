@@ -83,6 +83,7 @@
     },
     "command_wrapper_bench": {
       "type": "executable",
+      "features": [ "COMMAND_WRAPPER_BENCH" ],
       "sources": [
         "command_wrapper_bench.c3"
       ]

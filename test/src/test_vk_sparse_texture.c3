@@ -887,84 +887,6 @@ fn void unsupported_sparse_aspect_shapes_fault_unsupported() @test {
     assert_sparse_shape_unsupported(&memory, (&invalid)[:1]);
 }
 
-fn void unbacked_sparse_texture_rejects_copies_in_full_validation() @test {
-    gpu::RuntimeDesc runtime_desc = {
-        .contract_validation = gpu::ContractValidation.FULL,
-        .application_name    = "gpu_sparse_copy_validation_test",
-    };
-    gpu::Device? maybe_device = create_test_device(&runtime_desc);
-    if (catch create_fault = maybe_device) {
-        assert(create_fault == gpu::UNSUPPORTED_BACKEND
-            || create_fault == gpu::UNSUPPORTED_FEATURE);
-        io::eprintfn(
-            "unbacked_sparse_texture_rejects_copies_in_full_validation: "
-            "no Vulkan device available, skipping",
-        );
-        return;
-    }
-    gpu::Device device = maybe_device;
-    defer destroy_test_device(&device)!!;
-    gpu::TextureDesc texture_desc = {
-        .access = { .transfer },
-        .width  = 4,
-        .height = 4,
-        .format = gpu::Format.RGBA8_UNORM,
-        .usage  = { .transfer_src, .transfer_dst },
-    };
-    gpu::TextureHandle texture =
-        gpu::create_texture(&device, &texture_desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-    OwnedSpan buffer = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .transfer },
-        debug_name:   "sparse_copy_validation",
-    )!!;
-    defer free_owned_span(&device, &buffer)!!;
-    gpu::Queue queue =
-        gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
-    gpu::CommandAllocator allocator =
-        gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::TextureSlot* slot = state.textures.get(texture)!!;
-    slot.sparse = true;
-    defer slot.sparse = false;
-
-    gpu::TextureBarrier barrier = {
-        .texture = texture,
-        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
-        .after   = {
-            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
-            .stages = { .transfer },
-            .access = { .write },
-        },
-    };
-    gpu::cmd_texture_barrier(&commands, &barrier)!!;
-
-    gpu::BufferTextureCopyDesc upload = {
-        .src     = buffer.span,
-        .texture = texture,
-    };
-    assert(@catch(gpu::cmd_copy_buffer_to_texture(
-        &commands,
-        &upload,
-    )) == gpu::INVALID_ARGUMENT);
-    gpu::TextureBufferCopyDesc readback = {
-        .texture = texture,
-        .dst     = buffer.span,
-    };
-    assert(@catch(gpu::cmd_copy_texture_to_buffer(
-        &commands,
-        &readback,
-    )) == gpu::INVALID_ARGUMENT);
-}
-
 fn bool exercise_real_sparse_three_dimensional_lifecycle(
     gpu::Device* device,
     gpu::QueueRoles access,
@@ -1003,7 +925,6 @@ fn bool exercise_real_sparse_three_dimensional_lifecycle(
 
 fn void sparse_texture_real_lifecycle_when_supported() @test {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation = gpu::ContractValidation.FULL,
         .application_name    = "gpu_sparse_texture_test",
     };
     gpu::Runtime? maybe_runtime = gpu::create_runtime(&runtime_desc);
@@ -1170,14 +1091,6 @@ fn void sparse_texture_real_lifecycle_when_supported() @test {
                     },
                 };
                 gpu::cmd_texture_barrier(&commands, &barrier)!!;
-                gpu::BufferTextureCopyDesc copy = {
-                    .src     = upload.span,
-                    .texture = transfer,
-                };
-                assert(@catch(gpu::cmd_copy_buffer_to_texture(
-                    &commands,
-                    &copy,
-                )) == gpu::INVALID_ARGUMENT);
                 gpu::discard_commands(&commands)!!;
                 gpu::destroy_texture(&device, transfer)!!;
                 gpu::destroy_command_allocator(&allocator)!!;

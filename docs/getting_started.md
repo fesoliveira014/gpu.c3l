@@ -144,7 +144,7 @@ struct DoublerRoot {
 ### Runtime and device
 
 ```c3
-gpu::RuntimeDesc runtime_desc = gpu::full_validation_runtime_desc();
+gpu::RuntimeDesc runtime_desc = { .enable_vulkan_validation = true };
 runtime_desc.application_name = "hello_gpu";
 gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
 defer (void)gpu::destroy_runtime(&runtime);
@@ -155,10 +155,9 @@ gpu::Device device = gpu::create_device(&adapter)!;
 defer (void)gpu::destroy_device(&device);
 ```
 
-`full_validation_runtime_desc` turns on
-[contract validation](concepts.md#validation-and-diagnostics) and the Vulkan
-validation layer. Use it during development. A zero `RuntimeDesc` turns both
-off.
+`enable_vulkan_validation` requests the Vulkan validation layer. Use it
+during development; a zero `RuntimeDesc` leaves it off. Applications remain
+responsible for valid GPU usage and resource lifetimes.
 
 `create_device` with no descriptor selects default
 [queues](concepts.md#queues) and no presentation. The `defer` lines destroy

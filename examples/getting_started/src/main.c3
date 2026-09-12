@@ -22,7 +22,7 @@ fn int main() {
 }
 
 fn void? run() {
-    gpu::RuntimeDesc runtime_desc = gpu::full_validation_runtime_desc();
+    gpu::RuntimeDesc runtime_desc = { .enable_vulkan_validation = true };
     runtime_desc.application_name = "hello_gpu";
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer (void)gpu::destroy_runtime(&runtime);

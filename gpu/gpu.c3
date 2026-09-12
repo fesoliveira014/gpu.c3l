@@ -204,13 +204,6 @@ fn bool Queue.equals(self, Queue other) @operator(==) {
         && (uint)self.roles == (uint)other.roles;
 }
 
-<* Construct the all-enabled validation descriptor for development.
-   @return "A reusable FULL contract-validation descriptor with backend validation enabled." *>
-fn RuntimeDesc full_validation_runtime_desc() => {
-    .contract_validation = ContractValidation.FULL,
-    .enable_vulkan_validation = true,
-};
-
 <* Initialize backend discovery. Importing gpu performs no initialization.
    The descriptor is borrowed only for the call; callback user data must remain
    valid for every callback until runtime destruction.
@@ -1812,7 +1805,7 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
 fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (label == null) return INVALID_ARGUMENT~;
-    return record.ops.begin_label(record, label, color);
+    return gpu::internal::vk::vk_cmd_begin_label(record, label, color);
 }
 
 <* Close a debug-utils label region.
@@ -1822,63 +1815,59 @@ fn void? cmd_begin_label(CommandList* commands, ZString label, float[4] color = 
    @return "Success, or a recoverable command-state fault." *>
 fn void? cmd_end_label(CommandList* commands) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.end_label(record);
+    return gpu::internal::vk::vk_cmd_end_label(record);
 }
 
 <* Record a buffer-to-buffer copy; surrounding barriers are caller-owned.
    Preconditions: usage and queue access are valid.
    Always checked: token phase, required pointer, identity, bounds, and safe lowering.
-   FULL diagnostics: usage and queue-access misuse.
    @param commands : "Live recording token."
    @param desc : "Borrowed exact source and destination ranges."
    @return "Success, or a recoverable command, validation, ownership, bounds, or device fault." *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return record.ops.copy_buffer(record, desc);
+    return gpu::internal::vk::vk_cmd_copy_buffer(record, desc);
 }
 
 <* Record a 32-bit-pattern fill over dst.
-   Preconditions: usage, queue access, and surrounding barriers are valid.
-   Always checked: token phase, identity, bounds, alignment, and safe lowering.
-   FULL diagnostics: usage and queue-access misuse.
+   Preconditions: four-byte alignment, usage, queue access, and surrounding barriers are valid.
+   Always checked: token phase, identity, bounds, and safe lowering.
    @param commands : "Live recording token."
    @param dst : "Destination GPU span."
    @param value : "Repeated 32-bit fill pattern."
    @return "Success, or a recoverable command, validation, ownership, bounds, alignment, or device fault." *>
 fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.fill_buffer(record, dst, value);
+    return gpu::internal::vk::vk_cmd_fill_buffer(record, dst, value);
 }
 
 <* Record a dimension-aware buffer-to-texture copy; the effective layout is
    TRANSFER_DST and surrounding barriers remain caller-owned.
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
    Always checked: token phase, required pointer, identities, format support,
-   dimension/subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
-   FULL diagnostics: usage and queue-access misuse.
+   dimension/subresource/extent bounds, byte-size overflow, and safe lowering.
    @param commands : "Live recording token."
    @param desc : "Borrowed source-span and destination-texture region."
    @return "Success, or a recoverable command, validation, ownership, bounds, alignment, support, or device fault." *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return record.ops.copy_buffer_to_texture(record, desc);
+    return gpu::internal::vk::vk_cmd_copy_buffer_to_texture(record, desc);
 }
 
 <* Record a dimension-aware texture-to-buffer copy; the effective layout is
    TRANSFER_SRC and surrounding barriers remain caller-owned.
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
    Always checked: token phase, required pointer, identities, format support,
-   dimension/subresource/extent bounds, byte-size overflow, alignment, and safe lowering.
-   FULL diagnostics: usage and queue-access misuse.
+   dimension/subresource/extent bounds, byte-size overflow, and safe lowering.
    @param commands : "Live recording token."
    @param desc : "Borrowed source-texture and destination-span region."
    @return "Success, or a recoverable command, validation, ownership, bounds, alignment, support, or device fault." *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return record.ops.copy_texture_to_buffer(record, desc);
+    return gpu::internal::vk::vk_cmd_copy_texture_to_buffer(record, desc);
 }
 
 <* Record one full BLAS or TLAS build using caller-owned input and scratch
@@ -1890,7 +1879,7 @@ fn void? cmd_build_acceleration_structure(CommandList* commands, AccelerationStr
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return record.ops.build_acceleration_structure(record, desc);
+    return gpu::internal::vk::vk_cmd_build_acceleration_structure(record, desc);
 }
 
 <* Record an in-place acceleration-structure update using caller-owned input
@@ -1903,7 +1892,7 @@ fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationSt
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return record.ops.update_acceleration_structure(record, desc);
+    return gpu::internal::vk::vk_cmd_update_acceleration_structure(record, desc);
 }
 
 <* Record one GPU-ranged BLAS or TLAS build. The descriptor counts are CPU
@@ -1918,7 +1907,7 @@ fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationSt
    queue and inserts no barrier. Order a GPU producer with a barrier whose
    destination contains both `indirect` and `acceleration_structure_build`.
    The caller keeps the destination, inputs, scratch, and range span alive and
-   unmodified as required through their final GPU use under every policy.
+   unmodified as required through their final GPU use.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, maximum-count inputs, and build scratch."
    @param ranges : "Caller-owned GPU-authored fixed-stride range records."
@@ -1931,7 +1920,7 @@ fn void? cmd_build_acceleration_structure_indirect(
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return record.ops.build_acceleration_structure_indirect(
+    return gpu::internal::vk::vk_cmd_build_acceleration_structure_indirect(
         record,
         desc,
         ranges,
@@ -1959,7 +1948,7 @@ fn void? cmd_update_acceleration_structure_indirect(
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
     if (desc == null) return INVALID_ARGUMENT~;
-    return record.ops.update_acceleration_structure_indirect(
+    return gpu::internal::vk::vk_cmd_update_acceleration_structure_indirect(
         record,
         desc,
         ranges,
@@ -1979,7 +1968,7 @@ fn void? cmd_clone_acceleration_structure(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
-    return record.ops.clone_acceleration_structure(
+    return gpu::internal::vk::vk_cmd_clone_acceleration_structure(
         record,
         source,
         destination,
@@ -1990,14 +1979,12 @@ fn void? cmd_clone_acceleration_structure(
    Preconditions: the pipeline is live and valid for later use on this queue.
    Always checked: token phase, pipeline identity, ownership, descriptor-heap
    binding prerequisites, and a safe native snapshot.
-   FULL diagnostics: render-pass compatibility when binding during a pass;
-   failure preserves the prior logical bind.
    @param commands : "Live recording token."
    @param pipeline : "Compute, graphics, or ray-tracing pipeline to bind."
    @return "Success, or a recoverable command, ownership, compatibility, invalid-handle, or device fault." *>
 fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.bind_pipeline(record, pipeline);
+    return gpu::internal::vk::vk_cmd_bind_pipeline(record, pipeline);
 }
 
 <* Borrow a trivially copyable value as an inline root payload.
@@ -2014,16 +2001,15 @@ macro char[] @inline_root(value) => ((char*)value)[:@sizeof(*value)];
    dereferencing zero unless relying on defined robustness.
    Always checked: token identity, authoritative recording phase, and a
    usable bound-pipeline snapshot.
-   FULL diagnostics: active-kind and group-limit misuse.
    @param commands : "Live recording token."
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param groups : "Workgroup counts in X, Y, and Z."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, pipeline, limit, or device fault." *>
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_dispatch")!;
-    return record.ops.dispatch(record, root, groups);
+    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    return gpu::internal::vk::vk_cmd_dispatch(record, root, groups);
 }
 
 <* Dispatch indirectly with the root passed unchanged; zero is valid.
@@ -2031,16 +2017,15 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups, char
    group counts are valid; shaders make zero dereference safe.
    Always checked: token phase, identities, bounds, a usable bound-pipeline
    snapshot, and safe lowering.
-   FULL diagnostics: pipeline kind, usage, queue, and span misuse.
    @param commands : "Live recording token."
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param args : "Non-owning span containing one GPU-written dispatch record."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, pipeline, or device fault." *>
 fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_dispatch_indirect")!;
-    return record.ops.dispatch_indirect(record, root, args);
+    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    return gpu::internal::vk::vk_cmd_dispatch_indirect(record, root, args);
 }
 
 <* Execute GPU-written dispatch records, forwarding every embedded root unchanged;
@@ -2049,7 +2034,6 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
    shader zero paths are valid.
    Always checked: token phase, identities, bounds, capacity, a usable
    bound-pipeline snapshot, and safe lowering.
-   FULL diagnostics: pipeline-kind, usage, queue, and count misuse.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
    @param commands : "Live recording token."
@@ -2059,8 +2043,8 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
    @return "Success, or a recoverable command, ownership, bounds, support, scratch-capacity, or device fault." *>
 fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.dispatch_generated(
-        record:            record,
+    return gpu::internal::vk::vk_cmd_dispatch_generated(
+        commands:            record,
         records:            records,
         count_span:         count_span,
         max_dispatch_count: max_dispatch_count,
@@ -2075,7 +2059,7 @@ fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan 
    @param root : "Root GPU address passed unchanged to all ray-tracing stages."
    @param shader_binding_table : "Borrowed caller-owned SBT regions."
    @param dimensions : "Nonzero direct trace width, height, and depth within the selected device limits."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, pipeline, SBT, range, limit, ownership, or device fault." *>
 fn void? cmd_trace_rays(
     CommandList* commands,
@@ -2086,9 +2070,9 @@ fn void? cmd_trace_rays(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
-    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_trace_rays")!;
+    gpu::internal::vk::set_inline_root(record, inline_root)!;
     if (shader_binding_table == null) return INVALID_ARGUMENT~;
-    return record.ops.trace_rays(
+    return gpu::internal::vk::vk_cmd_trace_rays(
         record,
         root,
         shader_binding_table,
@@ -2103,7 +2087,7 @@ fn void? cmd_trace_rays(
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param shader_binding_table : "Borrowed caller-owned direct shader binding table regions."
    @param args : "Caller-owned span beginning with one GPU-written TraceRaysIndirectCommand, valid through completion."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, ownership, range, pipeline, support, or device fault." *>
 fn void? cmd_trace_rays_indirect(
     CommandList* commands,
@@ -2114,9 +2098,9 @@ fn void? cmd_trace_rays_indirect(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
-    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_trace_rays_indirect")!;
+    gpu::internal::vk::set_inline_root(record, inline_root)!;
     if (shader_binding_table == null) return INVALID_ARGUMENT~;
-    return record.ops.trace_rays_indirect(
+    return gpu::internal::vk::vk_cmd_trace_rays_indirect(
         record,
         root,
         shader_binding_table,
@@ -2131,24 +2115,24 @@ fn void? cmd_trace_rays_indirect(
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param args : "Caller-owned span beginning with one GPU-written TraceRaysIndirectCommand2; the packet and every shader binding table allocation it addresses must remain valid through completion."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, ownership, range, pipeline, support, or device fault." *>
 fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
-    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_trace_rays_indirect2")!;
-    return record.ops.trace_rays_indirect2(record, root, args);
+    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    return gpu::internal::vk::vk_cmd_trace_rays_indirect2(record, root, args);
 }
 
 <* Set a caller-derived byte size after binding a dynamic-stack ray pipeline.
    The value must fit uint and cover every shader execution in later traces.
    @param commands : "Live recording token outside a render pass on a compute-capable graphics or compute family."
-   @param pipeline_stack_size : "Sufficient byte count, which may be zero; FULL checks uint representability."
+   @param pipeline_stack_size : "Sufficient byte count, which may be zero; must fit uint."
    @return "Success, or a recoverable command, pipeline, queue, scope, range, support, or device fault." *>
 fn void? cmd_set_ray_tracing_pipeline_stack_size(CommandList* commands, ulong pipeline_stack_size) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
-    return record.ops.set_ray_tracing_pipeline_stack_size(
+    return gpu::internal::vk::vk_cmd_set_ray_tracing_pipeline_stack_size(
         record,
         pipeline_stack_size,
     );
@@ -2243,28 +2227,26 @@ fn GraphicsState? render_geometry_state(uint width, uint height) {
    Preconditions: attachments, layouts, queue access, dimensions, and pass phase are valid.
    Always checked: token phase, host-safe descriptor shape, a render area zero in
    exactly one dimension, identities, and safe lowering.
-   FULL diagnostics: attachment, usage, queue, compatibility, and render-area misuse.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed attachment and render-area description copied into the command stream; a zero extent selects the first attachment's extent."
    @return "Success, or a recoverable command, validation, ownership, compatibility, or device fault." *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
-    return record.ops.begin_render_pass(record, desc);
+    return gpu::internal::vk::vk_cmd_begin_render_pass(record, desc);
 }
 
 <* Replace complete graphics state before or during a pass.
    Preconditions: a compatible graphics pipeline is bound, the queue is
    graphics-capable, and all state values are valid.
    Always checked: token phase, required host-safe input, and safe lowering.
-   FULL diagnostics: pipeline, queue, enum, feature, and state-value misuse.
    @param commands : "Live recording token."
    @param state : "Borrowed complete graphics state copied into the command stream."
    @return "Success, or a recoverable command, validation, pipeline, support, or device fault." *>
 fn void? cmd_set_graphics_state(CommandList* commands, GraphicsState* state) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (!gpu::internal::graphics_state_host_safe(state)) return INVALID_ARGUMENT~;
-    return record.ops.set_graphics_state(record, state);
+    return gpu::internal::vk::vk_cmd_set_graphics_state(record, state);
 }
 
 <* End the active render pass without adding synchronization.
@@ -2274,33 +2256,31 @@ fn void? cmd_set_graphics_state(CommandList* commands, GraphicsState* state) {
    @return "Success, or a recoverable command-state fault." *>
 fn void? cmd_end_render_pass(CommandList* commands) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.end_render_pass(record);
+    return gpu::internal::vk::vk_cmd_end_render_pass(record);
 }
 
 <* Set one dynamic viewport before or during a pass.
    Preconditions: values are finite, representable, within device bounds, and height is nonzero.
    Always checked: token phase and required pointer.
-   FULL diagnostics: queue and viewport-value misuse.
    @param commands : "Live recording token."
    @param viewport : "Borrowed complete viewport state copied into the command stream."
    @return "Success, or a recoverable command, validation, queue-support, or device fault." *>
 fn void? cmd_set_viewport(CommandList* commands, Viewport* viewport) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (viewport == null) return INVALID_ARGUMENT~;
-    return record.ops.set_viewport(record, viewport);
+    return gpu::internal::vk::vk_cmd_set_viewport(record, viewport);
 }
 
 <* Set one dynamic scissor before or during a pass; overscan is valid.
    Preconditions: origin and extent are nonnegative and signed-representable.
    Always checked: token phase and required pointer.
-   FULL diagnostics: queue and scissor-value misuse.
    @param commands : "Live recording token."
    @param scissor : "Borrowed complete scissor state copied into the command stream."
    @return "Success, or a recoverable command, validation, queue-support, or device fault." *>
 fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (scissor == null) return INVALID_ARGUMENT~;
-    return record.ops.set_scissor(record, scissor);
+    return gpu::internal::vk::vk_cmd_set_scissor(record, scissor);
 }
 
 <* Draw with vertex and fragment roots passed unchanged; either may be zero.
@@ -2308,19 +2288,18 @@ fn void? cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
    and queue-admitted root data; shaders make zero dereference safe.
    Always checked: token identity, authoritative render-pass phase, and a
    usable bound-pipeline snapshot.
-   FULL diagnostics: pipeline-kind and state misuse.
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
    @param vertex_count : "Vertices drawn per instance."
    @param instance_count : "Instances to draw."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, pipeline, state, limit, or device fault." *>
 fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw")!;
-    return record.ops.draw(
-        record:        record,
+    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    return gpu::internal::vk::vk_cmd_draw(
+        commands:        record,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
         vertex_count:   vertex_count,
@@ -2333,7 +2312,6 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    queue, and shaders make zero dereference safe.
    Always checked: token phase, identities, index bounds, a usable bound-pipeline
    snapshot, and safe lowering.
-   FULL diagnostics: pipeline-kind, state, usage, queue, and index-type misuse.
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
@@ -2341,13 +2319,13 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    @param index_count : "Indices drawn per instance."
    @param instance_count : "Instances to draw."
    @param index_type : "Index element width; defaults to U32."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, pipeline, state, or device fault." *>
 fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_indexed")!;
-    return record.ops.draw_indexed(
-        record:        record,
+    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    return gpu::internal::vk::vk_cmd_draw_indexed(
+        commands:        record,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
         index_span:     index_span,
@@ -2368,9 +2346,9 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    @return "Success, or a recoverable command, pipeline, support, limit, or device fault." *>
 fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, Vec3u groups, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_mesh_tasks")!;
-    return record.ops.draw_mesh_tasks(
-        record:        record,
+    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    return gpu::internal::vk::vk_cmd_draw_mesh_tasks(
+        commands:        record,
         mesh_root:     mesh_root,
         fragment_root: fragment_root,
         groups:        groups,
@@ -2389,9 +2367,9 @@ fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAdd
    @return "Success, or a recoverable command, ownership, bounds, support, pipeline, or device fault." *>
 fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_mesh_tasks_indirect")!;
-    return record.ops.draw_mesh_tasks_indirect(
-        record:        record,
+    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    return gpu::internal::vk::vk_cmd_draw_mesh_tasks_indirect(
+        commands:        record,
         mesh_root:     mesh_root,
         fragment_root: fragment_root,
         args:          args,
@@ -2411,9 +2389,9 @@ fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_roo
    @return "Success, or a recoverable command, ownership, bounds, support, pipeline, or device fault." *>
 fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_mesh_tasks_indirect_count")!;
-    return record.ops.draw_mesh_tasks_indirect_count(
-        record:         record,
+    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    return gpu::internal::vk::vk_cmd_draw_mesh_tasks_indirect_count(
+        commands:         record,
         mesh_root:      mesh_root,
         fragment_root:  fragment_root,
         args:           args,
@@ -2427,19 +2405,18 @@ fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress me
    root data admits the queue and shaders make zero dereference safe.
    Always checked: token phase, identities, bounds, overflow, a usable
    bound-pipeline snapshot, and safe lowering.
-   FULL diagnostics: pipeline-kind, state, usage, queue, and count misuse.
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
    @param args : "Non-owning array of indirect draw records kept alive by the caller through completion."
    @param draw_count : "Number of indirect records to execute."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, pipeline, state, or device fault." *>
 fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_indirect")!;
-    return record.ops.draw_indirect(
-        record:       record,
+    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    return gpu::internal::vk::vk_cmd_draw_indirect(
+        commands:       record,
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
         args:          args,
@@ -2452,7 +2429,6 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    valid; shader zero paths and GPU-written index bounds are caller-owned.
    Always checked: token phase, identities, host-visible bounds, overflow, a
    usable bound-pipeline snapshot, and safe lowering.
-   FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse.
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
@@ -2460,13 +2436,13 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    @param draw_count : "Number of indirect records to execute."
    @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, pipeline, state, or device fault." *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_indexed_indirect")!;
-    return record.ops.draw_indexed_indirect(
-        record:       record,
+    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    return gpu::internal::vk::vk_cmd_draw_indexed_indirect(
+        commands:       record,
         vertex_root:   vertex_root,
         fragment_root: fragment_root,
         args:          args,
@@ -2481,7 +2457,6 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    zero paths, and GPU-written index bounds are valid.
    Always checked: token phase, identities, host-visible bounds, overflow, a
    usable bound-pipeline snapshot, and safe lowering.
-   FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse.
    Runtime failures: unsupported count execution faults UNSUPPORTED_FEATURE.
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
@@ -2491,13 +2466,13 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    @param max_draw_count : "Maximum records the GPU count may select."
    @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; FULL reports a public_contract diagnostic when it exceeds the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, ownership, bounds, support, pipeline, state, or device fault." *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    gpu::internal::vk::set_inline_root(record, inline_root, "cmd_draw_indexed_indirect_count")!;
-    return record.ops.draw_indexed_indirect_count(
-        record:        record,
+    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    return gpu::internal::vk::vk_cmd_draw_indexed_indirect_count(
+        commands:        record,
         vertex_root:    vertex_root,
         fragment_root:  fragment_root,
         args:           args,
@@ -2514,7 +2489,6 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    shader zero paths are valid.
    Always checked: token phase, identities, bounds, capacity, a usable
    bound-pipeline snapshot, and safe lowering.
-   FULL diagnostics: pipeline-kind, state, usage, queue, and count misuse.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
    @param commands : "Live recording token inside a render pass."
@@ -2524,8 +2498,8 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    @return "Success, or a recoverable command, ownership, bounds, support, scratch-capacity, or device fault." *>
 fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.draw_generated(
-        record:        record,
+    return gpu::internal::vk::vk_cmd_draw_generated(
+        commands:        record,
         records:        records,
         count_span:     count_span,
         max_draw_count: max_draw_count,
@@ -2538,7 +2512,6 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
    zero paths, and GPU-written index bounds are valid.
    Always checked: token phase, identities, bounds, capacity, a usable
    bound-pipeline snapshot, and safe lowering.
-   FULL diagnostics: pipeline-kind, state, usage, queue, count, and index-type misuse.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
    @param commands : "Live recording token inside a render pass."
@@ -2550,8 +2523,8 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
    @return "Success, or a recoverable command, ownership, bounds, support, scratch-capacity, or device fault." *>
 fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
-    return record.ops.draw_indexed_generated(
-        record:        record,
+    return gpu::internal::vk::vk_cmd_draw_indexed_generated(
+        commands:        record,
         records:        records,
         count_span:     count_span,
         max_draw_count: max_draw_count,
@@ -2642,27 +2615,25 @@ fn TextureBarrier? texture_transition(TextureHandle texture, TextureState before
    Preconditions: stages are known, consistent, and queue-supported.
    Always checked: token identity, authoritative phase, required pointer, and
    `index_input` on the source side.
-   FULL diagnostics: stage and queue-support misuse.
    @param commands : "Live recording token."
    @param barrier : "Borrowed source and destination execution scopes."
    @return "Success, or a recoverable command, validation, queue-support, or device fault." *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
-    return record.ops.barrier(record, barrier);
+    return gpu::internal::vk::vk_cmd_barrier(record, barrier);
 }
 
 <* Record an explicit semantic texture transition.
    Preconditions: the texture, range, states, usage, and queue access are valid.
    Always checked: token phase, required pointer, texture identity, range, and safe lowering.
-   FULL diagnostics: state, usage, queue, format, and presentation misuse.
    @param commands : "Live recording token."
    @param barrier : "Borrowed texture, subresource range, and semantic states."
    @return "Success, or a recoverable command, validation, ownership, range, support, or device fault." *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
     if (barrier == null) return INVALID_ARGUMENT~;
-    return record.ops.texture_barrier(record, barrier);
+    return gpu::internal::vk::vk_cmd_texture_barrier(record, barrier);
 }
 
 <* Create a caller-owned timestamp pool. Slots are uninitialized and must be
@@ -2715,7 +2686,12 @@ fn void? cmd_reset_timestamps(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
-    return record.ops.reset_timestamps(record, pool, first, count);
+    return gpu::internal::vk::vk_cmd_reset_timestamps(
+        record: record,
+        pool: pool,
+        first: first,
+        count: count,
+    );
 }
 
 <* Write one timestamp at exactly one executable pipeline stage.
@@ -2732,7 +2708,12 @@ fn void? cmd_write_timestamp(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
-    return record.ops.write_timestamp(record, pool, index, stage);
+    return gpu::internal::vk::vk_cmd_write_timestamp(
+        record: record,
+        pool: pool,
+        index: index,
+        stage: stage,
+    );
 }
 
 <* Resolve packed `ulong` values with a device-side wait into aligned caller
@@ -2753,7 +2734,13 @@ fn void? cmd_resolve_timestamps(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
-    return record.ops.resolve_timestamps(record, pool, first, count, dst);
+    return gpu::internal::vk::vk_cmd_resolve_timestamps(
+        record: record,
+        pool: pool,
+        first: first,
+        count: count,
+        destination: dst,
+    );
 }
 
 <* Read packed timestamp values without waiting.

@@ -29,7 +29,6 @@ fn void capture_timestamp_validation_error(
 
 fn void timestamp_pool_creation_rejects_unsupported_device() @test {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_timestamp_unsupported_test",
     };
@@ -61,7 +60,6 @@ fn void timestamp_pool_creation_rejects_unsupported_device() @test {
 
 fn gpu::Device? create_timestamp_read_device(ZString application_name) {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = application_name,
     };
@@ -176,7 +174,6 @@ fn void run_timestamp_query_measurement(
     TimestampValidationCapture* validation_capture,
 ) {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_timestamp_query_test",
         .debug_callback           = &capture_timestamp_validation_error,

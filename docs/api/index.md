@@ -50,8 +50,8 @@ Submit, present, and sparse bind share a host synchronization boundary on the
 same native queue, including aliased roles. Completion polling and waiting are
 thread-safe.
 
-**Validation.** `ContractValidation.FULL` adds semantic diagnostics.
-Application-resource lifetimes remain caller-owned under every policy.
+**GPU validity.** Applications own valid GPU usage, ordering, and resource
+lifetimes. Enable Vulkan validation explicitly for development diagnostics.
 
 ## Faults
 
@@ -79,8 +79,8 @@ Application-resource lifetimes remain caller-owned under every policy.
 | `BACKEND_ERROR` | Unclassified backend failure; not device loss | no |
 
 Faults that guard host safety, handle identity, command phase, and
-lifecycle are always checked. `FULL` validation adds semantic diagnostics.
-Runtime faults can occur under any policy.
+lifecycle are checked. Recording also reports actual capacity, capability,
+and native failures; it does not diagnose all GPU misuse.
 
 ## Symbol map
 
@@ -96,7 +96,7 @@ Functions: `default_device_context_desc`, `create_device_context`,
 ### [Runtime and devices](runtime_and_devices.md)
 
 Types: `Vec2f`, `Vec4f`, `Vec4u`, `Device`, `Runtime`, `RuntimeDesc`,
-`ContractValidation`, `Adapter`, `AdapterList`, `AdapterClass`,
+`Adapter`, `AdapterList`, `AdapterClass`,
 `AdapterMemoryInfo`, `AdapterQueueInfo`, `AdapterLimits`, `AdapterInfo`,
 `BackendVersion`, `AdapterDiagnostics`, `Surface`, `QueueKind`, `QueueRoles`,
 `Queue`, `QueueInfo`, `QueueRequest`, `DeviceDesc`, `DeviceSupport`,
@@ -109,7 +109,7 @@ Constants: `DEVICE_INVALID`, `RUNTIME_INVALID`, `ADAPTER_INVALID`,
 Methods: `Device.is_valid`, `Runtime.is_valid`, `Adapter.is_valid`,
 `Surface.is_valid`, `Queue.is_valid`, `Queue.equals`, `AdapterList.get`.
 
-Functions: `full_validation_runtime_desc`, `create_runtime`,
+Functions: `create_runtime`,
 `destroy_runtime`, `enumerate_adapters`, `get_adapter_info`,
 `get_adapter_diagnostics`, `supports_presentation`, `supports_device_desc`,
 `create_device`, `destroy_device`, `get_device_caps`, `get_queue`,

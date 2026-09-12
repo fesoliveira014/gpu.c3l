@@ -88,9 +88,10 @@ cleanup with its own failure contract.
   submitting commands does not retain application resources. Keep them alive
   and unmodified as required until their last GPU use completes. Destroy and
   update calls do not infer shader use or wait for completion.
-- **Validation is optional.** `ContractValidation.FULL` adds detailed command
-  semantic checks. `TRUSTED` checks what is needed for host safety. Neither
-  policy infers shader use through a `GpuAddress` or descriptor index.
+- **GPU validity is application-owned.** Recording translates operations and
+  protects library handles, host structures, and backend lifetimes. Explicit
+  Vulkan validation helps diagnose native misuse. The library does not infer
+  shader use through a `GpuAddress` or descriptor index.
 
 ## Runtime, adapters, devices
 
@@ -329,8 +330,8 @@ native submit.
 
 ## Diagnostics and cost
 
-`ContractValidation.FULL` and the Vulkan validation layer are independent
-switches. `RuntimeDesc.debug_callback` receives structured `DebugMessage`
+`RuntimeDesc.enable_vulkan_validation` explicitly enables Vulkan diagnostics.
+`RuntimeDesc.debug_callback` receives structured `DebugMessage`
 values synchronously, possibly from any thread. The callback must not call
 back into the library.
 

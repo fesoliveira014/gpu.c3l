@@ -1397,7 +1397,6 @@ fn void sparse_support_and_created_caps_are_consistent() @test {
 
 fn void adapter_desc_creation_reuses_runtime_discovery() @test {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_vk_device_desc_test",
     };
@@ -1428,12 +1427,7 @@ fn void adapter_desc_creation_reuses_runtime_discovery() @test {
             "the device uses the exact requested physical adapter"
         );
         assert(
-            device_state.validation_policy.contract
-                == gpu::ContractValidation.FULL,
-            "the device inherits runtime contract validation"
-        );
-        assert(
-            device_state.validation_policy.vulkan_layers,
+            runtime_state.config.enable_vulkan_validation,
             "the device inherits runtime Vulkan validation layers"
         );
         gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
@@ -1568,68 +1562,9 @@ fn void presentation_device_creation_requires_instance_maintenance() @test {
     );
 }
 
-fn void command_policy_selection_covers_both_contract_modes() @test {
-    gpu::internal::vk::DeviceValidationPolicy policy;
-    uptr trusted_address = (uptr)gpu::internal::vk::select_command_ops(policy);
-    assert(
-        gpu::internal::vk::select_command_ops(policy)
-            == &gpu::internal::vk::TRUSTED_COMMAND_OPS,
-        "trusted validation selects the trusted table"
-    );
-
-    policy.contract = gpu::ContractValidation.FULL;
-    uptr full_address = (uptr)gpu::internal::vk::select_command_ops(policy);
-    assert(
-        gpu::internal::vk::select_command_ops(policy)
-            == &gpu::internal::vk::FULL_COMMAND_OPS,
-        "full validation selects the full table"
-    );
-
-    assert(trusted_address != full_address);
-    policy.contract = bitcast(99, gpu::ContractValidation);
-    assert(
-        gpu::internal::vk::select_command_ops(policy)
-            == &gpu::internal::vk::FULL_COMMAND_OPS,
-        "an unknown policy falls back to full command recording"
-    );
-    assert(
-        gpu::internal::vk::contract_uses_full_validation(policy),
-        "an unknown policy preserves full validation and reference storage"
-    );
-    assert(
-        gpu::internal::vk::TRUSTED_COMMAND_OPS.begin_label
-            == gpu::internal::vk::FULL_COMMAND_OPS.begin_label,
-        "both command policies share the label-begin entry"
-    );
-    assert(
-        gpu::internal::vk::TRUSTED_COMMAND_OPS.end_label
-            == gpu::internal::vk::FULL_COMMAND_OPS.end_label,
-        "both command policies share the label-end entry"
-    );
-    assert(
-        gpu::internal::vk::TRUSTED_COMMAND_OPS
-                .build_acceleration_structure_indirect
-            == &gpu::internal::vk::trusted_build_acceleration_structure_indirect
-        && gpu::internal::vk::TRUSTED_COMMAND_OPS
-                .update_acceleration_structure_indirect
-            == &gpu::internal::vk::trusted_update_acceleration_structure_indirect,
-        "trusted indirect construction selects trusted recording entries"
-    );
-    assert(
-        gpu::internal::vk::FULL_COMMAND_OPS
-                .build_acceleration_structure_indirect
-            == &gpu::internal::vk::full_build_acceleration_structure_indirect
-        && gpu::internal::vk::FULL_COMMAND_OPS
-                .update_acceleration_structure_indirect
-            == &gpu::internal::vk::full_update_acceleration_structure_indirect,
-        "full indirect construction selects full recording entries"
-    );
-}
-
 fn void device_creation_rolls_back_each_checkpoint() @test {
     gpu::RuntimeDesc desc = {
         .application_name  = "gpu_vk_device_desc_rollback_test",
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
@@ -1805,7 +1740,6 @@ fn void opted_in_ray_query_state_is_transactional_and_prepublication() @test {
 fn void publication_failure_rolls_back_native_state() @test {
     gpu::RuntimeDesc desc = {
         .application_name  = "gpu_vk_publication_rollback_test",
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
@@ -1881,7 +1815,6 @@ fn void publication_failure_rolls_back_native_state() @test {
 
 fn void runtime_devices_destroy_independently() @test {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_vk_multi_device_test",
     };

@@ -39,11 +39,9 @@ fn vk::VkDeviceState* mesh_device_state(gpu::Device* device) {
 
 fn gpu::Device? make_mesh_device(
     MeshValidationCapture* capture = null,
-    gpu::ContractValidation validation = gpu::ContractValidation.FULL,
     uint pipeline_capacity = 0,
 ) {
     gpu::RuntimeDesc runtime_desc = {
-        .contract_validation      = validation,
         .pipeline_capacity        = pipeline_capacity,
         .enable_vulkan_validation = true,
         .application_name         = "gpu_mesh_test",
@@ -126,9 +124,6 @@ fn void mesh_shaders_gate_on_the_feature() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
-    gpu::Barrier to_mesh = { .before = { .compute }, .after = { .mesh_shader } };
-    assert(@catch(gpu::cmd_barrier(&cmd, &to_mesh)) == gpu::INVALID_ARGUMENT,
-        "the mesh stage needs the feature");
 }
 
 fn void mesh_pipeline_draws_meshlet_triangle() @test {
@@ -188,37 +183,8 @@ fn void mesh_pipeline_draws_meshlet_triangle() @test {
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, graphics_pipeline)!!;
     gpu::cmd_set_graphics_state(&cmd, &state)!!;
-    assert(@catch(gpu::cmd_draw_mesh_tasks(
-        commands:      &cmd,
-        mesh_root:     test_span_address(&device, tri.span),
-        fragment_root: test_span_address(&device, color.span),
-        groups:        { 1, 1, 1 },
-    )) == gpu::INVALID_ARGUMENT, "mesh draws need a mesh pipeline");
     gpu::cmd_bind_pipeline(&cmd, mesh_pipeline)!!;
     gpu::cmd_set_graphics_state(&cmd, &state)!!;
-    assert(@catch(gpu::cmd_draw(
-        commands:       &cmd,
-        vertex_root:    test_span_address(&device, tri.span),
-        fragment_root:  test_span_address(&device, color.span),
-        vertex_count:   3,
-        instance_count: 1,
-    )) == gpu::INVALID_ARGUMENT, "vertex draws reject a mesh pipeline");
-    gpu::Vec3u too_many = { caps.mesh_shaders.max_mesh_work_group_count.x + 1, 1, 1 };
-    assert(@catch(gpu::cmd_draw_mesh_tasks(
-        commands:      &cmd,
-        mesh_root:     test_span_address(&device, tri.span),
-        fragment_root: test_span_address(&device, color.span),
-        groups:        too_many,
-    )) == gpu::INVALID_ARGUMENT, "group counts past the caps fault");
-    gpu::Vec3u over_total = mesh_groups_over_total(&caps.mesh_shaders);
-    if (over_total.x != 0) {
-        assert(@catch(gpu::cmd_draw_mesh_tasks(
-            commands:      &cmd,
-            mesh_root:     test_span_address(&device, tri.span),
-            fragment_root: test_span_address(&device, color.span),
-            groups:        over_total,
-        )) == gpu::INVALID_ARGUMENT, "a group product past the total limit faults");
-    }
     gpu::cmd_draw_mesh_tasks(
         commands:      &cmd,
         mesh_root:     (gpu::GpuAddress)0,
@@ -465,125 +431,6 @@ fn void mesh_and_vertex_pipelines_alternate_in_one_pass() @test {
     submit_and_finish(&device, &cmd);
     report_mesh_validation(&validation, "pipeline switch");
     assert(validation.errors == 0, "state set under a mesh pipeline carries to a later vertex draw");
-}
-
-fn void trusted_mesh_commands_check_kind_and_groups() @test {
-    gpu::Device? candidate = make_mesh_device(validation: gpu::ContractValidation.TRUSTED);
-    if (catch err = candidate) {
-        assert(err == gpu::UNSUPPORTED_FEATURE, "device creation faults only for missing support");
-        io::printfn("mesh shaders unsupported; skipping");
-        return;
-    }
-    gpu::Device device = candidate;
-    defer destroy_test_device(&device)!!;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
-    DepthCtx ctx = make_depth_ctx();
-    gpu::PipelineHandle mesh_pipeline = make_mesh_pipeline(&device, &ctx);
-    defer gpu::destroy_pipeline(&device, mesh_pipeline)!!;
-    gpu::PipelineHandle vertex_pipeline = make_vertex_pipeline(&device, &ctx);
-    defer gpu::destroy_pipeline(&device, vertex_pipeline)!!;
-    gpu::TextureHandle target = make_color_target(&device);
-    defer gpu::destroy_texture(&device, target)!!;
-    gpu::AttachmentViewHandle target_view = create_test_attachment_view(&device, target)!!;
-    defer destroy_test_attachment_view(&device, &target_view)!!;
-    OwnedSpan tri = write_tri(&device, 0.5f);
-    defer free_owned_span(&device, &tri)!!;
-    OwnedSpan color = write_color(&device, { 1.0f, 0.0f, 0.0f, 1.0f });
-    defer free_owned_span(&device, &color)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-    record_color_to_attach(&cmd, target);
-    gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR }};
-    gpu::RenderPassDesc pass = mesh_pass(colors[..]);
-    gpu::GraphicsState state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
-    gpu::ColorTargetState[1] color_on = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
-    state.color = { .targets = color_on[..] };
-    gpu::GpuAddress tri_root = test_span_address(&device, tri.span);
-    gpu::GpuAddress color_root = test_span_address(&device, color.span);
-
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    gpu::cmd_bind_pipeline(&cmd, vertex_pipeline)!!;
-    gpu::cmd_set_graphics_state(&cmd, &state)!!;
-    assert(@catch(gpu::cmd_draw_mesh_tasks(
-        commands:      &cmd,
-        mesh_root:     tri_root,
-        fragment_root: color_root,
-        groups:        { 1, 1, 1 },
-    )) == gpu::INVALID_ARGUMENT, "TRUSTED mesh draws reject a vertex pipeline");
-    assert(@catch(gpu::cmd_draw_mesh_tasks_indirect(
-        commands:      &cmd,
-        mesh_root:     tri_root,
-        fragment_root: color_root,
-        args:          tri.span,
-        draw_count:    1,
-    )) == gpu::INVALID_ARGUMENT, "TRUSTED indirect mesh draws reject a vertex pipeline");
-    gpu::cmd_bind_pipeline(&cmd, mesh_pipeline)!!;
-    gpu::cmd_set_graphics_state(&cmd, &state)!!;
-    assert(@catch(gpu::cmd_draw(
-        commands:       &cmd,
-        vertex_root:    tri_root,
-        fragment_root:  color_root,
-        vertex_count:   3,
-        instance_count: 1,
-    )) == gpu::INVALID_ARGUMENT, "TRUSTED vertex draws reject a mesh pipeline");
-    gpu::Vec3u too_many = { caps.mesh_shaders.max_mesh_work_group_count.x + 1, 1, 1 };
-    assert(@catch(gpu::cmd_draw_mesh_tasks(
-        commands:      &cmd,
-        mesh_root:     tri_root,
-        fragment_root: color_root,
-        groups:        too_many,
-    )) == gpu::INVALID_ARGUMENT, "TRUSTED checks the per-axis group limit");
-    gpu::Vec3u over_total = mesh_groups_over_total(&caps.mesh_shaders);
-    if (over_total.x != 0) {
-        assert(@catch(gpu::cmd_draw_mesh_tasks(
-            commands:      &cmd,
-            mesh_root:     tri_root,
-            fragment_root: color_root,
-            groups:        over_total,
-        )) == gpu::INVALID_ARGUMENT, "TRUSTED checks the group product");
-    }
-    gpu::cmd_draw_mesh_tasks(
-        commands:      &cmd,
-        mesh_root:     tri_root,
-        fragment_root: color_root,
-        groups:        { 1, 1, 1 },
-    )!!;
-    gpu::cmd_end_render_pass(&cmd)!!;
-}
-
-fn void mesh_stage_texture_barriers_need_the_feature() @test {
-    gpu::Device device = make_depth_device();
-    defer destroy_test_device(&device)!!;
-    gpu::TextureDesc desc = {
-        .access = { .graphics },
-        .width  = 4,
-        .height = 4,
-        .format = gpu::Format.RGBA8_UNORM,
-        .usage  = { .sampled, .transfer_dst },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-    gpu::TextureBarrier to_mesh = gpu::texture_transition(
-        texture,
-        gpu::sampled_at({ .fragment_shader }),
-        gpu::sampled_at({ .mesh_shader }),
-    )!!;
-    assert(@catch(gpu::cmd_texture_barrier(&cmd, &to_mesh)) == gpu::INVALID_ARGUMENT,
-        "a mesh-stage texture state is rejected without mesh shaders");
-    gpu::TextureBarrier to_fragment = gpu::texture_transition(
-        texture,
-        gpu::sampled_at({ .compute }),
-        gpu::sampled_at({ .fragment_shader }),
-    )!!;
-    gpu::cmd_texture_barrier(&cmd, &to_fragment)!!;
 }
 
 fn void task_pipelines_release_every_shader_identity() @test {

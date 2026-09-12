@@ -50,7 +50,6 @@ struct PreparedAccelerationStructureBuild {
     AccelerationStructureSlot*       destination;
     gpu::AccelerationStructureHandle destination_handle;
     ResolvedSpan                     scratch;
-    gpu::GpuSpan                     scratch_span;
     uint                             geometry_count;
     bool                             update;
 }
@@ -369,7 +368,6 @@ fn void? record_acceleration_structure_build_with_ops(
     CommandRecord* record,
     gpu::AccelerationStructureBuildDesc* desc,
     bool update,
-    bool validate,
     AccelerationStructureBuildCommandOps* ops,
 ) {
     uint geometry_checkpoint =
@@ -379,7 +377,6 @@ fn void? record_acceleration_structure_build_with_ops(
             record,
             desc,
             update,
-            validate,
         )!;
 
     defer catch {
@@ -400,8 +397,6 @@ fn ResolvedSpan? lower_acceleration_structure_indirect_ranges(
     CommandRecord* record,
     gpu::GpuSpan* ranges,
     uint geometry_count,
-    bool update,
-    bool validate,
 ) {
     usz range_size = gpu::AccelerationStructureIndirectBuildRange::size;
     if (geometry_count == 0
@@ -413,21 +408,8 @@ fn ResolvedSpan? lower_acceleration_structure_indirect_ranges(
         ranges,
         (usz)geometry_count * range_size,
     )!;
-    if ((ulong)resolved.address == 0
-        || (ulong)resolved.address % 4 != 0
-        || !resolved.slot.usage.indirect) {
+    if ((ulong)resolved.address == 0) {
         return gpu::INVALID_ARGUMENT~;
-    }
-    if (validate) {
-        validate_span_recording_access_only(
-            state:     record.device_state,
-            record:    record,
-            resolved:  &resolved,
-            span:      ranges,
-            operation: update
-                ? "cmd_update_acceleration_structure_indirect"
-                : "cmd_build_acceleration_structure_indirect",
-        )!;
     }
     return resolved;
 }
@@ -457,7 +439,6 @@ fn void? record_acceleration_structure_indirect_build_with_ops(
     gpu::AccelerationStructureBuildDesc* desc,
     gpu::GpuSpan ranges,
     bool update,
-    bool validate,
     AccelerationStructureIndirectBuildCommandOps* ops,
 ) {
     uint geometry_checkpoint =
@@ -469,7 +450,6 @@ fn void? record_acceleration_structure_indirect_build_with_ops(
             record:   record,
             desc:     desc,
             update:   update,
-            validate: validate,
             indirect: true,
         )!;
     defer catch record.scratch.acceleration_structure_geometry_count =
@@ -478,8 +458,6 @@ fn void? record_acceleration_structure_indirect_build_with_ops(
         record:         record,
         ranges:         &ranges,
         geometry_count: prepared.geometry_count,
-        update:         update,
-        validate:       validate,
     )!;
     fill_acceleration_structure_max_primitive_counts(
         record,
@@ -510,12 +488,6 @@ prepare_acceleration_structure_clone(
     gpu::AccelerationStructureHandle destination,
 ) {
     if (record == null) return gpu::INVALID_ARGUMENT~;
-    if (record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    if (!record.queue.roles.graphics && !record.queue.roles.compute) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     VkDeviceState* state = record.device_state;
     if (state == null || !state.acceleration_structures_enabled) {
         return gpu::UNSUPPORTED_FEATURE~;
@@ -634,27 +606,12 @@ fn bool gpu_span_is_zero(gpu::GpuSpan span) {
 
 fn ResolvedSpan? lower_acceleration_structure_input_span(
     VkDeviceState* state,
-    CommandRecord* record,
     gpu::GpuSpan* span,
     usz required,
-    usz alignment,
-    bool validate,
-    ZString operation,
 ) {
     ResolvedSpan resolved = resolve_span_slot(state, span, required)!;
-    if ((ulong)resolved.address == 0
-        || (ulong)resolved.address % (ulong)alignment != 0
-        || !resolved.slot.usage.acceleration_structure_build_input) {
+    if ((ulong)resolved.address == 0) {
         return gpu::INVALID_ARGUMENT~;
-    }
-    if (validate) {
-        validate_span_recording_access_only(
-            state:     state,
-            record:    record,
-            resolved:  &resolved,
-            span:      span,
-            operation: operation,
-        )!;
     }
     return resolved;
 }
@@ -664,16 +621,9 @@ prepare_acceleration_structure_build_mode(
     CommandRecord* record,
     gpu::AccelerationStructureBuildDesc* desc,
     bool update,
-    bool validate,
     bool indirect,
 ) {
     if (record == null || desc == null) return gpu::INVALID_ARGUMENT~;
-    if (record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    if (!record.queue.roles.graphics && !record.queue.roles.compute) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     VkDeviceState* state = record.device_state;
     if (state == null || !state.acceleration_structures_enabled) {
         return gpu::UNSUPPORTED_FEATURE~;
@@ -685,13 +635,6 @@ prepare_acceleration_structure_build_mode(
     }
     AccelerationStructureSlot* destination =
         state.acceleration_structures.get(desc.destination)!;
-    ZString operation = indirect
-        ? (update
-            ? "cmd_update_acceleration_structure_indirect"
-            : "cmd_build_acceleration_structure_indirect")
-        : (update
-            ? "cmd_update_acceleration_structure"
-            : "cmd_build_acceleration_structure");
     if (!update && (destination.pending_linked.load(AtomicOrdering.ACQUIRE)
         || destination.build_eligibility
             != gpu::internal::AccelerationStructureBuildEligibility.UNBUILT)) {
@@ -739,12 +682,9 @@ prepare_acceleration_structure_build_mode(
             * gpu::AccelerationStructureInstance::size;
         ResolvedSpan instances = lower_acceleration_structure_input_span(
             state,
-            record,
             &desc.instances,
             instance_bytes,
-            16,
-            validate,
-            operation,
+
         )!;
         vk::AccelerationStructureGeometryDataKHR geometry_data;
         geometry_data.instances =
@@ -760,7 +700,8 @@ prepare_acceleration_structure_build_mode(
             .primitive_count = desc.instance_count,
         };
     } else {
-        if (desc.geometries.len != destination.desc.geometries.len
+        if ((desc.geometries.len > 0 && desc.geometries.ptr == null)
+            || desc.geometries.len != destination.desc.geometries.len
             || desc.instance_count != 0
             || !gpu_span_is_zero(desc.instances)) {
             return gpu::INVALID_ARGUMENT~;
@@ -799,12 +740,9 @@ prepare_acceleration_structure_build_mode(
                 ResolvedSpan vertices =
                     lower_acceleration_structure_input_span(
                         state,
-                        record,
                         &input.triangles.vertices,
                         vertex_bytes,
-                        4,
-                        validate,
-                        operation,
+
                     )!;
                 vk::DeviceOrHostAddressConstKHR index_address;
                 if (schema.index_type
@@ -819,19 +757,12 @@ prepare_acceleration_structure_build_mode(
                         input.triangles.primitive_count,
                         schema.index_type,
                     )!;
-                    usz index_alignment = schema.index_type
-                            == gpu::AccelerationStructureIndexType.U16
-                        ? 2
-                        : 4;
                     ResolvedSpan indices =
                         lower_acceleration_structure_input_span(
                             state,
-                            record,
                             &input.triangles.indices,
                             index_bytes,
-                            index_alignment,
-                            validate,
-                            operation,
+
                         )!;
                     index_address.device_address =
                         (vk::DeviceAddress)indices.address;
@@ -841,12 +772,9 @@ prepare_acceleration_structure_build_mode(
                     ResolvedSpan transform =
                         lower_acceleration_structure_input_span(
                             state,
-                            record,
                             &input.triangles.transform,
                             12 * float::size,
-                            16,
-                            validate,
-                            operation,
+
                         )!;
                     transform_address.device_address =
                         (vk::DeviceAddress)transform.address;
@@ -899,12 +827,8 @@ prepare_acceleration_structure_build_mode(
                 )!;
                 ResolvedSpan aabbs = lower_acceleration_structure_input_span(
                     state,
-                    record,
                     &input.aabbs.aabbs,
                     aabb_bytes,
-                    8,
-                    validate,
-                    operation,
                 )!;
                 geometry_data.aabbs =
                     vk::acceleration_structure_geometry_aabbs_data_khr()
@@ -935,41 +859,13 @@ prepare_acceleration_structure_build_mode(
         &desc.scratch,
         required_scratch,
     )!;
-    if (!scratch.slot.usage.storage
-        || (ulong)scratch.address == 0
-        || !gpu::internal::acceleration_structure_scratch_fits(
-            &destination.desc.requirements,
-            scratch.size,
-            scratch.address,
-            update,
-        )) return gpu::INVALID_ARGUMENT~;
-    if (destination.placement.is_valid()
-        && desc.scratch.owner == destination.placement.owner
-        && desc.scratch.index == destination.placement.index
-        && desc.scratch.generation == destination.placement.generation
-        && scratch.offset
-            < destination.placement_offset
-                + destination.desc.requirements.storage_size
-        && destination.placement_offset
-            < scratch.offset + required_scratch) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (validate) {
-        validate_span_recording_access_only(
-            state:     state,
-            record:    record,
-            resolved:  &scratch,
-            span:      &desc.scratch,
-            operation: operation,
-        )!;
-    }
+    if ((ulong)scratch.address == 0) return gpu::INVALID_ARGUMENT~;
     record.scratch.acceleration_structure_geometry_count =
         required_geometry_count;
     return {
         .destination        = destination,
         .destination_handle = desc.destination,
         .scratch            = scratch,
-        .scratch_span       = desc.scratch,
         .geometry_count     = required_geometry_count,
         .update             = update,
     };
@@ -980,13 +876,11 @@ prepare_acceleration_structure_build(
     CommandRecord* record,
     gpu::AccelerationStructureBuildDesc* desc,
     bool update,
-    bool validate,
 ) {
     return prepare_acceleration_structure_build_mode(
         record:   record,
         desc:     desc,
         update:   update,
-        validate: validate,
         indirect: false,
     );
 }
@@ -1757,10 +1651,15 @@ fn void? vk_destroy_acceleration_structure_view(
     return destroy_acceleration_structure_descriptor_view(state, view);
 }
 
-fn void? trusted_build_acceleration_structure(
+fn void? vk_cmd_build_acceleration_structure(
     CommandRecord* record,
     gpu::AccelerationStructureBuildDesc* desc,
 ) {
+    if (record.device_state == null
+        || record.device_state.acceleration_structure_operations == null
+        || record.device_state.acceleration_structure_operations.cmd_build == null) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
     AccelerationStructureBuildCommandOps ops = {
         .user_data = record.device_state.acceleration_structure_operations,
         .build = &acceleration_structure_build_command_real,
@@ -1769,32 +1668,19 @@ fn void? trusted_build_acceleration_structure(
         record,
         desc,
         false,
-        false,
         &ops,
     );
 }
 
-fn void? full_build_acceleration_structure(
+fn void? vk_cmd_update_acceleration_structure(
     CommandRecord* record,
     gpu::AccelerationStructureBuildDesc* desc,
 ) {
-    AccelerationStructureBuildCommandOps ops = {
-        .user_data = record.device_state.acceleration_structure_operations,
-        .build = &acceleration_structure_build_command_real,
-    };
-    return record_acceleration_structure_build_with_ops(
-        record,
-        desc,
-        false,
-        true,
-        &ops,
-    );
-}
-
-fn void? trusted_update_acceleration_structure(
-    CommandRecord* record,
-    gpu::AccelerationStructureBuildDesc* desc,
-) {
+    if (record.device_state == null
+        || record.device_state.acceleration_structure_operations == null
+        || record.device_state.acceleration_structure_operations.cmd_build == null) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
     AccelerationStructureBuildCommandOps ops = {
         .user_data = record.device_state.acceleration_structure_operations,
         .build = &acceleration_structure_build_command_real,
@@ -1803,33 +1689,20 @@ fn void? trusted_update_acceleration_structure(
         record,
         desc,
         true,
-        false,
         &ops,
     );
 }
 
-fn void? full_update_acceleration_structure(
-    CommandRecord* record,
-    gpu::AccelerationStructureBuildDesc* desc,
-) {
-    AccelerationStructureBuildCommandOps ops = {
-        .user_data = record.device_state.acceleration_structure_operations,
-        .build = &acceleration_structure_build_command_real,
-    };
-    return record_acceleration_structure_build_with_ops(
-        record,
-        desc,
-        true,
-        true,
-        &ops,
-    );
-}
-
-fn void? trusted_build_acceleration_structure_indirect(
+fn void? vk_cmd_build_acceleration_structure_indirect(
     CommandRecord* record,
     gpu::AccelerationStructureBuildDesc* desc,
     gpu::GpuSpan ranges,
 ) {
+    if (record.device_state == null
+        || record.device_state.acceleration_structure_operations == null
+        || record.device_state.acceleration_structure_operations.cmd_build_indirect == null) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
     AccelerationStructureIndirectBuildCommandOps ops = {
         .user_data = record.device_state.acceleration_structure_operations,
         .build_indirect = &acceleration_structure_indirect_build_command_real,
@@ -1839,35 +1712,20 @@ fn void? trusted_build_acceleration_structure_indirect(
         desc:             desc,
         ranges:           ranges,
         update:           false,
-        validate:         false,
         ops:              &ops,
     );
 }
 
-fn void? full_build_acceleration_structure_indirect(
+fn void? vk_cmd_update_acceleration_structure_indirect(
     CommandRecord* record,
     gpu::AccelerationStructureBuildDesc* desc,
     gpu::GpuSpan ranges,
 ) {
-    AccelerationStructureIndirectBuildCommandOps ops = {
-        .user_data = record.device_state.acceleration_structure_operations,
-        .build_indirect = &acceleration_structure_indirect_build_command_real,
-    };
-    return record_acceleration_structure_indirect_build_with_ops(
-        record:           record,
-        desc:             desc,
-        ranges:           ranges,
-        update:           false,
-        validate:         true,
-        ops:              &ops,
-    );
-}
-
-fn void? trusted_update_acceleration_structure_indirect(
-    CommandRecord* record,
-    gpu::AccelerationStructureBuildDesc* desc,
-    gpu::GpuSpan ranges,
-) {
+    if (record.device_state == null
+        || record.device_state.acceleration_structure_operations == null
+        || record.device_state.acceleration_structure_operations.cmd_build_indirect == null) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
     AccelerationStructureIndirectBuildCommandOps ops = {
         .user_data = record.device_state.acceleration_structure_operations,
         .build_indirect = &acceleration_structure_indirect_build_command_real,
@@ -1877,52 +1735,20 @@ fn void? trusted_update_acceleration_structure_indirect(
         desc:             desc,
         ranges:           ranges,
         update:           true,
-        validate:         false,
         ops:              &ops,
     );
 }
 
-fn void? full_update_acceleration_structure_indirect(
-    CommandRecord* record,
-    gpu::AccelerationStructureBuildDesc* desc,
-    gpu::GpuSpan ranges,
-) {
-    AccelerationStructureIndirectBuildCommandOps ops = {
-        .user_data = record.device_state.acceleration_structure_operations,
-        .build_indirect = &acceleration_structure_indirect_build_command_real,
-    };
-    return record_acceleration_structure_indirect_build_with_ops(
-        record:           record,
-        desc:             desc,
-        ranges:           ranges,
-        update:           true,
-        validate:         true,
-        ops:              &ops,
-    );
-}
-
-fn void? trusted_clone_acceleration_structure(
+fn void? vk_cmd_clone_acceleration_structure(
     CommandRecord* record,
     gpu::AccelerationStructureHandle source,
     gpu::AccelerationStructureHandle destination,
 ) {
-    AccelerationStructureCloneCommandOps ops = {
-        .user_data = record.device_state.acceleration_structure_operations,
-        .clone = &acceleration_structure_clone_command_real,
-    };
-    return record_acceleration_structure_clone_with_ops(
-        record:           record,
-        source:           source,
-        destination:      destination,
-        ops:              &ops,
-    );
-}
-
-fn void? full_clone_acceleration_structure(
-    CommandRecord* record,
-    gpu::AccelerationStructureHandle source,
-    gpu::AccelerationStructureHandle destination,
-) {
+    if (record.device_state == null
+        || record.device_state.acceleration_structure_operations == null
+        || record.device_state.acceleration_structure_operations.cmd_copy == null) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
     AccelerationStructureCloneCommandOps ops = {
         .user_data = record.device_state.acceleration_structure_operations,
         .clone = &acceleration_structure_clone_command_real,

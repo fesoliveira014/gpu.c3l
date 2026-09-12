@@ -54,7 +54,7 @@ release. Native windows and displays remain application-owned.
 
 `default_device_context_desc()` selects:
 
-- `ContractValidation.FULL`, with native validation layers disabled;
+- native validation layers disabled;
 - the public default runtime and command allocator capacities;
 - graphics, compute, and transfer queue roles, allowing aliasing;
 - a `GRAPHICS` queue and command allocator;
@@ -68,8 +68,8 @@ swapchain rules and can produce a dormant swapchain. All nested descriptions
 remain configurable. For compute-only use, set both `device.queues.required`
 and `command_queue`, as below.
 
-A zero-initialized description keeps the nested API's zero semantics, including
-`TRUSTED` contract validation. Use the defaults function to request the convenience
+A zero-initialized description keeps the nested API's zero semantics.
+Use the defaults function to request the convenience
 baseline. Creation never weakens feature, queue, or capacity requirements.
 
 ## Headless use

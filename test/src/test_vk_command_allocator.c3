@@ -252,17 +252,14 @@ fn void command_claim_cancellation_preserves_concurrent_table_mutation() @test {
     gpu::Device device = { .generation = 1 };
     gpu::internal::vk::CommandRecord* first = table.claim(
         device:       device,
-        ops:          null,
         device_state: null,
         value: {
             .command_buffer = (vk::CommandBuffer)(uptr)1,
-            .ray_tracing_stack_size_set = true,
         },
     )!!;
     gpu::internal::CommandListHandle first_identity = first.identity;
     gpu::internal::vk::CommandRecord* concurrent = table.claim(
         device:       device,
-        ops:          null,
         device_state: null,
         value: {
             .command_buffer = (vk::CommandBuffer)(uptr)2,
@@ -275,7 +272,6 @@ fn void command_claim_cancellation_preserves_concurrent_table_mutation() @test {
         "cancelling an earlier claim preserves the concurrent record");
     gpu::internal::vk::CommandRecord* replacement = table.claim(
         device:       device,
-        ops:          null,
         device_state: null,
         value: {
             .command_buffer = (vk::CommandBuffer)(uptr)3,
@@ -284,14 +280,11 @@ fn void command_claim_cancellation_preserves_concurrent_table_mutation() @test {
     assert(replacement.identity.index == first_identity.index
         && replacement.identity.generation != first_identity.generation,
         "the cancelled cell rejoins the current free list with new identity");
-    assert(!replacement.ray_tracing_stack_size_set,
-        "recycled command records clear dynamic ray-tracing stack state");
     assert(table.get(concurrent_identity)!! == concurrent
         && concurrent.identity == concurrent_identity,
         "replacement publication leaves the interleaved claim unchanged");
     assert(@catch(table.claim(
         device:       device,
-        ops:          null,
         device_state: null,
         value:        {},
     )) == gpu::SLOT_TABLE_FULL,
@@ -490,10 +483,7 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
         gpu::internal::vk::VkDeviceState state = {
             .host_allocator = &fail_allocator,
             .queue_completions = completions[..],
-            .validation_policy = {
-                .contract = gpu::ContractValidation.FULL,
-            },
-        };
+                    };
         gpu::internal::vk::CommandAllocatorSlot slot;
         CommandAllocatorCreateProbe probe;
         gpu::internal::vk::CommandPoolOps ops = {
@@ -534,10 +524,7 @@ fn void command_allocator_host_failure_sweep_is_transactional() @test {
     gpu::internal::vk::VkDeviceState state = {
         .host_allocator = &success_allocator,
         .queue_completions = completions[..],
-        .validation_policy = {
-            .contract = gpu::ContractValidation.FULL,
-        },
-    };
+            };
     gpu::internal::vk::CommandAllocatorSlot slot;
     CommandAllocatorCreateProbe probe;
     gpu::internal::vk::CommandPoolOps ops = {
@@ -582,10 +569,7 @@ fn void generated_reservation_storage_allocation_is_transactional() @test {
         gpu::internal::vk::VkDeviceState state = {
             .host_allocator = &host,
             .queue_completions = completions[..],
-            .validation_policy = {
-                .contract = gpu::ContractValidation.FULL,
-            },
-        };
+                    };
         gpu::internal::vk::CommandAllocatorSlot slot;
         CommandAllocatorCreateProbe probe;
         gpu::internal::vk::CommandPoolOps ops = {

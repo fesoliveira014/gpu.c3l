@@ -27,7 +27,6 @@ struct DepthCtx {
 
 fn gpu::Device make_depth_device() {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_depth_test",
     };
@@ -977,11 +976,6 @@ fn void depth_pass_validation_faults() @test {
     assert(@catch(gpu::create_attachment_view(&device, &no_usage))
         == gpu::INVALID_ARGUMENT,
         "attachment creation rejects a texture without attachment usage");
-
-    gpu::RenderPassDesc empty_pass = { .width = DP_RT, .height = DP_RT };
-    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &empty_pass))
-        == gpu::INVALID_ARGUMENT,
-        "a pass with no attachments faults INVALID_ARGUMENT");
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 

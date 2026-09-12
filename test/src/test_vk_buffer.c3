@@ -4,7 +4,6 @@ import gpu;
 
 fn void allocation_spans_expose_mapping_address_and_liveness() @test {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_span_test",
     };
@@ -65,9 +64,8 @@ fn void live_allocations_block_device_destruction() @test {
     destroy_test_device(&device)!!;
 }
 
-fn void span_range_and_alignment_validation() @test {
+fn void span_ranges_preserve_native_bounds() @test {
     gpu::RuntimeDesc device_desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_range_validation_test",
     };
@@ -110,14 +108,6 @@ fn void span_range_and_alignment_validation() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
 
-    gpu::GpuSpan misaligned_offset = mapped.span.checked_subspan(2, 4)!!;
-    assert(@catch(gpu::cmd_fill_buffer(&commands, misaligned_offset, 0xAB))
-        == gpu::INVALID_ARGUMENT,
-        "misaligned fill offset faults");
-    gpu::GpuSpan misaligned_size = mapped.span.checked_subspan(0, 6)!!;
-    assert(@catch(gpu::cmd_fill_buffer(&commands, misaligned_size, 0xAB))
-        == gpu::INVALID_ARGUMENT,
-        "misaligned fill size faults");
     gpu::GpuSpan oversized = mapped.span.unchecked_subspan(0, 512);
     assert(@catch(gpu::cmd_fill_buffer(&commands, oversized, 0xAB))
         == gpu::INVALID_ARGUMENT,
@@ -128,12 +118,6 @@ fn void span_range_and_alignment_validation() @test {
         "zero-size fill span faults");
     gpu::cmd_fill_buffer(&commands, mapped.span, 0xAB)!!;
 
-    gpu::BufferCopyDesc overlap = {
-        .src = mapped.span.checked_subspan(0, 64)!!,
-        .dst = mapped.span.checked_subspan(32, 64)!!,
-    };
-    assert(@catch(gpu::cmd_copy_buffer(&commands, &overlap)) == gpu::INVALID_ARGUMENT,
-        "overlapping same-allocation copy faults");
     gpu::BufferCopyDesc touching = {
         .src = mapped.span.checked_subspan(0, 64)!!,
         .dst = mapped.span.checked_subspan(64, 64)!!,
@@ -154,7 +138,7 @@ fn void span_range_and_alignment_validation() @test {
         .dst = mapped.span.checked_subspan(128, 32)!!,
     };
     assert(@catch(gpu::cmd_copy_buffer(&commands, &unequal)) == gpu::INVALID_ARGUMENT,
-        "unequal copy spans fault");
+        "a copy cannot exceed the destination span");
     gpu::BufferCopyDesc zero_copy = {
         .src = zero_span,
         .dst = mapped.span.checked_subspan(128, 64)!!,

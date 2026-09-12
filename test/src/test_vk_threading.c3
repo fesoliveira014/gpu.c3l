@@ -77,7 +77,6 @@ struct RetrySubmitArgs {
 
 fn gpu::Device make_thr_device() {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_threading_test",
     };
@@ -684,7 +683,7 @@ fn void full_validation_rejects_cross_thread_shared_allocator() @test {
     worker.create(&allocator_begin_worker, &args)!!;
     int result = worker.join()!!;
     assert(result == 1 && args.result == gpu::RESOURCE_IN_USE,
-        "FULL validation rejects a second recording thread on one allocator");
+        "One allocator rejects a second recording thread");
 }
 
 fn void allocator_migrates_after_last_end_and_discard() @test {

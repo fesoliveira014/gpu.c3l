@@ -160,8 +160,8 @@ gpu::destroy_pipeline(&device, pipeline)!;
 ```
 
 Destruction never waits. Recording, ending, or submitting commands does not
-retain pipelines. Keep each pipeline alive through its last GPU use under
-every validation policy; cached command state does not extend its lifetime.
+retain pipelines. Keep each pipeline alive through its last GPU use;
+cached command state does not extend its lifetime.
 
 Equal descriptions on one device share a private cached pipeline; each
 `PipelineHandle` is still a separate owner with its own lifetime. Pipeline

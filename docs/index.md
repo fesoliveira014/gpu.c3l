@@ -39,8 +39,8 @@ device, command allocator, and optional surface and swapchain.
 
 ## Troubleshoot
 
-Develop with `full_validation_runtime_desc()` and a
-[debug callback](cookbook.md#receive-diagnostics). Ownership and call-order
-faults are reported with the operation, the offending field, and the
-violated invariant. Environment-specific symptoms are listed in
+Develop with `RuntimeDesc.enable_vulkan_validation = true` and a
+[debug callback](cookbook.md#receive-diagnostics). The callback receives native
+validation messages and useful library failure details. Applications remain
+responsible for valid GPU usage and ordering. Environment-specific symptoms are listed in
 [features and limitations](features_and_limitations.md#known-environment-behavior).

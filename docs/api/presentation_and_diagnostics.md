@@ -151,7 +151,7 @@ fn void on_message(gpu::DebugMessage* m, void* user_data) {
     }
 }
 
-gpu::RuntimeDesc desc = gpu::full_validation_runtime_desc();
+gpu::RuntimeDesc desc = { .enable_vulkan_validation = true };
 desc.debug_callback     = &on_message;
 desc.debug_user_data    = null;
 desc.enable_debug_names = true;
@@ -169,8 +169,8 @@ return promptly and must not call the library. Installing a callback
 changes delivery only; it does not enable checks or change returned
 faults.
 
-With `FULL` validation, `destroy_device` reports leaked children by name
-and still refuses to destroy them.
+`destroy_device` refuses to destroy live children. Backend teardown reports
+remaining resources, including names when available.
 
 ## Faults
 

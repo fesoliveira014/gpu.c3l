@@ -43,6 +43,11 @@ alias PipelineBindFn @private = fn void (
     vk::PipelineBindPoint bind_point,
     vk::Pipeline pipeline,
 );
+alias PipelineTopologyFn @private = fn void (
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    vk::PrimitiveTopology topology,
+);
 
 const uint MAX_COMMAND_ALLOCATORS = 256;
 const uint COMMAND_ALLOCATOR_FREE_NONE = 0;
@@ -56,6 +61,7 @@ const uint GENERATED_PREPROCESS_PER_LIST = 64;
 struct PipelineBindOps {
     void*          user_data;
     PipelineBindFn bind;
+    PipelineTopologyFn set_topology;
 }
 
 struct GeneratedPreprocessBuffer {
@@ -75,21 +81,16 @@ struct GeneratedPreprocessBuffer {
 struct PreparedBufferCopy {
     ResolvedSpan src;
     ResolvedSpan dst;
-    gpu::GpuSpan src_span;
-    gpu::GpuSpan dst_span;
 }
 
 struct PreparedBufferFill {
     ResolvedSpan span;
-    gpu::GpuSpan source;
     uint         value;
 }
 
 struct PreparedBufferTextureCopy {
     ResolvedSpan      buffer;
-    gpu::GpuSpan      buffer_span;
     TextureSlot*      texture;
-    gpu::TextureHandle texture_handle;
     vk::BufferImageCopy region;
 }
 
@@ -992,8 +993,7 @@ fn CommandRecord*? begin_commands_locked(
 ) @private {
     RecordingThreadIdentity current_identity =
         current_recording_thread_identity();
-    if (contract_uses_full_validation(state.validation_policy)
-        && slot.recording_thread_set
+    if (slot.recording_thread_set
         && !recording_thread_identity_matches(
             slot.recording_thread_identity,
         )) {
@@ -1047,7 +1047,6 @@ fn CommandRecord*? begin_commands_locked(
         defer state.command_mutex.unlock();
         record = state.commands.claim(
             device:       device,
-            ops:          state.command_ops,
             device_state: state,
             value:        backend_record,
         )!;
@@ -1458,111 +1457,7 @@ fn PreparedBufferCopy? lower_buffer_copy(
             operation:      "cmd_copy_buffer",
             rejected_field: "BufferCopyDesc.dst",
         )!,
-        .src_span = desc.src,
-        .dst_span = desc.dst,
     };
-}
-
-fn bool buffer_copy_is_safe(PreparedBufferCopy* copy) {
-    if (copy.src.size != copy.dst.size) return false;
-    return copy.src.slot.buffer != copy.dst.slot.buffer
-        || copy.src.offset >= copy.dst.offset + copy.dst.size
-        || copy.dst.offset >= copy.src.offset + copy.src.size;
-}
-
-fn PreparedBufferCopy? validate_and_lower_buffer_copy(
-    CommandRecord* commands,
-    gpu::BufferCopyDesc* desc,
-) {
-    CommandRecord* full_record = commands;
-    if (full_record.state != gpu::internal::CommandState.RECORDING) {
-        VkDeviceState* full_state = commands.device_state;
-        uint command_index = 0;
-        uint command_generation = 0;
-        bool has_public_identity = false;
-        foreach (i, &cell : full_state.commands.slots) {
-            if (&cell.record != full_record) continue;
-            command_index = (uint)i;
-            command_generation = cell.generation;
-            has_public_identity = cell.used;
-            break;
-        }
-        return report_contract_failure(
-            state:               full_state,
-            operation:           "cmd_copy_buffer",
-            public_fault:        gpu::COMMAND_RECORDING_ERROR,
-            resource_kind:       gpu::DebugResourceKind.COMMAND_LIST,
-            has_public_identity: has_public_identity,
-            index:               command_index,
-            generation:          command_generation,
-            debug_name:          null,
-            rejected_field:      "CommandList.state",
-            invariant:           "command must be recording outside a render pass",
-            backend_text:        null,
-        )~;
-    }
-    PreparedBufferCopy copy = lower_buffer_copy(commands, desc)!;
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    validate_span_transfer_usage(
-        state:     state,
-        resolved:  &copy.src,
-        span:      &copy.src_span,
-        source:    true,
-        operation: "cmd_copy_buffer",
-    )!;
-    validate_span_transfer_usage(
-        state:     state,
-        resolved:  &copy.dst,
-        span:      &copy.dst_span,
-        source:    false,
-        operation: "cmd_copy_buffer",
-    )!;
-    if (copy.src.size != copy.dst.size) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "cmd_copy_buffer",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       span_resource_kind(state, &copy.dst_span),
-            has_public_identity: true,
-            index:               copy.dst_span.index,
-            generation:          copy.dst_span.generation,
-            debug_name:          slot_name(&copy.dst.slot.debug_name[0]),
-            rejected_field:      "BufferCopyDesc.dst",
-            invariant:           "source and destination spans must have equal sizes",
-            backend_text:        null,
-        )~;
-    }
-    if (!buffer_copy_is_safe(&copy)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "cmd_copy_buffer",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       span_resource_kind(state, &copy.src_span),
-            has_public_identity: true,
-            index:               copy.src_span.index,
-            generation:          copy.src_span.generation,
-            debug_name:          slot_name(&copy.src.slot.debug_name[0]),
-            rejected_field:      "BufferCopyDesc",
-            invariant:           "source and destination spans must not overlap",
-            backend_text:        null,
-        )~;
-    }
-    validate_span_recording_access_only(
-        state:     state,
-        record:    record,
-        resolved:  &copy.src,
-        span:      &copy.src_span,
-        operation: "cmd_copy_buffer",
-    )!;
-    validate_span_recording_access_only(
-        state:     state,
-        record:    record,
-        resolved:  &copy.dst,
-        span:      &copy.dst_span,
-        operation: "cmd_copy_buffer",
-    )!;
-    return copy;
 }
 
 fn void record_buffer_copy(
@@ -1584,21 +1479,12 @@ fn void record_buffer_copy(
     );
 }
 
-fn void? trusted_copy_buffer(
+fn void? vk_cmd_copy_buffer(
     CommandRecord* commands,
     gpu::BufferCopyDesc* desc,
 ) {
     PreparedBufferCopy copy = lower_buffer_copy(commands, desc)!;
-    if (!buffer_copy_is_safe(&copy)) return gpu::INVALID_ARGUMENT~;
-    record_buffer_copy(commands, &copy);
-}
-
-fn void? full_copy_buffer(
-    CommandRecord* commands,
-    gpu::BufferCopyDesc* desc,
-) {
-    PreparedBufferCopy copy = validate_and_lower_buffer_copy(commands, desc)!;
-
+    if (copy.src.size > copy.dst.size) return gpu::INVALID_ARGUMENT~;
     record_buffer_copy(commands, &copy);
 }
 
@@ -1621,54 +1507,8 @@ fn PreparedBufferFill? lower_buffer_fill(
     )!;
     return {
         .span   = resolved,
-        .source = dst,
         .value  = value,
     };
-}
-
-fn PreparedBufferFill? validate_and_lower_buffer_fill(
-    CommandRecord* commands,
-    gpu::GpuSpan dst,
-    uint value,
-) {
-    PreparedBufferFill fill = lower_buffer_fill(commands, dst, value)!;
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    if (fill.span.offset % 4 != 0 || fill.span.size % 4 != 0) {
-        bool offset_misaligned = fill.span.offset % 4 != 0;
-        return report_contract_failure(
-            state:               state,
-            operation:           "cmd_fill_buffer",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       span_resource_kind(state, &fill.source),
-            has_public_identity: true,
-            index:               fill.source.index,
-            generation:          fill.source.generation,
-            debug_name:          slot_name(&fill.span.slot.debug_name[0]),
-            rejected_field:      offset_misaligned
-                ? "GpuSpan.offset"
-                : "GpuSpan.size",
-            invariant:           offset_misaligned
-                ? "span offset must be 4-byte aligned"
-                : "span size must be 4-byte aligned",
-            backend_text:        null,
-        )~;
-    }
-    validate_span_transfer_usage(
-        state:     state,
-        resolved:  &fill.span,
-        span:      &fill.source,
-        source:    false,
-        operation: "cmd_fill_buffer",
-    )!;
-    validate_span_recording_access_only(
-        state:     state,
-        record:    record,
-        resolved:  &fill.span,
-        span:      &fill.source,
-        operation: "cmd_fill_buffer",
-    )!;
-    return fill;
 }
 
 fn void record_buffer_fill(
@@ -1684,29 +1524,12 @@ fn void record_buffer_fill(
     );
 }
 
-fn void? trusted_fill_buffer(
+fn void? vk_cmd_fill_buffer(
     CommandRecord* commands,
     gpu::GpuSpan dst,
     uint value,
 ) {
     PreparedBufferFill fill = lower_buffer_fill(commands, dst, value)!;
-    if (fill.span.offset % 4 != 0 || fill.span.size % 4 != 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    record_buffer_fill(commands, &fill);
-}
-
-fn void? full_fill_buffer(
-    CommandRecord* commands,
-    gpu::GpuSpan dst,
-    uint value,
-) {
-    PreparedBufferFill fill = validate_and_lower_buffer_fill(
-        commands,
-        dst,
-        value,
-    )!;
-
     record_buffer_fill(commands, &fill);
 }
 
@@ -1768,16 +1591,6 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
 
     gpu::internal::FormatBlock block = gpu::internal::format_aspect_block(slot.format, aspect);
     if (block.bytes == 0) return gpu::INVALID_ARGUMENT~;
-    if (x % block.width != 0 || y % block.height != 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (width % block.width != 0 && x + width != extent.width) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (height % block.height != 0 && y + height != extent.height) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (row_length_texels % block.width != 0) return gpu::INVALID_ARGUMENT~;
 
     usz row_texels = row_length_texels == 0 ? width : row_length_texels;
     usz row_blocks = (row_texels + block.width - 1) / block.width;
@@ -1790,9 +1603,6 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
     if (slice_count > usz::max / copy_bytes) return gpu::INVALID_ARGUMENT~;
     copy_bytes *= slice_count;
     if (copy_bytes > resolved.size) return gpu::INVALID_ARGUMENT~;
-    if (resolved.offset % block.bytes != 0 || resolved.offset % 4 != 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
 
     return {
         .buffer_offset       = (vk::DeviceSize)resolved.offset,
@@ -1837,9 +1647,7 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
     )!;
     return {
         .buffer         = buffer,
-        .buffer_span    = desc.src,
         .texture        = texture,
-        .texture_handle = desc.texture,
         .region         = resolve_texture_copy_region(
             resolved:          &buffer,
             slot:              texture,
@@ -1856,39 +1664,6 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
             aspect:            desc.aspect,
         )!,
     };
-}
-
-fn PreparedBufferTextureCopy? validate_and_lower_buffer_to_texture_copy(
-    CommandRecord* commands,
-    gpu::BufferTextureCopyDesc* desc,
-) {
-    PreparedBufferTextureCopy copy = lower_buffer_to_texture_copy(commands, desc)!;
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    if (copy.texture.sparse) return gpu::INVALID_ARGUMENT~;
-    validate_span_recording_access_only(
-        state:     state,
-        record:    record,
-        resolved:  &copy.buffer,
-        span:      &copy.buffer_span,
-        operation: "cmd_copy_buffer_to_texture",
-    )!;
-    validate_texture_recording_access_only(
-        state:     state,
-        record:    record,
-        slot:      copy.texture,
-        handle:    copy.texture_handle,
-        operation: "cmd_copy_buffer_to_texture",
-    )!;
-    validate_span_transfer_usage(
-        state:     state,
-        resolved:  &copy.buffer,
-        span:      &copy.buffer_span,
-        source:    true,
-        operation: "cmd_copy_buffer_to_texture",
-    )!;
-    if (!copy.texture.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
-    return copy;
 }
 
 fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
@@ -1911,9 +1686,7 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
     )!;
     return {
         .buffer         = buffer,
-        .buffer_span    = desc.dst,
         .texture        = texture,
-        .texture_handle = desc.texture,
         .region         = resolve_texture_copy_region(
             resolved:          &buffer,
             slot:              texture,
@@ -1930,39 +1703,6 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
             aspect:            desc.aspect,
         )!,
     };
-}
-
-fn PreparedBufferTextureCopy? validate_and_lower_texture_to_buffer_copy(
-    CommandRecord* commands,
-    gpu::TextureBufferCopyDesc* desc,
-) {
-    PreparedBufferTextureCopy copy = lower_texture_to_buffer_copy(commands, desc)!;
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    if (copy.texture.sparse) return gpu::INVALID_ARGUMENT~;
-    validate_texture_recording_access_only(
-        state:     state,
-        record:    record,
-        slot:      copy.texture,
-        handle:    copy.texture_handle,
-        operation: "cmd_copy_texture_to_buffer",
-    )!;
-    validate_span_recording_access_only(
-        state:     state,
-        record:    record,
-        resolved:  &copy.buffer,
-        span:      &copy.buffer_span,
-        operation: "cmd_copy_texture_to_buffer",
-    )!;
-    validate_span_transfer_usage(
-        state:     state,
-        resolved:  &copy.buffer,
-        span:      &copy.buffer_span,
-        source:    false,
-        operation: "cmd_copy_texture_to_buffer",
-    )!;
-    if (!copy.texture.usage.transfer_src) return gpu::INVALID_ARGUMENT~;
-    return copy;
 }
 
 fn vk::ImageLayout texture_copy_layout(
@@ -2015,7 +1755,7 @@ fn void record_texture_to_buffer_copy(
     );
 }
 
-fn void? trusted_copy_buffer_to_texture(
+fn void? vk_cmd_copy_buffer_to_texture(
     CommandRecord* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
@@ -2023,31 +1763,11 @@ fn void? trusted_copy_buffer_to_texture(
     record_buffer_to_texture_copy(commands, &copy);
 }
 
-fn void? full_copy_buffer_to_texture(
-    CommandRecord* commands,
-    gpu::BufferTextureCopyDesc* desc,
-) {
-    PreparedBufferTextureCopy copy =
-        validate_and_lower_buffer_to_texture_copy(commands, desc)!;
-
-    record_buffer_to_texture_copy(commands, &copy);
-}
-
-fn void? trusted_copy_texture_to_buffer(
+fn void? vk_cmd_copy_texture_to_buffer(
     CommandRecord* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
     PreparedBufferTextureCopy copy = lower_texture_to_buffer_copy(commands, desc)!;
-    record_texture_to_buffer_copy(commands, &copy);
-}
-
-fn void? full_copy_texture_to_buffer(
-    CommandRecord* commands,
-    gpu::TextureBufferCopyDesc* desc,
-) {
-    PreparedBufferTextureCopy copy =
-        validate_and_lower_texture_to_buffer_copy(commands, desc)!;
-
     record_texture_to_buffer_copy(commands, &copy);
 }
 
@@ -2063,74 +1783,6 @@ fn ResolvedSpan? lower_indirect_span(
         max_count:     uint::max,
     )!;
     ResolvedSpan resolved = resolve_span_slot(state, span, required)!;
-    if (resolved.offset % 4 != 0) return gpu::INVALID_ARGUMENT~;
-    return resolved;
-}
-
-<* Resolve an indirect argument span and validate its command semantics. *>
-fn ResolvedSpan? validate_and_lower_indirect_span(
-    VkDeviceState* state,
-    CommandRecord* record,
-    gpu::GpuSpan* span,
-    usz arg_size,
-    uint count,
-    ZString operation,
-    ZString rejected_field,
-    uint max_count = uint::max,
-) {
-    if (count > max_count && operation != null) {
-        return report_contract_failure(
-            state:               state,
-            operation:           operation,
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.NONE,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      rejected_field,
-            invariant:           "count must not exceed DeviceCaps.max_draw_indirect_count",
-            backend_text:        null,
-        )~;
-    }
-    usz? required_result = gpu::internal::indirect_argument_bytes(
-        argument_size: arg_size,
-        count:         count,
-        max_count:     max_count,
-    );
-    if (catch size_fault = required_result) {
-        if (operation == null) return size_fault~;
-        return report_contract_failure(
-            state:               state,
-            operation:           operation,
-            public_fault:        size_fault,
-            resource_kind:       gpu::DebugResourceKind.NONE,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      rejected_field,
-            invariant:           "indirect argument byte size must not overflow",
-            backend_text:        null,
-        )~;
-    }
-    usz required = required_result;
-    ResolvedSpan resolved = resolve_span_slot(
-        state:          state,
-        span:           span,
-        required:       required,
-        operation:      operation,
-        rejected_field: rejected_field,
-    )!;
-    validate_span_recording_access_only(
-        state:     state,
-        record:    record,
-        resolved:  &resolved,
-        span:      span,
-        operation: operation,
-    )!;
-    if (!resolved.slot.usage.indirect) return gpu::INVALID_ARGUMENT~;
-    if (resolved.offset % 4 != 0) return gpu::INVALID_ARGUMENT~;
     return resolved;
 }
 
@@ -2141,100 +1793,10 @@ fn ResolvedSpan? validate_and_lower_indirect_span(
 fn BoundPipeline*? borrow_bound_pipeline(CommandRecord* record) @private {
     BoundPipeline* pipeline = &record.logical_pipeline;
     if (!pipeline.handle.is_valid()) return gpu::INVALID_RESOURCE_STATE~;
-    if (pipeline.pipeline == null || pipeline.layout == null) unreachable();
-    return pipeline;
-}
-
-<* TRUSTED: the bound pipeline, faulting INVALID_ARGUMENT when its kind is
-   not the one the command needs. *>
-fn BoundPipeline*? borrow_bound_pipeline_of_kind(
-    CommandRecord* record,
-    PipelineKind kind,
-) @private {
-    BoundPipeline* pipeline = borrow_bound_pipeline(record)!;
-    if (pipeline.kind != kind) return gpu::INVALID_ARGUMENT~;
-    return pipeline;
-}
-
-fn bool pipeline_kind_rasterizes(PipelineKind kind) {
-    return kind == PipelineKind.GRAPHICS || kind == PipelineKind.MESH;
-}
-
-fn BoundPipeline*? active_bound_pipeline(
-    VkDeviceState* state,
-    CommandRecord* record,
-    PipelineKind expected_kind,
-    ZString operation,
-    bool any_raster = false,
-) @private {
-    BoundPipeline* pipeline = &record.logical_pipeline;
-    if (!pipeline.handle.is_valid()) return gpu::COMMAND_RECORDING_ERROR~;
-    bool matches = pipeline.kind == expected_kind
-        || (any_raster && pipeline_kind_rasterizes(pipeline.kind));
-    if (!matches) {
-        ZString invariant = expected_kind == PipelineKind.COMPUTE
-            ? "pipeline kind must match the COMPUTE bind point"
-            : (expected_kind == PipelineKind.MESH
-                ? "pipeline kind must be a mesh pipeline"
-                : "pipeline kind must match the GRAPHICS bind point");
-        return report_contract_failure(
-            state:               state,
-            operation:           operation,
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.PIPELINE,
-            has_public_identity: true,
-            index:               pipeline.handle.index,
-            generation:          pipeline.handle.generation,
-            debug_name:          null,
-            rejected_field:      "pipeline",
-            invariant:           invariant,
-            backend_text:        null,
-        )~;
+    if (pipeline.pipeline == null || pipeline.layout == null) {
+        return gpu::INVALID_RESOURCE_STATE~;
     }
     return pipeline;
-}
-
-fn void? validate_pipeline_render_compatibility(
-    BoundPipeline* pipeline,
-    RenderCompatibility* render,
-) @private {
-    if (!pipeline_kind_rasterizes(pipeline.kind)) return;
-    RenderCompatibility* expected = &pipeline.render;
-    if (expected.color_count != render.color_count
-        || expected.depth_format != render.depth_format
-        || expected.sample_count != render.sample_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    for (uint i = 0; i < render.color_count; i++) {
-        if (expected.color_formats[i] != render.color_formats[i]) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-    }
-}
-
-fn void? validate_active_pipeline_render_compatibility(
-    VkDeviceState* state,
-    CommandRecord* record,
-    RenderCompatibility* render,
-) @private {
-    BoundPipeline* pipeline = &record.logical_pipeline;
-    if (!pipeline.handle.is_valid()) return;
-    return validate_pipeline_render_compatibility(pipeline, render);
-}
-
-fn RenderCompatibility pipeline_render_compatibility(
-    PipelineKey* key,
-) @private {
-    RenderCompatibility compatibility = {
-        .color_count  = key.color_target_count,
-        .depth_format = (gpu::Format)key.depth_format,
-        .sample_count = (gpu::SampleCount)key.sample_count,
-    };
-    for (uint i = 0; i < key.color_target_count; i++) {
-        compatibility.color_formats[i] =
-            (gpu::Format)key.color_formats[i];
-    }
-    return compatibility;
 }
 
 fn BoundPipeline? lower_bound_pipeline(
@@ -2258,29 +1820,8 @@ fn BoundPipeline? lower_bound_pipeline(
         .generated_dispatch_layout = slot.generated_dispatch_layout,
         .cache_entry               = slot.entry,
         .kind                      = (PipelineKind)entry.key.kind,
-        .mesh_task_stage           = entry.mesh_task_stage,
-        .push_block_size           = entry.push_block_size,
         .inline_root_offset        = entry.inline_root_offset,
-        .render                    = pipeline_render_compatibility(&entry.key),
-        .dynamic_ray_tracing_stack_size =
-            slot.ray_tracing_info.dynamic_stack_size,
     };
-}
-
-fn BoundPipeline? validate_and_lower_bound_pipeline(
-    CommandRecord* commands,
-    gpu::PipelineHandle pipeline,
-) {
-    BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    if (record.state == gpu::internal::CommandState.RECORDING_RENDER_PASS) {
-        validate_pipeline_render_compatibility(
-            &bound,
-            &record.active_render,
-        )!;
-    }
-    return bound;
 }
 
 fn void bind_pipeline_real(
@@ -2294,7 +1835,19 @@ fn void bind_pipeline_real(
 }
 
 fn PipelineBindOps pipeline_bind_ops_real() @private {
-    return { .bind = &bind_pipeline_real };
+    return {
+        .bind = &bind_pipeline_real,
+        .set_topology = &set_pipeline_topology_real,
+    };
+}
+
+fn void set_pipeline_topology_real(
+    void* user_data,
+    vk::CommandBuffer command_buffer,
+    vk::PrimitiveTopology topology,
+) @private {
+    (void)user_data;
+    vk::cmd_set_primitive_topology(command_buffer, topology);
 }
 
 fn void? record_bound_pipeline_with_ops(
@@ -2342,43 +1895,17 @@ fn void? record_bound_pipeline_with_ops(
     if (bound.kind == PipelineKind.GRAPHICS
         && record.graphics_state_initialized
         && !record.raster_topology_emitted) {
-        vk::cmd_set_primitive_topology(
+        ops.set_topology(
+            ops.user_data,
             record.command_buffer,
             topology_to_vk(record.raster_topology),
         );
         record.raster_topology_emitted = true;
     }
-    if (bound.kind == PipelineKind.RAY_TRACING
-        && !bound.dynamic_ray_tracing_stack_size) {
-        record.ray_tracing_stack_size_set = false;
-    }
     record.logical_pipeline = *bound;
 }
 
-fn void? record_bound_pipeline(
-    CommandRecord* commands,
-    BoundPipeline* bound,
-) {
-    PipelineBindOps ops = pipeline_bind_ops_real();
-    return record_bound_pipeline_with_ops(commands, bound, &ops);
-}
-
-fn void update_full_color_state_for_bind(
-    CommandRecord* record,
-    BoundPipeline* bound,
-) @private {
-    if (!record.color_state_initialized
-        || !pipeline_kind_rasterizes(bound.kind)) return;
-    if (!color_compatibility_matches(
-        &record.color_state,
-        &bound.render,
-    )) {
-        record.color_state_initialized = false;
-        record.color_state = {};
-    }
-}
-
-fn void? trusted_bind_pipeline_with_ops(
+fn void? vk_cmd_bind_pipeline_with_ops(
     CommandRecord* commands,
     gpu::PipelineHandle pipeline,
     PipelineBindOps* ops,
@@ -2387,51 +1914,18 @@ fn void? trusted_bind_pipeline_with_ops(
     record_bound_pipeline_with_ops(commands, &bound, ops)!;
 }
 
-fn void? full_bind_pipeline_with_ops(
-    CommandRecord* commands,
-    gpu::PipelineHandle pipeline,
-    PipelineBindOps* ops,
-) {
-    BoundPipeline bound = validate_and_lower_bound_pipeline(commands, pipeline)!;
-    CommandRecord* record = commands;
-
-    record_bound_pipeline_with_ops(commands, &bound, ops)!;
-    update_full_color_state_for_bind(record, &bound);
-}
-
-fn void? trusted_bind_pipeline(
+fn void? vk_cmd_bind_pipeline(
     CommandRecord* commands,
     gpu::PipelineHandle pipeline,
 ) {
     PipelineBindOps ops = pipeline_bind_ops_real();
-    return trusted_bind_pipeline_with_ops(commands, pipeline, &ops);
-}
-
-fn void? full_bind_pipeline(
-    CommandRecord* commands,
-    gpu::PipelineHandle pipeline,
-) {
-    PipelineBindOps ops = pipeline_bind_ops_real();
-    return full_bind_pipeline_with_ops(commands, pipeline, &ops);
-}
-
-fn void? bind_pipeline_with_injected_ops(
-    CommandRecord* commands,
-    gpu::PipelineHandle pipeline,
-    PipelineBindOps* ops,
-) @feat(TESTING) {
-    if (commands.device_state.validation_policy.contract
-            == gpu::ContractValidation.FULL) {
-        return full_bind_pipeline_with_ops(commands, pipeline, ops);
-    }
-    return trusted_bind_pipeline_with_ops(commands, pipeline, ops);
+    return vk_cmd_bind_pipeline_with_ops(commands, pipeline, &ops);
 }
 
 <* Validate and borrow the inline payload for the next direct command. *>
 fn void? set_inline_root(
     CommandRecord* record,
     char[] inline_root,
-    ZString operation,
 ) {
     if (inline_root.len % 4 != 0 || inline_root.len > gpu::INLINE_ROOT_CAPACITY) {
         return gpu::INVALID_ARGUMENT~;
@@ -2443,16 +1937,6 @@ fn void? set_inline_root(
     BoundPipeline* pipeline = bound;
     uint needed = pipeline.inline_root_offset + (uint)inline_root.len;
     if (needed > gpu::ROOT_PUSH_CAPACITY) return gpu::INVALID_ARGUMENT~;
-    if (!contract_uses_full_validation(record.device_state.validation_policy)) return;
-    if (pipeline.push_block_size < needed) {
-        report_state_diagnostic(
-            state:          record.device_state,
-            category:       { .public_contract },
-            operation:      operation,
-            rejected_field: "inline_root",
-            invariant:      "inline payload must fit the bound pipeline's push block",
-        );
-    }
 }
 
 <* One push of the header followed by the inline payload at the bound
@@ -2515,45 +1999,7 @@ fn void record_dispatch(
     );
 }
 
-fn void? full_dispatch(
-    CommandRecord* commands,
-    gpu::GpuAddress root,
-    gpu::Vec3u groups,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (record.state != gpu::internal::CommandState.RECORDING) return gpu::COMMAND_RECORDING_ERROR~;
-    VkDeviceState* state = commands.device_state;
-    BoundPipeline* pipeline = active_bound_pipeline(
-        state:         state,
-        record:        record,
-        expected_kind: PipelineKind.COMPUTE,
-        operation:     "cmd_dispatch",
-    )!;
-    if (catch limit_fault = gpu::internal::validate_dispatch_groups(groups, state.caps.max_compute_work_group_count)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "cmd_dispatch",
-            public_fault:        limit_fault,
-            resource_kind:       gpu::DebugResourceKind.NONE,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "groups",
-            invariant:           "group counts must not exceed DeviceCaps.max_compute_work_group_count",
-            backend_text:        null,
-        )~;
-    }
-    record_dispatch(
-        record:   record,
-        pipeline: pipeline,
-        root:     root,
-        groups:   groups,
-    );
-}
-
-fn void? trusted_dispatch(
+fn void? vk_cmd_dispatch(
     CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::Vec3u groups,
@@ -2593,37 +2039,6 @@ fn PreparedDispatchIndirect? lower_dispatch_indirect(
     };
 }
 
-fn PreparedDispatchIndirect? full_prepare_dispatch_indirect(
-    CommandRecord* commands,
-    gpu::GpuAddress root,
-    gpu::GpuSpan args,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = commands.device_state;
-    return {
-        .pipeline  = active_bound_pipeline(
-            state:         state,
-            record:        record,
-            expected_kind: PipelineKind.COMPUTE,
-            operation:     "cmd_dispatch_indirect",
-        )!,
-        .args      = validate_and_lower_indirect_span(
-            state:          state,
-            record:         record,
-            span:           &args,
-            arg_size:       gpu::DispatchIndirectCommand::size,
-            count:          1,
-            operation:      "cmd_dispatch_indirect",
-            rejected_field: "args",
-        )!,
-        .root      = root,
-    };
-}
-
 fn void record_dispatch_indirect(
     CommandRecord* commands,
     PreparedDispatchIndirect* dispatch,
@@ -2637,7 +2052,7 @@ fn void record_dispatch_indirect(
     );
 }
 
-fn void? trusted_dispatch_indirect(
+fn void? vk_cmd_dispatch_indirect(
     CommandRecord* commands,
     gpu::GpuAddress root,
     gpu::GpuSpan args,
@@ -2648,42 +2063,6 @@ fn void? trusted_dispatch_indirect(
         args,
     )!;
     record_dispatch_indirect(commands, &dispatch);
-}
-
-fn void? full_dispatch_indirect(
-    CommandRecord* commands,
-    gpu::GpuAddress root,
-    gpu::GpuSpan args,
-) {
-    PreparedDispatchIndirect dispatch = full_prepare_dispatch_indirect(
-        commands,
-        root,
-        args,
-    )!;
-
-    record_dispatch_indirect(commands, &dispatch);
-}
-
-fn void? validate_generated_work_count(
-    VkDeviceState* state,
-    uint count,
-    ZString operation,
-    ZString rejected_field,
-) {
-    if (count <= state.caps.max_generated_work_count) return;
-    return report_contract_failure(
-        state:               state,
-        operation:           operation,
-        public_fault:        gpu::INVALID_ARGUMENT,
-        resource_kind:       gpu::DebugResourceKind.NONE,
-        has_public_identity: false,
-        index:               0,
-        generation:          0,
-        debug_name:          null,
-        rejected_field:      rejected_field,
-        invariant:           "count must not exceed DeviceCaps.max_generated_work_count",
-        backend_text:        null,
-    )~;
 }
 
 fn ResolvedSpan? lower_generated_work_records(
@@ -2698,42 +2077,6 @@ fn ResolvedSpan? lower_generated_work_records(
         uint::max,
     )!;
     ResolvedSpan resolved = resolve_span_slot(state, records, required)!;
-    if (resolved.offset % 8 != 0) return gpu::INVALID_ARGUMENT~;
-    return resolved;
-}
-
-fn ResolvedSpan? validate_and_lower_generated_work_records(
-    VkDeviceState* state,
-    CommandRecord* record,
-    gpu::GpuSpan* records,
-    usz record_size,
-    uint max_count,
-    ZString operation,
-) {
-    validate_generated_work_count(state, max_count, operation, "max_count")!;
-    usz required = gpu::internal::generated_work_bytes(
-        record_size,
-        max_count,
-        state.caps.max_generated_work_count,
-    )!;
-    ResolvedSpan resolved = resolve_span_slot(
-        state:          state,
-        span:           records,
-        required:       required,
-        operation:      operation,
-        rejected_field: "records",
-    )!;
-    validate_span_recording_access_only(
-        state:     state,
-        record:    record,
-        resolved:  &resolved,
-        span:      records,
-        operation: operation,
-    )!;
-    if (!resolved.slot.usage.indirect || !resolved.slot.usage.addressable) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (resolved.offset % 8 != 0) return gpu::INVALID_ARGUMENT~;
     return resolved;
 }
 
@@ -2873,51 +2216,6 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch_with_layout_read_ops(
     return dispatch;
 }
 
-fn PreparedGeneratedDispatch? full_prepare_generated_dispatch(
-    CommandRecord* commands,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_dispatch_count,
-) {
-    if (commands == null) return gpu::INVALID_ARGUMENT~;
-    CommandRecord* record = commands;
-    if (record == null || record.state != gpu::internal::CommandState.RECORDING) {
-        return gpu::COMMAND_RECORDING_ERROR~;
-    }
-    VkDeviceState* state = commands.device_state;
-    PreparedGeneratedDispatch dispatch = {
-        .pipeline = active_bound_pipeline(
-            state:         state,
-            record:        record,
-            expected_kind: PipelineKind.COMPUTE,
-            operation:     "cmd_dispatch_generated",
-        )!,
-        .max_count    = max_dispatch_count,
-    };
-    if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
-    if (max_dispatch_count == 0) return dispatch;
-
-    dispatch.records = validate_and_lower_generated_work_records(
-        state:       state,
-        record:      record,
-        records:     &records,
-        record_size: gpu::GeneratedDispatchRecord::size,
-        max_count:   max_dispatch_count,
-        operation:   "cmd_dispatch_generated",
-    )!;
-    dispatch.count = validate_and_lower_indirect_span(
-        state:          state,
-        record:         record,
-        span:           &count_span,
-        arg_size:       uint::size,
-        count:          1,
-        operation:      "cmd_dispatch_generated",
-        rejected_field: "count_span",
-    )!;
-    dispatch.layout = snapshot_generated_dispatch_layout(dispatch.pipeline)!;
-    return dispatch;
-}
-
 fn void? record_generated_dispatch(
     CommandRecord* commands,
     PreparedGeneratedDispatch* dispatch,
@@ -2938,7 +2236,7 @@ fn void? record_generated_dispatch(
     )!;
 }
 
-fn void? trusted_dispatch_generated_with_layout_read_ops(
+fn void? vk_cmd_dispatch_generated_with_layout_read_ops(
     CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
@@ -2958,7 +2256,7 @@ fn void? trusted_dispatch_generated_with_layout_read_ops(
     record_generated_dispatch(commands, &dispatch)!;
 }
 
-fn void? trusted_dispatch_generated(
+fn void? vk_cmd_dispatch_generated(
     CommandRecord* commands,
     gpu::GpuSpan records,
     gpu::GpuSpan count_span,
@@ -2970,23 +2268,6 @@ fn void? trusted_dispatch_generated(
         count_span:         count_span,
         max_dispatch_count: max_dispatch_count,
     )!;
-    record_generated_dispatch(commands, &dispatch)!;
-}
-
-fn void? full_dispatch_generated(
-    CommandRecord* commands,
-    gpu::GpuSpan records,
-    gpu::GpuSpan count_span,
-    uint max_dispatch_count,
-) {
-    PreparedGeneratedDispatch dispatch = full_prepare_generated_dispatch(
-        commands:           commands,
-        records:            records,
-        count_span:         count_span,
-        max_dispatch_count: max_dispatch_count,
-    )!;
-    if (dispatch.max_count == 0) return;
-
     record_generated_dispatch(commands, &dispatch)!;
 }
 

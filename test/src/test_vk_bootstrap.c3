@@ -57,7 +57,6 @@ fn void device_destroy_readiness_never_waits() @test {
 
 fn void device_create_destroy() @test {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .enable_debug_names = true,
         .application_name   = "gpu_vk_bootstrap_test",
@@ -129,7 +128,6 @@ fn void device_create_destroy() @test {
 
 fn void device_heap_capacities() @test {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .texture_heap_capacity = 64,
         .sampler_heap_capacity = 8,

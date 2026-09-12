@@ -29,7 +29,6 @@ fn gpu::Device? create_ray_query_test_device(
 ) {
     gpu::RuntimeDesc runtime_desc = {
         .application_name = "gpu_ray_query_test",
-        .contract_validation = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .acceleration_structure_heap_capacity = 32,
     };

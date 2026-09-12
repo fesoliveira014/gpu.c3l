@@ -7,7 +7,7 @@ import std::core::mem;
 import std::io;
 
 struct RuntimeConfig {
-    DeviceValidationPolicy    validation;
+    bool                     enable_vulkan_validation;
     bool                      debug_names;
     uint                      texture_heap_capacity;
     uint                      sampler_heap_capacity;
@@ -154,13 +154,13 @@ fn VkInstanceDesc runtime_instance_desc(
     vk::DebugUtilsMessengerCreateInfoEXT* messenger_info,
 ) {
     return {
-        .enable_validation         = config.validation.vulkan_layers,
-        .enable_debug_utils        = config.validation.vulkan_layers
+        .enable_validation         = config.enable_vulkan_validation,
+        .enable_debug_utils        = config.enable_vulkan_validation
             || config.debug_names
             || config.debug_callback != null,
         .enable_available_surfaces = true,
         .application_name          = application_name,
-        .debug_messenger_info      = config.validation.vulkan_layers
+        .debug_messenger_info      = config.enable_vulkan_validation
             ? messenger_info
             : null,
     };
@@ -172,10 +172,7 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
         destroy_vk_runtime_state(state);
     }
 
-    state.config.validation = {
-        .contract      = desc.contract_validation,
-        .vulkan_layers = desc.enable_vulkan_validation,
-    };
+    state.config.enable_vulkan_validation = desc.enable_vulkan_validation;
     state.config.debug_names = desc.enable_debug_names;
     state.config.texture_heap_capacity = desc.texture_heap_capacity;
     state.config.sampler_heap_capacity = desc.sampler_heap_capacity;

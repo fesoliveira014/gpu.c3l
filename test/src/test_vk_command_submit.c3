@@ -6,7 +6,6 @@ import gpu::internal::vk @public;
 import vk;
 import std::atomic;
 
-
 fn void record_empty_executables(
     gpu::CommandAllocator* allocator,
     gpu::ExecutableCommandList[] out_lists,
@@ -55,7 +54,6 @@ fn void discard_consumes_recording_and_executable_lists() @test {
 
 fn void copy_upload_to_readback() @test {
     gpu::RuntimeDesc desc = {
-        .contract_validation      = gpu::ContractValidation.FULL,
         .enable_vulkan_validation = true,
         .application_name  = "gpu_command_test",
     };
@@ -257,7 +255,6 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
     defer discard_test_executable(&replacement_executable)!!;
     assert(replacement_executable.record != original_executable.record,
         "a submitted command record is not reused before retirement");
-
 
     gpu::ExecutableCommandList[1] original_alias = { original_executable };
     gpu::SubmitDesc second = { .command_lists = original_alias[..] };
@@ -773,7 +770,6 @@ fn void command_recording_requires_no_lifecycle_boundary() @test {
         gpu::wait_completion(completion, ulong::max)!!;
     }
 }
-
 
 fn void mixed_allocators_submit_and_retire_to_exact_owners() @test {
     gpu::RuntimeDesc desc = {};
