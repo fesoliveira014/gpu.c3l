@@ -178,8 +178,9 @@ gpu::cmd_set_scissor(&commands, &clip)!;
 enabled stencil test with an undefined `CompareOp` or `StencilOp` faults
 `INVALID_ARGUMENT` under every policy. Under `FULL`, an enabled stencil
 test on a pipeline without a stencil aspect reports a `performance`
-diagnostic, and a stencil `LOAD` after a `DONT_CARE` stencil store on the
-same texture reports a `public_contract` diagnostic; neither faults.
+diagnostic without faulting. The application must ensure that a stencil
+`LOAD` reads defined contents; a `DONT_CARE` store leaves them undefined.
+The library does not track stencil content history.
 Binding a pipeline or beginning a pass does not reset state. Fields are
 described in [shaders and pipelines](shaders_and_pipelines.md#graphics-pipelines).
 
