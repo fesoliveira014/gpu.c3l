@@ -21,8 +21,8 @@ management, or a compatibility descriptor path.
 - compute, graphics, mesh, and opt-in ray-tracing pipelines; indirect and
   generated work; sparse textures; timestamp queries; swapchains;
 - caller-owned command allocators and completion points; no hidden waits;
-- optional `gpu::util` device context, full contract validation, and
-  structured diagnostics; and
+- optional `gpu::util` device context and structured diagnostics, including
+  Vulkan validation-layer messages; and
 - `gpu_shaders`: one tool that generates matching C3 and GLSL ABI declarations
   and compiles shaders.
 

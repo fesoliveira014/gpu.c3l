@@ -124,7 +124,7 @@ c3c test vk_sparse_bind --path test --test-show-output
 | `vk_sparse_texture` | sparse descriptor validation, flags, requirement translation, transaction rollback, cached queries, capability-gated image lifecycle |
 | `vk_sparse_bind` | tile and tail geometry, unbind, allocation compatibility and overlap, allocation-failure rollback, timeline chaining, result mapping, retention and retirement, cross-thread lock boundaries, capability-gated bind/use/unbind with readback |
 | `vk_core` | device selection, allocations, spans, textures, views, samplers, reflection and root ABI, pipelines and cache, command lifecycle, graphics/compute/transfer output, depth, threading, queues, submission and completion, timestamps, diagnostics, rollback |
-| `vk_wsi` | swapchain configuration, acquire, present, resize, ownership, result mapping, WSI diagnostics; no native window needed |
+| `vk_wsi` | swapchain configuration, simulated acquire/present/resize, ownership, result mapping and diagnostics; captures presentation lowering and executes valid ordinary-image transitions with real queue retirement, without a native window |
 | `vk_optional_generated_work` | indirect and generated dispatch and draw, reservation and exhaustion, caller-owned spans, output when the driver supports it |
 | `vk_ray_tracing` | on a capable device: BLAS and TLAS builds, clone, SBT packing, direct and indirect trace, dynamic stack size, indirect build ranges. On an adapter without ray-tracing pipelines it fails with `UNSUPPORTED_FEATURE`; that is not a skip. |
 

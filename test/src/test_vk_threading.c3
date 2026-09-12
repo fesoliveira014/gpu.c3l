@@ -667,7 +667,7 @@ fn void contended_allocator_does_not_hold_the_device_resource_lock() @test {
         "an allocator waiter does not retain the device resource lock");
 }
 
-fn void full_validation_rejects_cross_thread_shared_allocator() @test {
+fn void shared_allocator_rejects_concurrent_recording() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;

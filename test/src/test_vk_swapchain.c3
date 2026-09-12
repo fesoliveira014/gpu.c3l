@@ -4,6 +4,7 @@ import gpu::internal @public;
 import gpu;
 import gpu::internal::vk @public;
 import std::core::mem;
+import std::io;
 import vma;
 import vk;
 
@@ -15,6 +16,9 @@ const ulong ACQUIRE_FIXTURE_OWNER = 101;
 
 uint unified_submit_buffer_count;
 vk::PipelineStageFlags2 unified_submit_wait_stage;
+vk::CommandBuffer unified_acquire_buffer;
+vk::CommandBuffer unified_application_buffer;
+vk::CommandBuffer unified_present_buffer;
 
 struct AcquisitionStateSnapshot {
     bool                                              acquire_pending;
@@ -1356,6 +1360,82 @@ struct BorrowedSwapchainFixture {
     vma::ImageAllocation                             backing;
     gpu::SwapchainHandle                             swapchain;
     gpu::internal::vk::SwapchainSlot*                live_slot;
+    uint                                            acquire_barriers;
+    uint                                            present_barriers;
+}
+
+<* Check presentation lowering, then keep the ordinary backing image in GENERAL. *>
+fn void emit_simulated_swapchain_barrier(
+    void* user_data,
+    vk::CommandBuffer commands,
+    vk::DependencyInfo* dependency,
+) {
+    BorrowedSwapchainFixture* fixture = (BorrowedSwapchainFixture*)user_data;
+    assert(dependency.image_memory_barrier_count == 1
+        && dependency.memory_barrier_count == 0
+        && dependency.buffer_memory_barrier_count == 0);
+    vk::ImageMemoryBarrier2 barrier = dependency.p_image_memory_barriers[0];
+    assert(barrier.image == fixture.backing.image
+        && barrier.src_queue_family_index == vk::QUEUE_FAMILY_IGNORED
+        && barrier.dst_queue_family_index == vk::QUEUE_FAMILY_IGNORED);
+    assert(barrier.subresource_range.aspect_mask == (vk::ImageAspectFlags)vk::ImageAspectFlagBits.COLOR_BIT
+        && barrier.subresource_range.base_mip_level == 0
+        && barrier.subresource_range.base_array_layer == 0);
+    if (fixture.state.unified_layouts) {
+        assert(barrier.subresource_range.level_count == vk::REMAINING_MIP_LEVELS
+            && barrier.subresource_range.layer_count == vk::REMAINING_ARRAY_LAYERS);
+    } else {
+        assert(barrier.subresource_range.level_count == 1
+            && barrier.subresource_range.layer_count == 1);
+    }
+    if (barrier.new_layout == vk::ImageLayout.GENERAL) {
+        assert(fixture.state.unified_layouts && barrier.old_layout == vk::ImageLayout.UNDEFINED);
+        assert(barrier.src_stage_mask == (vk::PipelineStageFlags2)0
+            && barrier.src_access_mask == (vk::AccessFlags2)0
+            && barrier.dst_stage_mask == (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT
+            && barrier.dst_access_mask == ((vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT
+                | (vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_MEMORY_WRITE_BIT));
+        fixture.acquire_barriers++;
+        unified_acquire_buffer = commands;
+    } else {
+        assert(barrier.new_layout == vk::ImageLayout.PRESENT_SRC_KHR
+            && barrier.dst_stage_mask == (vk::PipelineStageFlags2)0
+            && barrier.dst_access_mask == (vk::AccessFlags2)0);
+        if (fixture.state.unified_layouts) {
+            assert(barrier.old_layout == vk::ImageLayout.GENERAL
+                && barrier.src_stage_mask == (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT
+                && barrier.src_access_mask == (vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_MEMORY_WRITE_BIT);
+            unified_present_buffer = commands;
+        } else {
+            assert(barrier.old_layout == vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL
+                && barrier.src_stage_mask == (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
+                && barrier.src_access_mask == ((vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_READ_BIT
+                    | (vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT));
+        }
+        fixture.present_barriers++;
+        barrier.new_layout = vk::ImageLayout.GENERAL;
+    }
+    vk::DependencyInfo native = *dependency;
+    native.p_image_memory_barriers = &barrier;
+    vk::cmd_pipeline_barrier2(commands, &native);
+}
+
+fn void consume_simulated_present(
+    BorrowedSwapchainFixture* fixture,
+    gpu::Queue queue,
+    gpu::AcquiredImage* acquired,
+) {
+    gpu::internal::vk::QueueCompletionState* completion =
+        &fixture.state.queue_completions[queue.id];
+    completion.submission_mutex.lock()!!;
+    defer completion.submission_mutex.unlock();
+    vk::SemaphoreSubmitInfo wait = vk::semaphore_submit_info()
+        .set_semaphore(fixture.live_slot.present_semaphores[acquired.index])
+        .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
+    vk::SubmitInfo2 submit = vk::submit_info2().set_wait_semaphore_infos((&wait)[:1]);
+    assert(vk::queue_submit2(completion.queue, 1, &submit, (vk::Fence)null) == vk::Result.SUCCESS);
+    assert(vk::queue_wait_idle(completion.queue) == vk::Result.SUCCESS);
+    gpu::internal::vk::commit_present_result(fixture.live_slot, acquired, vk::Result.SUCCESS);
 }
 
 <* Install a one-image swapchain over an application image through injected
@@ -1465,10 +1545,23 @@ fn void restore_borrowed_swapchain(BorrowedSwapchainFixture* fixture) {
     state.allocator.destroy_image(fixture.backing.image, fixture.backing.allocation);
 }
 
+fn void report_simulated_swapchain_validation(gpu::DebugMessage* message, void* user_data) {
+    if (!message.category.validation) return;
+    io::eprintfn("vk: %s", message.backend_text);
+    if (message.severity == gpu::DebugMessageSeverity.ERROR) {
+        uint* errors = (uint*)user_data;
+        (*errors)++;
+    }
+}
+
 fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
+    uint validation_errors;
+    defer assert(validation_errors == 0, "simulated WSI must issue valid native commands");
     gpu::RuntimeDesc runtime_desc = {
         .enable_vulkan_validation = true,
         .application_name  = "borrowed_swapchain_view_lifecycle_test",
+        .debug_callback = &report_simulated_swapchain_validation,
+        .debug_user_data = &validation_errors,
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
     defer destroy_test_device(&device)!!;
@@ -1539,7 +1632,16 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
         },
         .after = { .layout = gpu::TextureLayout.PRESENT },
     };
-    gpu::cmd_texture_barrier(&commands, &to_present)!!;
+    gpu::internal::vk::BarrierEmitOps barrier_ops = {
+        .user_data = &fixture,
+        .emit = &emit_simulated_swapchain_barrier,
+    };
+    gpu::internal::vk::vk_cmd_texture_barrier_with_ops(
+        gpu::internal::required_recording_command(&commands),
+        &to_present,
+        &barrier_ops,
+    )!!;
+    assert(fixture.present_barriers == 1 && fixture.acquire_barriers == 0);
 
     gpu::internal::vk::commit_present_result(live_slot, &acquired, vk::Result.SUCCESS);
 
@@ -2123,6 +2225,10 @@ fn vk::Result capture_unified_submit(
 ) {
     assert(submit_count == 1, "one native submission");
     unified_submit_buffer_count = submits[0].command_buffer_info_count;
+    assert(unified_submit_buffer_count == 3
+        && submits[0].p_command_buffer_infos[0].command_buffer == unified_acquire_buffer
+        && submits[0].p_command_buffer_infos[1].command_buffer == unified_application_buffer
+        && submits[0].p_command_buffer_infos[2].command_buffer == unified_present_buffer);
     unified_submit_wait_stage = submits[0].wait_semaphore_info_count > 0
         ? submits[0].p_wait_semaphore_infos[0].stage_mask
         : (vk::PipelineStageFlags2)0;
@@ -2139,9 +2245,13 @@ fn vk::Result capture_unified_submit(
 }
 
 fn void unified_swapchain_submit_wraps_application_lists() @test {
+    uint validation_errors;
+    defer assert(validation_errors == 0, "simulated WSI must issue valid native commands");
     gpu::RuntimeDesc runtime_desc = {
         .enable_vulkan_validation = true,
         .application_name         = "unified_swapchain_submit_test",
+        .debug_callback = &report_simulated_swapchain_validation,
+        .debug_user_data = &validation_errors,
     };
     gpu::DeviceDesc device_desc = { .unified_layouts = true };
     gpu::Device device = create_test_device(&runtime_desc, &device_desc)!!;
@@ -2151,6 +2261,15 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
     BorrowedSwapchainFixture fixture;
     install_borrowed_swapchain(state, &fixture);
     defer restore_borrowed_swapchain(&fixture);
+
+    gpu::internal::vk::QueueSubmitOps submit_ops = {
+        .submit = &capture_unified_submit,
+        .counter_query = &gpu::internal::vk::real_semaphore_counter_query,
+        .swapchain_barrier = {
+            .user_data = &fixture,
+            .emit = &emit_simulated_swapchain_barrier,
+        },
+    };
 
     gpu::AcquiredImage acquired = gpu::internal::vk::vk_acquire_next_image(
         state,
@@ -2168,13 +2287,19 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = 4, .height = 4 };
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_end_render_pass(&commands)!!;
+    unified_application_buffer = gpu::internal::required_recording_command(&commands).command_buffer;
     gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)!! };
 
     gpu::SubmitDesc wrong = {
         .command_lists    = lists[..],
         .readiness_before = { .compute },
     };
-    assert(@catch(gpu::internal::vk::vk_submit_with(state, queue, &wrong, &capture_unified_submit))
+    assert(@catch(gpu::internal::vk::vk_submit_with_ops(
+        state: state,
+        queue: queue,
+        desc: &wrong,
+        ops: &submit_ops,
+    ))
         == gpu::INVALID_ARGUMENT,
         "readiness stages without readiness stay rejected");
 
@@ -2185,14 +2310,20 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
         .readiness_before = { .compute },
     };
     gpu::CompletionPoint point =
-        gpu::internal::vk::vk_submit_with(state, queue, &desc, &capture_unified_submit)!!;
+        gpu::internal::vk::vk_submit_with_ops(
+            state: state,
+            queue: queue,
+            desc: &desc,
+            ops: &submit_ops,
+        )!!;
+    assert(fixture.acquire_barriers == 1 && fixture.present_barriers == 1);
     assert(unified_submit_buffer_count == 3,
         "the batch holds the acquire list, the application list, and the present list");
     assert(unified_submit_wait_stage
         == (vk::PipelineStageFlags2)vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
         "the acquire wait ignores readiness_before");
     gpu::wait_completion(point)!!;
-    gpu::internal::vk::commit_present_result(fixture.live_slot, &acquired, vk::Result.SUCCESS);
+    consume_simulated_present(&fixture, queue, &acquired);
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(&device)!!;
     release_submitted_executables(&operation, lists[..]);
@@ -2203,19 +2334,20 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
         fixture.swapchain,
         0,
     )!!;
-    vk::SemaphoreSubmitInfo signal = vk::semaphore_submit_info()
-        .set_semaphore(fixture.live_slot.pending_acquire_semaphore)
-        .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
-    vk::SubmitInfo2 release = vk::submit_info2().set_signal_semaphore_infos((&signal)[:1]);
-    assert(vk::queue_submit2(state.queue_completions[queue.id].queue, 1, &release, (vk::Fence)null)
-        == vk::Result.SUCCESS, "the fixture signals the acquisition");
     gpu::CommandList again = gpu::begin_commands(&allocator)!!;
     gpu::cmd_begin_render_pass(&again, &pass)!!;
     gpu::cmd_end_render_pass(&again)!!;
+    unified_application_buffer = gpu::internal::required_recording_command(&again).command_buffer;
     gpu::ExecutableCommandList[1] again_lists = { gpu::end_commands(&again)!! };
     gpu::SubmitDesc omitted = { .command_lists = again_lists[..], .readiness = second.readiness };
-    gpu::CompletionPoint public_point = gpu::submit(queue, &omitted)!!;
-    gpu::wait_completion(public_point)!!;
-    gpu::internal::vk::commit_present_result(fixture.live_slot, &second, vk::Result.SUCCESS);
+    gpu::CompletionPoint second_point = gpu::internal::vk::vk_submit_with_ops(
+        state: state,
+        queue: queue,
+        desc: &omitted,
+        ops: &submit_ops,
+    )!!;
+    assert(fixture.acquire_barriers == 2 && fixture.present_barriers == 2);
+    gpu::wait_completion(second_point)!!;
+    consume_simulated_present(&fixture, queue, &second);
     gpu::internal::vk::vk_destroy_swapchain(state, fixture.swapchain)!!;
 }
