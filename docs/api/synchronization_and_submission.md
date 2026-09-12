@@ -48,8 +48,15 @@ no resource. Common pairs:
 | `.compute` | `.index_input` | compute wrote an index buffer |
 | `.compute` | `.host` | before host readback of compute output |
 | `.transfer` | `.host` | before host readback of a copy |
+| `.acceleration_structure_build` | `.acceleration_structure_build` | build, update, clone, or scratch reuse before dependent AS work |
 | `.acceleration_structure_build` | `.compute`, `.ray_tracing` | before a query or trace |
 | `.compute` | `.indirect, .acceleration_structure_build` | GPU-written build ranges |
+
+The AS-build stage covers AS clone operations too. A build, barrier, and
+dependent clone or compatible update can share a list without a host wait.
+A second list can also be recorded before producer completion is polled;
+submit it with a completion wait at its first dependent stage. A host wait
+is needed when the application needs completed results or reclaims storage.
 
 A global barrier cannot change a texture layout.
 

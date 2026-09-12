@@ -8,12 +8,6 @@ const uint ACCELERATION_STRUCTURE_INSTANCE_FLAGS @private = 0x0F;
 const uint ACCELERATION_STRUCTURE_BUILD_FLAGS @private = 0x0F;
 const uint ACCELERATION_STRUCTURE_GEOMETRY_FLAGS @private = 0x01;
 
-enum AccelerationStructureBuildEligibility : char {
-    UNBUILT,
-    PENDING,
-    BUILT,
-}
-
 struct NormalizedAccelerationStructureGeometry {
     AccelerationStructureGeometryKind  kind;
     AccelerationStructureGeometryFlags flags;
@@ -21,9 +15,6 @@ struct NormalizedAccelerationStructureGeometry {
     uint                               max_primitive_count;
     AccelerationStructureIndexType     index_type;
     bool                               has_transform;
-    uint                               built_vertex_count;
-    uint                               built_primitive_count;
-    bool                               built_with_transform;
 }
 
 struct NormalizedAccelerationStructureDesc {

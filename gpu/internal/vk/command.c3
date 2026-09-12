@@ -1038,8 +1038,6 @@ fn CommandRecord*? begin_commands_locked(
         .allocator_buffer = buffer_index,
         .queue            = queue,
         .scratch          = scratch,
-        .pending_acceleration_structure_head =
-            ACCELERATION_STRUCTURE_PENDING_NONE,
     };
     CommandRecord* record;
     {
@@ -1414,7 +1412,6 @@ fn void discard_commands_locked(
 ) @private {
     gpu::internal::CommandListHandle handle = record.identity;
     record.state = gpu::internal::CommandState.INACTIVE;
-    abandon_pending_acceleration_structure_builds(record, true);
 
     recycle_generated_preprocess_indices_locked(
         state,

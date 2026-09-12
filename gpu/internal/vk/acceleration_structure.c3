@@ -6,12 +6,9 @@ import vk;
 import vma;
 import std::core::mem;
 import std::core::mem::alloc;
-import std::atomic;
-import std::atomic::types;
 
 const usz MAX_ACCELERATION_STRUCTURES = 4096;
 const uint ACCELERATION_STRUCTURE_FREE_NONE = 0;
-const uint ACCELERATION_STRUCTURE_PENDING_NONE = uint::max;
 const usz ACCELERATION_STRUCTURE_STORAGE_ALIGNMENT = 256;
 
 alias AccelerationStructureBuildSizesFn = fn void (
@@ -48,7 +45,6 @@ struct AccelerationStructureNativeOps {
 
 struct PreparedAccelerationStructureBuild {
     AccelerationStructureSlot*       destination;
-    gpu::AccelerationStructureHandle destination_handle;
     ResolvedSpan                     scratch;
     uint                             geometry_count;
     bool                             update;
@@ -85,7 +81,6 @@ struct AccelerationStructureIndirectBuildCommandOps {
 struct PreparedAccelerationStructureClone {
     AccelerationStructureSlot*       source;
     AccelerationStructureSlot*       destination;
-    gpu::AccelerationStructureHandle destination_handle;
 }
 
 alias AccelerationStructureCloneCommandFn = fn void (
@@ -97,161 +92,6 @@ alias AccelerationStructureCloneCommandFn = fn void (
 struct AccelerationStructureCloneCommandOps {
     void*                               user_data;
     AccelerationStructureCloneCommandFn clone;
-}
-
-fn bool acceleration_structure_clone_compatible(
-    AccelerationStructureSlot* source,
-    AccelerationStructureSlot* destination,
-) {
-    if (source.desc.kind != destination.desc.kind
-        || (uint)source.desc.flags != (uint)destination.desc.flags
-        || source.desc.max_instance_count
-            != destination.desc.max_instance_count
-        || source.desc.geometries.len != destination.desc.geometries.len
-        || destination.desc.requirements.storage_size
-            < source.desc.requirements.storage_size) return false;
-    foreach (i, &source_geometry : source.desc.geometries) {
-        gpu::internal::NormalizedAccelerationStructureGeometry*
-            destination_geometry = &destination.desc.geometries[i];
-        if (source_geometry.kind != destination_geometry.kind
-            || (uint)source_geometry.flags
-                != (uint)destination_geometry.flags
-            || source_geometry.max_vertex_count
-                != destination_geometry.max_vertex_count
-            || source_geometry.max_primitive_count
-                != destination_geometry.max_primitive_count
-            || source_geometry.index_type != destination_geometry.index_type
-            || source_geometry.has_transform
-                != destination_geometry.has_transform) return false;
-    }
-    return true;
-}
-
-fn void copy_completed_acceleration_structure_shape(
-    AccelerationStructureSlot* source,
-    AccelerationStructureSlot* destination,
-) {
-    destination.built_instance_count = source.built_instance_count;
-    destination.built_counts_are_maxima = source.built_counts_are_maxima;
-    foreach (i, &source_geometry : source.desc.geometries) {
-        gpu::internal::NormalizedAccelerationStructureGeometry*
-            destination_geometry = &destination.desc.geometries[i];
-        destination_geometry.built_vertex_count =
-            source_geometry.built_vertex_count;
-        destination_geometry.built_primitive_count =
-            source_geometry.built_primitive_count;
-        destination_geometry.built_with_transform =
-            source_geometry.built_with_transform;
-    }
-}
-
-fn void set_pending_acceleration_structure_builds(
-    CommandRecord* record,
-    gpu::internal::AccelerationStructureBuildEligibility state,
-    bool clear,
-) {
-    if (record == null || record.device_state == null) return;
-    uint index = record.pending_acceleration_structure_head;
-    while (index != ACCELERATION_STRUCTURE_PENDING_NONE) {
-        if (index >= record.device_state.acceleration_structures.next_new) {
-            break;
-        }
-        AccelerationStructureCell* cell =
-            &record.device_state.acceleration_structures.slots[index];
-        if (!cell.used) break;
-        uint next = cell.value.pending_next;
-        cell.value.build_eligibility = state;
-        if (clear) {
-            cell.value.pending_next = ACCELERATION_STRUCTURE_PENDING_NONE;
-            cell.value.pending_linked.store(false, AtomicOrdering.RELEASE);
-        }
-        index = next;
-    }
-    if (clear) {
-        record.pending_acceleration_structure_head =
-            ACCELERATION_STRUCTURE_PENDING_NONE;
-    }
-}
-
-fn void activate_pending_acceleration_structure_builds(
-    CommandRecord* record,
-) {
-    set_pending_acceleration_structure_builds(
-        record,
-        gpu::internal::AccelerationStructureBuildEligibility.PENDING,
-        false,
-    );
-}
-
-fn void abandon_pending_acceleration_structure_builds(
-    CommandRecord* record,
-    bool clear,
-) {
-    set_pending_acceleration_structure_builds(
-        record,
-        gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
-        clear,
-    );
-}
-
-fn void complete_pending_acceleration_structure_builds(
-    CommandRecord* record,
-) {
-    set_pending_acceleration_structure_builds(
-        record,
-        gpu::internal::AccelerationStructureBuildEligibility.BUILT,
-        true,
-    );
-}
-
-fn void link_pending_acceleration_structure(
-    CommandRecord* record,
-    gpu::AccelerationStructureHandle handle,
-    AccelerationStructureSlot* slot,
-) {
-    slot.build_eligibility =
-        gpu::internal::AccelerationStructureBuildEligibility.PENDING;
-    slot.pending_next = record.pending_acceleration_structure_head;
-    record.pending_acceleration_structure_head = handle.index;
-    slot.pending_linked.store(true, AtomicOrdering.RELEASE);
-}
-
-fn void? link_pending_acceleration_structure_build(
-    CommandRecord* record,
-    PreparedAccelerationStructureBuild* prepared,
-    gpu::AccelerationStructureBuildDesc* desc,
-    bool counts_are_maxima,
-) {
-    AccelerationStructureSlot* slot = prepared.destination;
-    if (slot.pending_linked.load(AtomicOrdering.ACQUIRE)
-        || slot.build_eligibility
-        != gpu::internal::AccelerationStructureBuildEligibility.UNBUILT) {
-        return gpu::RESOURCE_IN_USE~;
-    }
-    if (slot.desc.kind == gpu::AccelerationStructureKind.TOP_LEVEL) {
-        slot.built_instance_count = desc.instance_count;
-    } else {
-        foreach (i, &input : desc.geometries) {
-            gpu::internal::NormalizedAccelerationStructureGeometry* schema =
-                &slot.desc.geometries[i];
-            if (schema.kind
-                == gpu::AccelerationStructureGeometryKind.TRIANGLES) {
-                schema.built_vertex_count = input.triangles.vertex_count;
-                schema.built_primitive_count =
-                    input.triangles.primitive_count;
-                schema.built_with_transform =
-                    !gpu_span_is_zero(input.triangles.transform);
-            } else {
-                schema.built_primitive_count = input.aabbs.primitive_count;
-            }
-        }
-    }
-    slot.built_counts_are_maxima = counts_are_maxima;
-    link_pending_acceleration_structure(
-        record,
-        prepared.destination_handle,
-        slot,
-    );
 }
 
 fn void acceleration_structure_build_command_real(
@@ -370,8 +210,6 @@ fn void? record_acceleration_structure_build_with_ops(
     bool update,
     AccelerationStructureBuildCommandOps* ops,
 ) {
-    uint geometry_checkpoint =
-        record.scratch.acceleration_structure_geometry_count;
     PreparedAccelerationStructureBuild prepared =
         prepare_acceleration_structure_build(
             record,
@@ -379,17 +217,6 @@ fn void? record_acceleration_structure_build_with_ops(
             update,
         )!;
 
-    defer catch {
-        record.scratch.acceleration_structure_geometry_count =
-            geometry_checkpoint;
-    }
-
-    if (!update) link_pending_acceleration_structure_build(
-        record,
-        &prepared,
-        desc,
-        false,
-    )!;
     emit_acceleration_structure_build(record, &prepared, ops);
 }
 
@@ -465,14 +292,6 @@ fn void? record_acceleration_structure_indirect_build_with_ops(
         &prepared,
     );
 
-    if (!update) {
-        link_pending_acceleration_structure_build(
-            record:            record,
-            prepared:          &prepared,
-            desc:              desc,
-            counts_are_maxima: true,
-        )!;
-    }
     emit_acceleration_structure_indirect_build(
         record:   record,
         prepared: &prepared,
@@ -501,23 +320,13 @@ prepare_acceleration_structure_clone(
         state.acceleration_structures.get(source)!;
     AccelerationStructureSlot* destination_slot =
         state.acceleration_structures.get(destination)!;
-    if (source_slot.build_eligibility
-        != gpu::internal::AccelerationStructureBuildEligibility.BUILT) {
+    if (destination_slot.desc.requirements.storage_size
+        < source_slot.desc.requirements.storage_size) {
         return gpu::INVALID_ARGUMENT~;
     }
-    if (destination_slot.pending_linked.load(AtomicOrdering.ACQUIRE)
-        || destination_slot.build_eligibility
-        != gpu::internal::AccelerationStructureBuildEligibility.UNBUILT) {
-        return gpu::RESOURCE_IN_USE~;
-    }
-    if (!acceleration_structure_clone_compatible(
-        source_slot,
-        destination_slot,
-    )) return gpu::INVALID_ARGUMENT~;
     return {
         .source             = source_slot,
         .destination        = destination_slot,
-        .destination_handle = destination,
     };
 }
 
@@ -558,15 +367,6 @@ fn void? record_acceleration_structure_clone_with_ops(
         )!;
 
     emit_acceleration_structure_clone(record, &prepared, ops);
-    copy_completed_acceleration_structure_shape(
-        prepared.source,
-        prepared.destination,
-    );
-    link_pending_acceleration_structure(
-        record,
-        prepared.destination_handle,
-        prepared.destination,
-    );
 }
 
 fn usz? acceleration_structure_strided_bytes(
@@ -635,19 +435,9 @@ prepare_acceleration_structure_build_mode(
     }
     AccelerationStructureSlot* destination =
         state.acceleration_structures.get(desc.destination)!;
-    if (!update && (destination.pending_linked.load(AtomicOrdering.ACQUIRE)
-        || destination.build_eligibility
-            != gpu::internal::AccelerationStructureBuildEligibility.UNBUILT)) {
-        return gpu::RESOURCE_IN_USE~;
-    }
     if (update
         && (!destination.desc.flags.allow_update
-            || destination.desc.requirements.update_scratch_size == 0
-            || destination.build_eligibility
-                != gpu::internal::AccelerationStructureBuildEligibility.BUILT)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (update && !indirect && destination.built_counts_are_maxima) {
+            || destination.desc.requirements.update_scratch_size == 0)) {
         return gpu::INVALID_ARGUMENT~;
     }
     uint required_geometry_count = destination.desc.kind
@@ -667,10 +457,7 @@ prepare_acceleration_structure_build_mode(
     if (destination.desc.kind
         == gpu::AccelerationStructureKind.TOP_LEVEL) {
         if (desc.geometries.len != 0 || desc.instance_count == 0
-            || desc.instance_count > destination.desc.max_instance_count
-            || (!indirect && update
-                && desc.instance_count
-                    != destination.built_instance_count)) {
+            || desc.instance_count > destination.desc.max_instance_count) {
             return gpu::INVALID_ARGUMENT~;
         }
         usz instance_bytes;
@@ -721,14 +508,7 @@ prepare_acceleration_structure_build_mode(
                         > schema.max_primitive_count
                     || input.triangles.vertex_stride < 12
                     || !gpu_span_is_zero(input.triangles.transform)
-                        != schema.has_transform
-                    || (!indirect && update
-                        && (input.triangles.vertex_count
-                                != schema.built_vertex_count
-                            || input.triangles.primitive_count
-                                != schema.built_primitive_count
-                            || !gpu_span_is_zero(input.triangles.transform)
-                                != schema.built_with_transform))) {
+                        != schema.has_transform) {
                     return gpu::INVALID_ARGUMENT~;
                 }
                 usz vertex_bytes = acceleration_structure_strided_bytes(
@@ -812,10 +592,7 @@ prepare_acceleration_structure_build_mode(
                 if (input.aabbs.primitive_count == 0
                     || input.aabbs.primitive_count
                         > schema.max_primitive_count
-                    || input.aabbs.stride < 24
-                    || (!indirect && update
-                        && input.aabbs.primitive_count
-                            != schema.built_primitive_count)) {
+                    || input.aabbs.stride < 24) {
                     return gpu::INVALID_ARGUMENT~;
                 }
                 usz aabb_bytes = acceleration_structure_strided_bytes(
@@ -862,7 +639,6 @@ prepare_acceleration_structure_build_mode(
         required_geometry_count;
     return {
         .destination        = destination,
-        .destination_handle = desc.destination,
         .scratch            = scratch,
         .geometry_count     = required_geometry_count,
         .update             = update,
@@ -890,12 +666,7 @@ struct AccelerationStructureSlot {
     gpu::GpuAllocation                              placement;
     usz                                             placement_offset;
     gpu::internal::NormalizedAccelerationStructureDesc desc;
-    Atomic{bool}                                    pending_linked;
     uint                                            live_view_count;
-    uint                                            built_instance_count;
-    bool                                            built_counts_are_maxima;
-    gpu::internal::AccelerationStructureBuildEligibility build_eligibility;
-    uint                                            pending_next;
     char[DEBUG_NAME_CAP]                            debug_name;
 }
 
@@ -1365,8 +1136,6 @@ create_acceleration_structure_on_buffer_with_ops(
         .placement             = placement,
         .placement_offset      = offset,
         .desc                  = normalized,
-        .build_eligibility     = gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
-        .pending_next          = ACCELERATION_STRUCTURE_PENDING_NONE,
     };
     copy_debug_name(&slot.debug_name[0], desc.debug_name);
     gpu::AccelerationStructureHandle handle =
@@ -1565,10 +1334,7 @@ fn void? vk_destroy_acceleration_structure(
         return err~;
     }
     AccelerationStructureSlot* slot = resolved_slot;
-    if (slot.live_view_count > 0
-        || slot.pending_linked.load(AtomicOrdering.ACQUIRE)
-        || slot.build_eligibility
-            == gpu::internal::AccelerationStructureBuildEligibility.PENDING) {
+    if (slot.live_view_count > 0) {
         state.resource_mutex.unlock();
         return gpu::RESOURCE_IN_USE~;
     }

@@ -1192,7 +1192,7 @@ fn DedicatedAccelerationStructure? create_dedicated_acceleration_structure(
 }
 
 <* Destroy an acceleration structure after its final GPU use without waiting.
-   Live views or membership in a pending build list make destruction retryable.
+   Live views make destruction retryable; GPU lifetime is caller-owned.
    @param device : "Live device that owns the structure."
    @param acceleration_structure : "Owning structure handle to destroy."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
@@ -1883,8 +1883,8 @@ fn void? cmd_build_acceleration_structure(CommandList* commands, AccelerationStr
 }
 
 <* Record an in-place acceleration-structure update using caller-owned input
-   and update scratch spans matching the completed build shape. The command
-   inserts no barrier.
+   and update scratch spans. The application orders a compatible update-enabled
+   build before execution; recording needs no host wait and inserts no barrier.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, matching dynamic inputs, and update scratch."
    @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
@@ -1932,7 +1932,7 @@ fn void? cmd_build_acceleration_structure_indirect(
    `maxVertex + 1` bound. The fixed 16-byte packet, capability, alignment,
    ownership, queue, render-scope, barrier, and lifetime rules are identical to
    cmd_build_acceleration_structure_indirect.
-   Preconditions: the destination was built with update support and every
+   Preconditions: an update-enabled build precedes execution on the GPU and every
    GPU-authored actual count equals the corresponding actual count from its
    prior build or update, while remaining within the supplied CPU maximum and
    explicit input span. The library does not inspect or read back the packet.
@@ -1955,11 +1955,11 @@ fn void? cmd_update_acceleration_structure_indirect(
     );
 }
 
-<* Record one device clone from a completed acceleration structure into a
-   distinct, matching unbuilt destination. The command inserts no barrier.
+<* Record one device clone into distinct compatible storage. The application
+   orders source construction before execution; no host wait or implicit barrier.
    @param commands : "Live recording token outside a render pass."
-   @param source : "Completed source kept live through clone completion."
-   @param destination : "Matching unbuilt destination kept live through completion."
+   @param source : "Source constructed before clone execution and kept live through completion."
+   @param destination : "Compatible destination with sufficient storage, kept live through completion."
    @return "Success, or a recoverable command, validation, ownership, capacity, support, or device fault." *>
 fn void? cmd_clone_acceleration_structure(
     CommandList* commands,

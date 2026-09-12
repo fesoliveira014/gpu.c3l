@@ -80,7 +80,9 @@ lifetimes. Enable Vulkan validation explicitly for development diagnostics.
 
 Faults that guard host safety, handle identity, command phase, and
 lifecycle are checked. Recording also reports actual capacity, capability,
-and native failures; it does not diagnose all GPU misuse.
+and native failures; it does not diagnose all GPU misuse. Acceleration-structure
+construction history and update compatibility are application preconditions;
+see [AS ordering](synchronization_and_submission.md#global-barriers).
 
 ## Symbol map
 

@@ -52,7 +52,6 @@ struct CommandRecord @public {
     NativePipelineBinding            native_ray_tracing_pipeline;
     DescriptorHeapCommandBinding     descriptor_heap_binding;
     CommandScratch*                  scratch;
-    uint                             pending_acceleration_structure_head;
     char[]                           inline_root;
     bool                             internal;
     gpu::TextureHandle[]             init_textures;
@@ -162,14 +161,6 @@ fn void release_command(
 
 fn void destroy_command_table(VkDeviceState* state) {
     if (state.commands.slots.ptr == null) return;
-    foreach (&cell : state.commands.slots[:state.commands.next_new]) {
-        if (cell.used) {
-            abandon_pending_acceleration_structure_builds(
-                &cell.record,
-                true,
-            );
-        }
-    }
     mem::free(state.commands.slots.ptr);
     state.commands = {};
 }

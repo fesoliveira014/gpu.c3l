@@ -1316,7 +1316,6 @@ fn void rollback_submit_claim(
             if (record.state == gpu::internal::CommandState.SUBMITTING) {
                 record.state = gpu::internal::CommandState.EXECUTABLE;
             }
-            abandon_pending_acceleration_structure_builds(record, false);
         }
     }
     foreach (record : records) {

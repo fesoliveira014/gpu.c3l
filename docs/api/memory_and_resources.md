@@ -346,16 +346,20 @@ Rules:
 
 - Build inputs and scratch are caller-owned spans kept alive through the
   build's completion point. No hidden scratch, no hidden barrier.
-- Updates are in place, need `allow_update`, and must follow a completed
-  build or clone with the same counts.
-- A clone copies a completed structure into an unbuilt destination made
-  from the same descriptor. A cloned BLAS has a new address; a cloned TLAS
-  needs its own view.
-- A pending build or clone destination cannot be destroyed or linked to
-  another build or clone until its command is discarded or retired. Failed
-  submission preserves this restriction while the original executable is live.
-- After an indirect build the CPU does not know actual counts; only
-  indirect updates or a new direct build may follow.
+- Updates are in place and require an update-enabled prior build and compatible
+  inputs, including actual counts, geometry layout, and transform presence.
+  The application orders that build before update execution.
+- Build, clone, and update can be recorded in one list or dependent lists
+  before any host completion poll. Use explicit barriers and submission waits.
+  Recording does not validate construction history or update compatibility.
+- Clone destinations need compatible creation parameters and sufficient storage.
+  A cloned BLAS has its own address; instance records must explicitly name it
+  to use the clone. A cloned TLAS needs its own view and still refers to the
+  BLASes represented by its instance addresses: it neither owns nor retargets
+  those references. Keep those BLASes alive through the cloned TLAS's uses.
+- Direct and indirect updates may follow either build form when actual GPU
+  counts and other update parameters are compatible. Indirect descriptor maxima
+  remain bounds, never observed execution counts.
 - Teardown: wait, destroy views, destroy the TLAS, destroy BLASes that its
   instances reference, then free caller-owned storage.
 

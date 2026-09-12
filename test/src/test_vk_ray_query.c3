@@ -303,6 +303,11 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
     gpu::AccelerationStructureHandle blas =
         gpu::create_acceleration_structure(&device, &blas_desc)!!;
     defer gpu::destroy_acceleration_structure(&device, blas)!!;
+    gpu::AccelerationStructureHandle blas_clone =
+        gpu::create_acceleration_structure(&device, &blas_desc)!!;
+    defer gpu::destroy_acceleration_structure(&device, blas_clone)!!;
+    assert(gpu::get_acceleration_structure_address(&device, blas)!!
+        != gpu::get_acceleration_structure_address(&device, blas_clone)!!);
     OwnedSpan blas_scratch = allocate_ray_query_span(
         device:       &device,
         size:         blas_requirements.build_scratch_size
@@ -372,6 +377,14 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
         .scratch = blas_scratch.span,
     };
     gpu::cmd_build_acceleration_structure(&blas_commands, &blas_build)!!;
+    gpu::Barrier as_dependency = {
+        .before = { .acceleration_structure_build },
+        .after = { .acceleration_structure_build },
+    };
+    gpu::cmd_barrier(&blas_commands, &as_dependency)!!;
+    gpu::cmd_update_acceleration_structure(&blas_commands, &blas_build)!!;
+    gpu::cmd_barrier(&blas_commands, &as_dependency)!!;
+    gpu::cmd_clone_acceleration_structure(&blas_commands, blas, blas_clone)!!;
     gpu::ExecutableCommandList blas_executable =
         gpu::end_commands(&blas_commands)!!;
     gpu::CompletionPoint blas_completion =
@@ -381,7 +394,7 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
         .transform_row_0 = { 1.0, 0.0, 0.0, 0.0 },
         .transform_row_1 = { 0.0, 1.0, 0.0, 0.0 },
         .transform_row_2 = { 0.0, 0.0, 1.0, 0.0 },
-        .bottom_level = blas,
+        .bottom_level = blas_clone,
         .custom_index = 0x1234,
         .mask = 0x0f,
         .flags = { .triangle_cull_disable },
@@ -419,6 +432,9 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
     gpu::AccelerationStructureHandle tlas =
         gpu::create_acceleration_structure(&device, &tlas_desc)!!;
     defer gpu::destroy_acceleration_structure(&device, tlas)!!;
+    gpu::AccelerationStructureHandle tlas_clone =
+        gpu::create_acceleration_structure(&device, &tlas_desc)!!;
+    defer gpu::destroy_acceleration_structure(&device, tlas_clone)!!;
     OwnedSpan tlas_scratch = allocate_ray_query_span(
         device:       &device,
         size:         tlas_requirements.build_scratch_size
@@ -440,6 +456,8 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
         .scratch = tlas_scratch.span,
     };
     gpu::cmd_build_acceleration_structure(&tlas_commands, &tlas_build)!!;
+    gpu::cmd_barrier(&tlas_commands, &as_dependency)!!;
+    gpu::cmd_update_acceleration_structure(&tlas_commands, &tlas_build)!!;
     gpu::ExecutableCommandList tlas_executable =
         gpu::end_commands(&tlas_commands)!!;
     gpu::CompletionWait[1] blas_wait = {{
@@ -451,10 +469,9 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
         tlas_executable,
         blas_wait[..],
     )!!;
-    gpu::wait_completion(tlas_completion)!!;
 
     gpu::AccelerationStructureView tlas_view =
-        gpu::create_acceleration_structure_view(&device, tlas)!!;
+        gpu::create_acceleration_structure_view(&device, tlas_clone)!!;
     defer gpu::destroy_acceleration_structure_view(&device, tlas_view)!!;
     OwnedSpan output = allocate_ray_query_span(
         device:       &device,
@@ -491,6 +508,12 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
     defer gpu::destroy_pipeline(&device, pipeline)!!;
     gpu::CommandList query_commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&query_commands)!!;
+    gpu::cmd_clone_acceleration_structure(&query_commands, tlas, tlas_clone)!!;
+    gpu::Barrier clone_to_query = {
+        .before = { .acceleration_structure_build },
+        .after = { .compute },
+    };
+    gpu::cmd_barrier(&query_commands, &clone_to_query)!!;
     gpu::cmd_bind_pipeline(&query_commands, pipeline)!!;
     gpu::cmd_dispatch(
         commands: &query_commands,
@@ -506,7 +529,7 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
         gpu::end_commands(&query_commands)!!;
     gpu::CompletionWait[1] tlas_wait = {{
         .point = tlas_completion,
-        .before = { .compute },
+        .before = { .acceleration_structure_build },
     }};
     gpu::CompletionPoint query_completion = submit_ray_query_commands(
         queue,
@@ -523,12 +546,14 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
             && results[0].instance_custom_index == 0x1234
             && results[0].primitive_index == 0
             && results[0].distance > 0.99 && results[0].distance < 1.01,
-        "triangle BLAS/TLAS query returns the exact committed hit");
+        "GPU-ordered build, update, BLAS clone and dependent TLAS clone return the exact hit");
     assert(results[1].hit == 1 && results[2].hit == 1,
         "U16 and U32 indexed geometries produce committed hits");
     assert(results[3].hit == 0 && results[4].hit == 0,
         "spatial misses and instance-mask misses remain uncommitted");
 
+    blas_build.destination = blas_clone;
+    tlas_build.destination = tlas_clone;
     vertex_data[0] = 8.0;
     vertex_data[3] = 9.0;
     vertex_data[6] = 8.0;
