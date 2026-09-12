@@ -1152,7 +1152,7 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     }
 
     retained_texture.retained_counter =
-        &texture.tracked_command_references;
+        &texture.internal_references;
     retained_texture.retained_counter.add(1, AtomicOrdering.RELAXED);
     bool texture_retained = true;
     defer if (texture_retained) {

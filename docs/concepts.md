@@ -644,8 +644,8 @@ Contract: [Presentation](architecture.md#presentation).
 ## Validation and diagnostics
 
 Everything above puts rules on the application. Validation checks them.
-`ContractValidation.FULL` tracks ownership, generations, texture state, and
-lifetimes, and reports the operation, the field, and the invariant that a
+`ContractValidation.FULL` checks ownership, generations, and command semantics,
+and reports the operation, the field, and the invariant that a
 call violated. `TRUSTED` checks only what host safety needs. Both are
 independent of the Vulkan validation layer, which `enable_vulkan_validation`
 switches on.

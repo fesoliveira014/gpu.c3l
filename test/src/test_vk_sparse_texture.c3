@@ -1178,8 +1178,6 @@ fn void sparse_texture_real_lifecycle_when_supported() @test {
                     &commands,
                     &copy,
                 )) == gpu::INVALID_ARGUMENT);
-                assert(@catch(gpu::destroy_texture(&device, transfer))
-                    == gpu::RESOURCE_IN_USE);
                 gpu::discard_commands(&commands)!!;
                 gpu::destroy_texture(&device, transfer)!!;
                 gpu::destroy_command_allocator(&allocator)!!;

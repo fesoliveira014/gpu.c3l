@@ -82,8 +82,8 @@ by CPU tests but has not run on hardware that reports the capability.
   is destroyed.
 - Allocations are never moved. An address is valid until `free_allocation`.
 - A `CompletionPoint` orders work. It does not keep anything alive.
-- Under `ContractValidation.FULL`, a command list retains resources it names
-  by handle until it retires. Under `TRUSTED` nothing is retained.
+- Commands do not retain application resources under any validation policy.
+  Keep resources alive and unmodified as required through their last GPU use.
 - Creation is transactional; destruction never waits and may return
   `RESOURCE_IN_USE` or `DEVICE_BUSY`.
 - Texture layout history is application state. Each transition names the
@@ -131,7 +131,6 @@ by CPU tests but has not run on hardware that reports the capability.
 | color attachments | — | min(8, device limit) |
 | command allocators per device | — | 256 |
 | command units per allocator | 32 | 4,096 |
-| retained references per list | 64 | 4,096 |
 | generated-work reservations per allocator | — | 64 × command units |
 
 Exhaustion returns `DESCRIPTOR_HEAP_FULL`, `SLOT_TABLE_FULL`, or
@@ -140,7 +139,7 @@ Exhaustion returns `DESCRIPTOR_HEAP_FULL`, `SLOT_TABLE_FULL`, or
 ## Validation and callbacks
 
 `ContractValidation.FULL` checks ownership, generations, call order,
-resource references, and semantic limits. It does not prove sparse
+and semantic limits. It does not prove sparse
 residency or the validity of data reached through a `GpuAddress`.
 
 Debug callbacks are synchronous, may run on any thread, and must not call

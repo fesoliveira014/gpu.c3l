@@ -785,7 +785,7 @@ fn void sparse_bind_lowers_one_transaction_and_publishes_completion() @test {
         && fixture.completions[0].published_sequence.load(
             AtomicOrdering.ACQUIRE,
         ) == 2);
-    assert(fixture.texture_cells[0].value.tracked_command_references.load(
+    assert(fixture.texture_cells[0].value.internal_references.load(
             AtomicOrdering.RELAXED,
         ) == 1,
         "a successful sparse bind retains its image through completion");
@@ -821,7 +821,7 @@ fn void sparse_bind_native_failure_cancels_without_publication() @test {
         && fixture.completions[0].published_sequence.load(
             AtomicOrdering.ACQUIRE,
         ) == 0);
-    assert(fixture.texture_cells[0].value.tracked_command_references.load(
+    assert(fixture.texture_cells[0].value.internal_references.load(
             AtomicOrdering.RELAXED,
         ) == 0,
         "native failure rolls back sparse image retention");
@@ -922,7 +922,7 @@ fn void sparse_bind_orders_the_next_submit_and_retains_texture() @test {
         && sparse_submit_capture.wait.value
             == gpu::internal::completion_point_sequence(bound),
         "a failed ordinary submit preserves the sparse ordering edge");
-    assert(fixture.texture_cells[0].value.tracked_command_references.load(
+    assert(fixture.texture_cells[0].value.internal_references.load(
             AtomicOrdering.RELAXED,
         ) == 1);
 
@@ -934,7 +934,7 @@ fn void sparse_bind_orders_the_next_submit_and_retains_texture() @test {
         &fixture.state,
         &completed_sparse_counter_value,
     )!!;
-    assert(fixture.texture_cells[0].value.tracked_command_references.load(
+    assert(fixture.texture_cells[0].value.internal_references.load(
             AtomicOrdering.RELAXED,
         ) == 0,
         "queue retirement releases the retained sparse image");

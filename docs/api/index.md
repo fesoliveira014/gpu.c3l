@@ -50,8 +50,8 @@ Submit, present, and sparse bind share a host synchronization boundary on the
 same native queue, including aliased roles. Completion polling and waiting are
 thread-safe.
 
-**Validation.** `ContractValidation.FULL` adds diagnostics and retained
-references. It never changes the behavior of a valid program.
+**Validation.** `ContractValidation.FULL` adds semantic diagnostics.
+Application-resource lifetimes remain caller-owned under every policy.
 
 ## Faults
 
@@ -65,7 +65,7 @@ references. It never changes the behavior of a valid program.
 | `OUT_OF_HOST_MEMORY`, `OUT_OF_DEVICE_MEMORY` | Allocation failed | release memory |
 | `DEVICE_LOST` | Driver reported loss; the device rejects further work | recreate device |
 | `DEVICE_BUSY` | Work still running or contention | wait, retry |
-| `RESOURCE_IN_USE` | A live child or reference blocks destruction | release child, retry |
+| `RESOURCE_IN_USE` | A live child or backend operation blocks destruction | release child or establish completion, retry |
 | `SLOT_TABLE_FULL` | Fixed public table full | destroy something |
 | `DESCRIPTOR_HEAP_FULL` | No free heap slot | destroy a view |
 | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` | Fixed per-allocator bookkeeping exhausted | larger allocator |
@@ -220,8 +220,7 @@ Types: `CommandAllocatorHandle`, `CommandAllocator`, `CommandAllocatorDesc`,
 
 Constants: `COMMAND_ALLOCATOR_HANDLE_INVALID`,
 `ATTACHMENT_VIEW_HANDLE_INVALID`, `DEFAULT_COMMAND_ALLOCATOR_CAPACITY`,
-`DEFAULT_COMMAND_REFERENCES_PER_LIST`, `MAX_COMMAND_ALLOCATOR_CAPACITY`,
-`MAX_COMMAND_REFERENCES_PER_LIST`, `DEFAULT_ATTACHMENT_VIEW_CAPACITY`,
+`MAX_COMMAND_ALLOCATOR_CAPACITY`, `DEFAULT_ATTACHMENT_VIEW_CAPACITY`,
 `ROOT_PUSH_CAPACITY`, `INLINE_ROOT_OFFSET_COMPUTE`,
 `INLINE_ROOT_OFFSET_GRAPHICS`, `INLINE_ROOT_CAPACITY`.
 

@@ -34,7 +34,7 @@ defer (void)gpu::destroy_runtime(&runtime);
 
 | Field | Zero means | Purpose |
 |---|---|---|
-| `contract_validation` | `TRUSTED` | `FULL` adds semantic checks and lifetime tracking |
+| `contract_validation` | `TRUSTED` | `FULL` adds semantic checks |
 | `enable_vulkan_validation` | off | Loads the Khronos validation layer |
 | `enable_debug_names` | off | Passes `debug_name` strings to the driver |
 | `texture_heap_capacity` | 4,096 | Bindless texture slots |

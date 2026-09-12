@@ -52,7 +52,6 @@ struct AllocationSlot {
     gpu::MemoryClass    memory_class;
     bool                coherent;
     bool                device_local;
-    Atomic{uint}       tracked_command_references;
     uint                live_placements;
     char[DEBUG_NAME_CAP] debug_name;
 }
@@ -604,12 +603,6 @@ fn void? free_allocation_for_state_with_ops(
         defer state.resource_mutex.unlock();
         AllocationSlot* slot = state.allocations.get(allocation)!;
         if (slot.live_placements > 0) return gpu::RESOURCE_IN_USE~;
-        if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
-            drain_completed_submitted_commands(state)!;
-            if (slot.tracked_command_references.load(AtomicOrdering.RELAXED) > 0) {
-                return gpu::RESOURCE_IN_USE~;
-            }
-        }
         released = *slot;
         state.allocations.free(allocation)!;
     }

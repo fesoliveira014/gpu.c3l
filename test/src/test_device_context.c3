@@ -100,7 +100,6 @@ fn void context_defaults_enable_contract_checks_without_layers() @test {
     assert(desc.runtime.texture_heap_capacity == gpu::DEFAULT_TEXTURE_HEAP_CAPACITY);
     assert(desc.runtime.sampler_heap_capacity == gpu::DEFAULT_SAMPLER_HEAP_CAPACITY);
     assert(desc.runtime.pipeline_capacity == gpu::MAX_PIPELINES);
-    assert(desc.command_allocator.max_resource_references_per_list == gpu::DEFAULT_COMMAND_REFERENCES_PER_LIST);
     assert(desc.device.queues.required.graphics);
     assert(desc.device.queues.required.compute);
     assert(desc.device.queues.required.transfer);
@@ -195,7 +194,6 @@ fn void context_compute_override_preserves_descriptor_and_capacities() @test {
     desc.device.queues.required = { .compute };
     desc.command_queue = QueueKind.COMPUTE;
     desc.command_allocator.command_buffer_capacity = 7;
-    desc.command_allocator.max_resource_references_per_list = 13;
     util::DeviceContextDesc original = desc;
     for (uint index = 0; index < 2; index++) {
         util::DeviceContext context = util::create_device_context(&desc)!!;
@@ -203,7 +201,6 @@ fn void context_compute_override_preserves_descriptor_and_capacities() @test {
         assert(@catch(gpu::get_queue(&context.device, QueueKind.GRAPHICS)) == gpu::INVALID_ARGUMENT);
         vk::VkDeviceState* state = present_wait_state(&context.device);
         assert(state.allocator_desc.command_buffer_capacity == 7);
-        assert(state.allocator_desc.max_resource_references_per_list == 13);
         assert(device_desc_equal(desc.device, original.device));
         assert(desc.command_queue == original.command_queue);
         assert(desc.command_allocator.command_buffer_capacity == 7);

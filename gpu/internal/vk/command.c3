@@ -96,7 +96,6 @@ struct PreparedBufferTextureCopy {
 struct PreparedDispatchIndirect {
     BoundPipeline*  pipeline;
     ResolvedSpan    args;
-    gpu::GpuSpan    args_span;
     gpu::GpuAddress root;
 }
 
@@ -104,8 +103,6 @@ struct PreparedGeneratedDispatch {
     BoundPipeline*                 pipeline;
     ResolvedSpan                   records;
     ResolvedSpan                   count;
-    gpu::GpuSpan                   records_span;
-    gpu::GpuSpan                   count_span;
     vk::IndirectCommandsLayoutEXT layout;
     uint                           max_count;
 }
@@ -130,8 +127,6 @@ struct CommandRecordingOps @private {
 }
 
 struct CommandScratch {
-    CommandResourceReference[] references;
-    uint                       reference_count;
     uint[]                     generated_preprocess_indices;
     uint                       generated_preprocess_count;
     vk::AccelerationStructureGeometryKHR[]
@@ -148,7 +143,6 @@ struct CommandAllocatorSlot {
     vk::CommandPool             pool;
     vk::CommandBuffer[]          command_buffers;
     CommandScratch[]             scratch;
-    CommandResourceReference[]   reference_storage;
     uint[]                       preprocess_index_storage;
     vk::AccelerationStructureGeometryKHR[]
         acceleration_structure_geometry_storage;
@@ -304,9 +298,6 @@ fn void destroy_command_allocator_slot_with_ops(
         alloc::free(state.host_allocator, slot.command_buffers.ptr);
     }
     if (slot.scratch.ptr != null) alloc::free(state.host_allocator, slot.scratch.ptr);
-    if (slot.reference_storage.ptr != null) {
-        alloc::free(state.host_allocator, slot.reference_storage.ptr);
-    }
     if (slot.preprocess_index_storage.ptr != null) {
         alloc::free(state.host_allocator, slot.preprocess_index_storage.ptr);
     }
@@ -378,21 +369,6 @@ fn void? initialize_command_allocator_slot_with_ops(
     if (catch available) return gpu::OUT_OF_HOST_MEMORY~;
     slot.available = available;
 
-    uint reference_capacity =
-        contract_uses_full_validation(state.validation_policy)
-        ? desc.max_resource_references_per_list
-        : 0;
-    if (reference_capacity > 0) {
-        CommandResourceReference[]? reference_storage = alloc::new_array_try(
-            state.host_allocator,
-            CommandResourceReference,
-            (usz)capacity * (usz)reference_capacity,
-        );
-        if (catch reference_storage) {
-            return gpu::OUT_OF_HOST_MEMORY~;
-        }
-        slot.reference_storage = reference_storage;
-    }
     uint acceleration_structure_geometry_capacity =
         desc.max_acceleration_structure_geometries_per_build;
     if (acceleration_structure_geometry_capacity > 0) {
@@ -424,12 +400,6 @@ fn void? initialize_command_allocator_slot_with_ops(
             maximum_count_storage;
     }
     for (uint i = 0; i < capacity; i++) {
-        if (reference_capacity > 0) {
-            usz start = (usz)i * (usz)reference_capacity;
-            slot.scratch[i].references = slot.reference_storage[
-                start:reference_capacity
-            ];
-        }
         if (acceleration_structure_geometry_capacity > 0) {
             usz start = (usz)i
                 * (usz)acceleration_structure_geometry_capacity;
@@ -927,7 +897,7 @@ fn void return_allocator_buffer_locked(
     uint buffer_index,
 ) {
     CommandScratch* scratch = &slot.scratch[buffer_index];
-    scratch.reference_count = 0;
+
     scratch.generated_preprocess_count = 0;
     scratch.acceleration_structure_geometry_count = 0;
     scratch.in_use = false;
@@ -1033,7 +1003,7 @@ fn CommandRecord*? begin_commands_locked(
     uint buffer_index = slot.available[--slot.available_count];
     CommandScratch* scratch = &slot.scratch[buffer_index];
     scratch.in_use = true;
-    scratch.reference_count = 0;
+
     scratch.generated_preprocess_count = 0;
     scratch.acceleration_structure_geometry_count = 0;
     slot.live_recordings++;
@@ -1446,7 +1416,7 @@ fn void discard_commands_locked(
     gpu::internal::CommandListHandle handle = record.identity;
     record.state = gpu::internal::CommandState.INACTIVE;
     abandon_pending_acceleration_structure_builds(record, true);
-    clear_command_scratch_references(record.scratch);
+
     recycle_generated_preprocess_indices_locked(
         state,
         slot,
@@ -1595,29 +1565,6 @@ fn PreparedBufferCopy? validate_and_lower_buffer_copy(
     return copy;
 }
 
-fn void? track_buffer_copy_references(
-    CommandRecord* commands,
-    PreparedBufferCopy* copy,
-) {
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    CommandResourceReference[2] references = {
-        {
-            .owner      = copy.src_span.owner,
-            .index      = copy.src_span.index,
-            .generation = copy.src_span.generation,
-        },
-        {
-            .owner      = copy.dst_span.owner,
-            .index      = copy.dst_span.index,
-            .generation = copy.dst_span.generation,
-        },
-    };
-    preflight_command_references(record, references[..])!;
-    track_span_command_reference(state, record, &copy.src_span)!;
-    track_span_command_reference(state, record, &copy.dst_span)!;
-}
-
 fn void record_buffer_copy(
     CommandRecord* commands,
     PreparedBufferCopy* copy,
@@ -1651,13 +1598,7 @@ fn void? full_copy_buffer(
     gpu::BufferCopyDesc* desc,
 ) {
     PreparedBufferCopy copy = validate_and_lower_buffer_copy(commands, desc)!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_buffer_copy_references(commands, &copy)!;
+
     record_buffer_copy(commands, &copy);
 }
 
@@ -1765,17 +1706,7 @@ fn void? full_fill_buffer(
         dst,
         value,
     )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_span_command_reference(
-        commands.device_state,
-        record,
-        &fill.source,
-    )!;
+
     record_buffer_fill(commands, &fill);
 }
 
@@ -2034,29 +1965,6 @@ fn PreparedBufferTextureCopy? validate_and_lower_texture_to_buffer_copy(
     return copy;
 }
 
-fn void? track_buffer_texture_copy_references(
-    CommandRecord* commands,
-    PreparedBufferTextureCopy* copy,
-) {
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    CommandResourceReference[2] references = {
-        {
-            .owner      = copy.buffer_span.owner,
-            .index      = copy.buffer_span.index,
-            .generation = copy.buffer_span.generation,
-        },
-        {
-            .owner      = copy.texture_handle.owner,
-            .index      = copy.texture_handle.index,
-            .generation = copy.texture_handle.generation,
-        },
-    };
-    preflight_command_references(record, references[..])!;
-    track_span_command_reference(state, record, &copy.buffer_span)!;
-    track_texture_command_reference(state, record, copy.texture_handle)!;
-}
-
 fn vk::ImageLayout texture_copy_layout(
     TextureSlot* texture,
     bool destination,
@@ -2121,10 +2029,7 @@ fn void? full_copy_buffer_to_texture(
 ) {
     PreparedBufferTextureCopy copy =
         validate_and_lower_buffer_to_texture_copy(commands, desc)!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(record, checkpoint);
-    track_buffer_texture_copy_references(commands, &copy)!;
+
     record_buffer_to_texture_copy(commands, &copy);
 }
 
@@ -2142,10 +2047,7 @@ fn void? full_copy_texture_to_buffer(
 ) {
     PreparedBufferTextureCopy copy =
         validate_and_lower_texture_to_buffer_copy(commands, desc)!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(record, checkpoint);
-    track_buffer_texture_copy_references(commands, &copy)!;
+
     record_texture_to_buffer_copy(commands, &copy);
 }
 
@@ -2381,20 +2283,6 @@ fn BoundPipeline? validate_and_lower_bound_pipeline(
     return bound;
 }
 
-fn void? track_bound_pipeline(
-    CommandRecord* commands,
-    BoundPipeline* pipeline,
-) {
-    CommandRecord* record = commands;
-    return track_command_reference(
-        commands.device_state,
-        record,
-        pipeline.handle.owner,
-        pipeline.handle.index,
-        pipeline.handle.generation,
-    );
-}
-
 fn void bind_pipeline_real(
     void* user_data,
     vk::CommandBuffer command_buffer,
@@ -2506,12 +2394,7 @@ fn void? full_bind_pipeline_with_ops(
 ) {
     BoundPipeline bound = validate_and_lower_bound_pipeline(commands, pipeline)!;
     CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_bound_pipeline(commands, &bound)!;
+
     record_bound_pipeline_with_ops(commands, &bound, ops)!;
     update_full_color_state_for_bind(record, &bound);
 }
@@ -2706,7 +2589,6 @@ fn PreparedDispatchIndirect? lower_dispatch_indirect(
             arg_size: gpu::DispatchIndirectCommand::size,
             count:    1,
         )!,
-        .args_span = args,
         .root      = root,
     };
 }
@@ -2738,20 +2620,8 @@ fn PreparedDispatchIndirect? full_prepare_dispatch_indirect(
             operation:      "cmd_dispatch_indirect",
             rejected_field: "args",
         )!,
-        .args_span = args,
         .root      = root,
     };
-}
-
-fn void? track_dispatch_indirect(
-    CommandRecord* commands,
-    PreparedDispatchIndirect* dispatch,
-) {
-    return track_span_command_reference(
-        commands.device_state,
-        commands,
-        &dispatch.args_span,
-    );
 }
 
 fn void record_dispatch_indirect(
@@ -2790,7 +2660,7 @@ fn void? full_dispatch_indirect(
         root,
         args,
     )!;
-    track_dispatch_indirect(commands, &dispatch)!;
+
     record_dispatch_indirect(commands, &dispatch);
 }
 
@@ -2944,8 +2814,6 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch_inputs(
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedDispatch dispatch = {
         .pipeline     = borrow_bound_pipeline(record)!,
-        .records_span = records,
-        .count_span   = count_span,
         .max_count    = max_dispatch_count,
     };
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
@@ -3024,8 +2892,6 @@ fn PreparedGeneratedDispatch? full_prepare_generated_dispatch(
             expected_kind: PipelineKind.COMPUTE,
             operation:     "cmd_dispatch_generated",
         )!,
-        .records_span = records,
-        .count_span   = count_span,
         .max_count    = max_dispatch_count,
     };
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
@@ -3050,29 +2916,6 @@ fn PreparedGeneratedDispatch? full_prepare_generated_dispatch(
     )!;
     dispatch.layout = snapshot_generated_dispatch_layout(dispatch.pipeline)!;
     return dispatch;
-}
-
-fn void? track_generated_dispatch(
-    CommandRecord* commands,
-    PreparedGeneratedDispatch* dispatch,
-) {
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    CommandResourceReference[2] references = {
-        {
-            .owner      = dispatch.records_span.owner,
-            .index      = dispatch.records_span.index,
-            .generation = dispatch.records_span.generation,
-        },
-        {
-            .owner      = dispatch.count_span.owner,
-            .index      = dispatch.count_span.index,
-            .generation = dispatch.count_span.generation,
-        },
-    };
-    preflight_command_references(record, references[..])!;
-    track_span_command_reference(state, record, &dispatch.records_span)!;
-    track_span_command_reference(state, record, &dispatch.count_span)!;
 }
 
 fn void? record_generated_dispatch(
@@ -3143,13 +2986,7 @@ fn void? full_dispatch_generated(
         max_dispatch_count: max_dispatch_count,
     )!;
     if (dispatch.max_count == 0) return;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_generated_dispatch(commands, &dispatch)!;
+
     record_generated_dispatch(commands, &dispatch)!;
 }
 

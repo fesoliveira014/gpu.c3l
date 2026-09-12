@@ -361,167 +361,6 @@ fn void pipeline_only_build_to_trace_barrier_keeps_acceleration_read() @test {
         "pipeline-only ray tracing retains acceleration-structure read access");
 }
 
-fn void reference_capacity_preflight_counts_unique_identities() @test {
-    vk::CommandResourceReference[1] storage;
-    vk::CommandScratch scratch = {
-        .references = storage[..],
-    };
-    vk::CommandRecord record = {
-        .scratch = &scratch,
-    };
-    vk::CommandResourceReference first = {
-        .owner      = 1,
-        .index      = 2,
-        .generation = 3,
-    };
-    vk::CommandResourceReference second = {
-        .owner      = 1,
-        .index      = 3,
-        .generation = 3,
-    };
-    vk::CommandResourceReference[2] duplicates = { first, first };
-    vk::CommandResourceReference[2] distinct_refs = { first, second };
-
-    vk::preflight_command_references(&record, duplicates[..])!!;
-    assert(@catch(vk::preflight_command_references(
-        &record,
-        distinct_refs[..],
-    ))
-        == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
-        "preflight counts identities independently of queue topology");
-
-    storage[0] = first;
-    scratch.reference_count = 1;
-    vk::CommandResourceReference[1] existing = { first };
-    vk::preflight_command_references(&record, existing[..])!!;
-    vk::CommandResourceReference[1] additional = { second };
-    assert(@catch(vk::preflight_command_references(
-        &record,
-        additional[..],
-    ))
-        == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
-        "preflight excludes existing identities and counts new identities");
-}
-
-fn void reference_capacity_preflights_all_copy_resources() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    OwnedSpan source = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics },
-        debug_name:   "capacity_source",
-    )!!;
-    OwnedSpan destination = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics },
-        debug_name:   "capacity_destination",
-    )!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocatorDesc allocator_desc = {
-        .command_buffer_capacity          = 1,
-        .max_resource_references_per_list = 1,
-    };
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(
-        device: &device,
-        queue:  queue,
-        desc:   &allocator_desc,
-    )!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    vk::CommandAllocatorSlot* slot = state.command_allocators.get(
-        allocator.handle,
-    )!!;
-    vk::AllocationSlot* source_slot =
-        state.allocations.get(source.allocation)!!;
-    vk::AllocationSlot* destination_slot =
-        state.allocations.get(destination.allocation)!!;
-    uint source_references_before =
-        source_slot.tracked_command_references.load(AtomicOrdering.RELAXED);
-    uint destination_references_before =
-        destination_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        );
-    gpu::BufferCopyDesc copy = {
-        .src = source.span,
-        .dst = destination.span,
-    };
-
-    assert(@catch(gpu::cmd_copy_buffer(&commands, &copy))
-        == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
-        "two unique references fault before a one-reference scratch unit mutates");
-    assert(record.scratch.reference_count == 0,
-        "capacity preflight retains and rolls back no partial reference");
-    assert(source_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == source_references_before
-        && destination_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == destination_references_before,
-        "capacity preflight leaves both retained counters unchanged");
-    assert(commands.is_valid() && slot.live_recordings == 1
-        && slot.available_count == 0 && record.scratch.in_use,
-        "capacity failure preserves the recording token and allocator unit");
-
-    free_owned_span(&device, &source)!!;
-    free_owned_span(&device, &destination)!!;
-    gpu::discard_commands(&commands)!!;
-    gpu::destroy_command_allocator(&allocator)!!;
-}
-
-fn void render_pass_reference_capacity_rejection_preserves_recording() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    gpu::TextureHandle target = make_render_validation_target(
-        &device,
-        gpu::Format.RGBA8_UNORM,
-    );
-    defer gpu::destroy_texture(&device, target)!!;
-    gpu::AttachmentViewHandle view = create_test_attachment_view(
-        &device,
-        target,
-    )!!;
-    defer destroy_test_attachment_view(&device, &view)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocatorDesc allocator_desc = {
-        .command_buffer_capacity          = 1,
-        .max_resource_references_per_list = 1,
-    };
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(
-        device: &device,
-        queue:  queue,
-        desc:   &allocator_desc,
-    )!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer gpu::discard_commands(&commands)!!;
-    record_val_target_to_attach(&commands, target);
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    uint references_before = record.scratch.reference_count;
-    assert(references_before == 1,
-        "the transition occupies the allocator's sole reference slot");
-    gpu::ColorTargetDesc[1] colors = {{ .view = view }};
-    gpu::RenderPassDesc pass = {
-        .colors = colors[..],
-        .width  = VAL_RT,
-        .height = VAL_RT,
-    };
-    assert(@catch(gpu::cmd_begin_render_pass(
-        &commands,
-        &pass,
-    )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
-        "the attachment view exceeds the occupied reference slot");
-    assert(record.state == gpu::internal::CommandState.RECORDING,
-        "tracking rejection leaves the command outside a render pass");
-    assert(record.scratch.reference_count == references_before,
-        "tracking rejection preserves the reference checkpoint");
-}
-
 <* Textured draw context, same shape as the indirect-draw tests: offscreen
    vertex/fragment code, one graphics pipeline, and a 1x1 white pattern feeding the
    fragment heap path. *>
@@ -859,12 +698,10 @@ fn void resource_access_intersects_recording_roles_before_mutation() @test {
             .access = { .write },
         },
     };
-    uint references_before = record.scratch.reference_count;
+
     assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
         == gpu::INVALID_ARGUMENT,
         "compute-only texture rejects a disjoint recording-role token");
-    assert(record.scratch.reference_count == references_before,
-        "access rejection precedes validation-reference mutation");
 
     gpu::BufferTextureCopyDesc copy = {
         .src     = span,
@@ -1026,7 +863,6 @@ fn void render_pass_access_preflight_preserves_precreated_views() @test {
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     gpu::Queue recorded_queue = record.queue;
     record.queue.roles = { .graphics };
-    uint references_before = record.scratch.reference_count;
 
     gpu::ColorTargetDesc[2] colors = {
         { .view = admitted_view },
@@ -1040,8 +876,7 @@ fn void render_pass_access_preflight_preserves_precreated_views() @test {
     assert(@catch(gpu::cmd_begin_render_pass(&commands, &pass))
         == gpu::INVALID_ARGUMENT,
         "a later attachment outside the recording role rejects the whole pass");
-    assert(record.scratch.reference_count == references_before,
-        "attachment access failure rolls back precreated-view references");
+
     assert(record.state == gpu::internal::CommandState.RECORDING,
         "attachment access rejection leaves command state reusable");
 
@@ -2763,13 +2598,10 @@ fn void texture_barrier_queue_stage_mismatch_faults_without_poisoning_recording(
             .access = { .write },
         },
     )!!;
-    uint references_before = record.scratch.reference_count;
 
     assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
         == gpu::INVALID_ARGUMENT,
         "queue-incompatible before use faults INVALID_ARGUMENT");
-    assert(record.scratch.reference_count == references_before,
-        "before-use rejection retains no texture reference");
 
     barrier.before = { .layout = gpu::TextureLayout.UNDEFINED };
     barrier.after = {
@@ -2780,8 +2612,6 @@ fn void texture_barrier_queue_stage_mismatch_faults_without_poisoning_recording(
     assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
         == gpu::INVALID_ARGUMENT,
         "queue-incompatible after use faults INVALID_ARGUMENT");
-    assert(record.scratch.reference_count == references_before,
-        "after-use rejection retains no texture reference");
 
     completion.queue_flags = selected_flags;
     barrier.after = {
@@ -2951,8 +2781,6 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
         "one mixed-size attachment that cannot cover the pass faults INVALID_ARGUMENT");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "mixed-size rejection records no pass");
 
-    vk::CommandRecord* record = vk::resolve_command(&cmd)!!;
-    uint references_before = record.scratch.reference_count;
     gpu::ColorTargetDesc[2] invalid_later = {
         { .view = large_mip_two },
         { .view = stale_view },
@@ -2961,8 +2789,7 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
     assert(@catch(gpu::cmd_begin_render_pass(&cmd, &invalid_later_pass))
         == gpu::INVALID_HANDLE,
         "a stale later attachment faults INVALID_HANDLE before recording");
-    assert(record.scratch.reference_count == references_before,
-        "later attachment lookup failure rolls back the earlier reference");
+
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "later attachment rejection records no pass");
 
     gpu::ColorTargetDesc[1] mip_color = { { .view = large_mip_one } };
@@ -3650,8 +3477,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
     record_val_target_to_attach(&commands, color_target);
     gpu::RenderPassDesc oversized = { .colors = colors[..], .width = 9, .height = 8 };
     vk::CommandRecord* render_record = vk::resolve_command(&commands)!!;
-    uint render_references_before =
-        render_record.scratch.reference_count;
+
     reset_sync_diagnostic(
         capture:        &capture,
         operation:      "cmd_begin_render_pass",
@@ -3664,9 +3490,7 @@ fn void tranche_b_command_and_render_diagnostics() @test {
         &oversized,
     ));
     assert(extent_fault == gpu::INVALID_ARGUMENT, "attachment extent fault is unchanged");
-    assert(render_record.scratch.reference_count
-        == render_references_before,
-        "bare begin rejection preserves the reference checkpoint");
+
     assert_sync_contract_diagnostic(
         capture:             &capture,
         expected_fault:      extent_fault,

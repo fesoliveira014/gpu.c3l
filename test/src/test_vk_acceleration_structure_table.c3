@@ -733,14 +733,14 @@ fn void acceleration_structure_destroy_checks_use_without_waiting() @test {
 
     state.acceleration_structures.get(handle)!!.live_view_count = 0;
     state.acceleration_structures.get(handle)!!
-        .tracked_command_references.store(1, AtomicOrdering.RELAXED);
+        .pending_linked.store(true, AtomicOrdering.RELEASE);
     assert(@catch(vk_destroy_acceleration_structure(&state, handle))
         == gpu::RESOURCE_IN_USE);
     assert(acceleration_structure_native_destroy_count == 0,
-        "tracked use rejects without a completion wait or native call");
+        "pending membership rejects without a completion wait or native call");
 
     state.acceleration_structures.get(handle)!!
-        .tracked_command_references.store(0, AtomicOrdering.RELAXED);
+        .pending_linked.store(false, AtomicOrdering.RELEASE);
     vk_destroy_acceleration_structure(&state, handle)!!;
     assert(acceleration_structure_native_destroy_count == 1
             && allocations[0].value.live_placements == 0,
@@ -1039,15 +1039,13 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
         &build,
         false,
         true,
-        true,
         &ops,
     )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED);
     assert(capture.calls == 0
-            && command_scratch.reference_count == 0
             && command_scratch.acceleration_structure_geometry_count == 0
             && record.pending_acceleration_structure_head
                 == ACCELERATION_STRUCTURE_PENDING_NONE,
-        "N+1 geometries reject before emission, references, lowering count, or pending-state mutation");
+        "N+1 geometries reject before emission, lowering count, or pending-state mutation");
 
     command_scratch.acceleration_structure_geometries =
         native_geometries[..];
@@ -1058,7 +1056,6 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
         &build,
         false,
         true,
-        false,
         &ops,
     )!!;
     complete_pending_acceleration_structure_builds(&record);
@@ -1290,9 +1287,8 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
     vk::AccelerationStructureGeometryKHR[1] native_geometries;
     vk::AccelerationStructureBuildRangeInfoKHR[1] native_ranges;
     uint[1] maximum_counts;
-    CommandResourceReference[4] references;
+
     CommandScratch command_scratch = {
-        .references = references[..],
         .acceleration_structure_geometries = native_geometries[..],
         .acceleration_structure_ranges = native_ranges[..],
         .acceleration_structure_max_primitive_counts = maximum_counts[..],
@@ -1331,7 +1327,6 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
         ranges:           ranges,
         update:           false,
         validate:         true,
-        track_references: true,
         ops:              &ops,
     )) == gpu::UNSUPPORTED_FEATURE);
     state.ray_tracing_support.acceleration_structure_indirect_build = true;
@@ -1343,7 +1338,6 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
         ranges:           ranges,
         update:           false,
         validate:         true,
-        track_references: true,
         ops:              &ops,
     )) == gpu::INVALID_ARGUMENT);
     ranges = acceleration_structure_test_span(
@@ -1357,7 +1351,6 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
         ranges:           ranges,
         update:           false,
         validate:         true,
-        track_references: true,
         ops:              &ops,
     )) == gpu::INVALID_HANDLE);
     ranges = acceleration_structure_test_span(ranges_buffer, 32);
@@ -1368,7 +1361,6 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
         ranges:           ranges,
         update:           false,
         validate:         true,
-        track_references: true,
         ops:              &ops,
     )) == gpu::INVALID_ARGUMENT);
     ranges = acceleration_structure_test_span(ranges_buffer, 32);
@@ -1379,7 +1371,6 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
         ranges:           ranges,
         update:           false,
         validate:         true,
-        track_references: true,
         ops:              &ops,
     )) == gpu::INVALID_ARGUMENT);
     ranges = acceleration_structure_test_span(
@@ -1393,39 +1384,25 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
         ranges:           ranges,
         update:           false,
         validate:         true,
-        track_references: true,
         ops:              &ops,
     )) == gpu::INVALID_ARGUMENT);
     state.allocations.get(ranges_buffer)!!.backing.usage.indirect = true;
-    assert(capture.calls == 0 && command_scratch.reference_count == 0);
+    assert(capture.calls == 0);
 
-    command_scratch.references = references[:3];
-    assert(@catch(record_acceleration_structure_indirect_build_with_ops(
-        record:           &record,
-        desc:             &build,
-        ranges:           ranges,
-        update:           false,
-        validate:         true,
-        track_references: true,
-        ops:              &ops,
-    )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED);
     AccelerationStructureSlot* destination_slot =
         state.acceleration_structures.get(destination)!!;
     assert(capture.calls == 0
-            && command_scratch.reference_count == 0
             && destination_slot.build_eligibility
                 == gpu::internal::AccelerationStructureBuildEligibility.UNBUILT
             && !destination_slot.built_counts_are_maxima,
-        "reference failure rolls back before indirect emission and state");
+        "invalid indirect inputs preserve emission and destination state");
 
-    command_scratch.references = references[..];
     record_acceleration_structure_indirect_build_with_ops(
         record:           &record,
         desc:             &build,
         ranges:           ranges,
         update:           false,
         validate:         true,
-        track_references: true,
         ops:              &ops,
     )!!;
     assert(capture.calls == 1
@@ -1436,14 +1413,12 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
                 == gpu::AccelerationStructureIndirectBuildRange::size
             && capture.max_primitive_count == 4,
         "one indirect TLAS build emits one fixed packet and maximum count");
-    assert(command_scratch.reference_count == 4
-            && destination_slot.built_counts_are_maxima
+    assert(destination_slot.built_counts_are_maxima
             && destination_slot.built_instance_count == 4
             && destination_slot.build_eligibility
                 == gpu::internal::AccelerationStructureBuildEligibility.PENDING,
-        "full indirect build retains every explicit owner and records maxima");
+        "full indirect build emits native parameters and records maxima");
     complete_pending_acceleration_structure_builds(&record);
-    clear_command_scratch_references(&command_scratch);
 
     assert(@catch(prepare_acceleration_structure_build(
         &record,
@@ -1460,7 +1435,6 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
         ranges:           ranges,
         update:           true,
         validate:         true,
-        track_references: true,
         ops:              &ops,
     )!!;
     assert(capture.calls == 1
@@ -1468,7 +1442,6 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
                 == vk::BuildAccelerationStructureModeKHR.UPDATE_KHR
             && destination_slot.built_counts_are_maxima,
         "indirect update preserves maximum-count knowledge");
-    clear_command_scratch_references(&command_scratch);
 
     destination_slot.built_counts_are_maxima = false;
     capture = {};
@@ -1478,7 +1451,6 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
         ranges:           ranges,
         update:           true,
         validate:         false,
-        track_references: false,
         ops:              &ops,
     )!!;
     assert(capture.calls == 1 && !destination_slot.built_counts_are_maxima,
@@ -1494,13 +1466,12 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
                 ranges:           ranges,
                 update:           true,
                 validate:         false,
-                track_references: false,
                 ops:              &ops,
             )!!;
         }
     };
-    assert(capture.calls == 64 && command_scratch.reference_count == 0,
-        "warmed trusted indirect updates allocate and retain nothing");
+    assert(capture.calls == 64,
+        "warmed trusted indirect updates allocate no storage");
 }
 
 fn void acceleration_structure_scratch_rejects_destination_overlap() @test {
@@ -1593,7 +1564,7 @@ fn void acceleration_structure_scratch_rejects_destination_overlap() @test {
     )!!;
 }
 
-fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @test {
+fn void acceleration_structure_build_emits_and_transitions_atomically() @test {
     AllocationCell[] input_cells = mem::new_array(AllocationCell, 2);
     defer mem::free(input_cells.ptr);
     AccelerationStructureCell[] acceleration_structure_cells =
@@ -1645,9 +1616,8 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
         })!!;
     vk::AccelerationStructureGeometryKHR[1] native_geometries;
     vk::AccelerationStructureBuildRangeInfoKHR[1] native_ranges;
-    CommandResourceReference[3] references;
+
     CommandScratch command_scratch = {
-        .references = references[..],
         .acceleration_structure_geometries = native_geometries[..],
         .acceleration_structure_ranges = native_ranges[..],
     };
@@ -1680,7 +1650,6 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
         &build,
         false,
         true,
-        true,
         &ops,
     )!!;
     AccelerationStructureSlot* destination_slot =
@@ -1693,16 +1662,7 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
             && capture.info.scratch_data.device_address == 0x8000
             && capture.range.primitive_count == 2,
         "one full build emits one exact native build command");
-    assert(command_scratch.reference_count == 3
-            && destination_slot.tracked_command_references.load(
-                AtomicOrdering.RELAXED,
-            ) == 1
-            && state.allocations.get(instances)!!.tracked_command_references.load(
-                AtomicOrdering.RELAXED,
-            ) == 1
-            && state.allocations.get(scratch_buffer)!!
-                .tracked_command_references.load(AtomicOrdering.RELAXED) == 1,
-        "full validation retains destination, instances, and scratch");
+
     assert(destination_slot.build_eligibility
                 == gpu::internal::AccelerationStructureBuildEligibility.PENDING
             && !destination_slot.built_counts_are_maxima
@@ -1713,6 +1673,19 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
     abandon_pending_acceleration_structure_builds(&record, false);
     assert(destination_slot.build_eligibility
         == gpu::internal::AccelerationStructureBuildEligibility.UNBUILT);
+    CommandRecord second_record = record;
+    second_record.pending_acceleration_structure_head =
+        ACCELERATION_STRUCTURE_PENDING_NONE;
+    assert(@catch(prepare_acceleration_structure_build(
+        &second_record,
+        &build,
+        false,
+        true,
+    )) == gpu::RESOURCE_IN_USE,
+        "a failed submit leaves the destination linked to its original command");
+    assert(destination_slot.pending_linked.load(AtomicOrdering.ACQUIRE)
+        && second_record.pending_acceleration_structure_head
+            == ACCELERATION_STRUCTURE_PENDING_NONE);
     activate_pending_acceleration_structure_builds(&record);
     assert(destination_slot.build_eligibility
         == gpu::internal::AccelerationStructureBuildEligibility.PENDING);
@@ -1722,10 +1695,7 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
             && record.pending_acceleration_structure_head
                 == ACCELERATION_STRUCTURE_PENDING_NONE,
         "failed submit, accepted submit, and retirement transition exactly");
-    clear_command_scratch_references(&command_scratch);
-    assert(destination_slot.tracked_command_references.load(
-            AtomicOrdering.RELAXED,
-        ) == 0);
+    assert(!destination_slot.pending_linked.load(AtomicOrdering.ACQUIRE));
 
     build.instance_count = 1;
     assert(@catch(prepare_acceleration_structure_build(
@@ -1744,7 +1714,6 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
         &build,
         true,
         true,
-        true,
         &ops,
     )!!;
     assert(capture.calls == 1
@@ -1756,13 +1725,11 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
                 == destination_slot.native
             && capture.info.scratch_data.device_address == 0x8000,
         "update emits one in-place native command with update scratch");
-    assert(command_scratch.reference_count == 3
-            && destination_slot.build_eligibility
+    assert(destination_slot.build_eligibility
                 == gpu::internal::AccelerationStructureBuildEligibility.BUILT
             && record.pending_acceleration_structure_head
                 == ACCELERATION_STRUCTURE_PENDING_NONE,
-        "update retains resources without changing completed build state");
-    clear_command_scratch_references(&command_scratch);
+        "update preserves completed build state");
 
     capture = {};
     mem::@scoped(&allocators::NULL_ALLOCATOR) {
@@ -1773,16 +1740,13 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
                 &build,
                 true,
                 true,
-                true,
                 &ops,
             )!!;
-            clear_command_scratch_references(&command_scratch);
         }
     };
     assert(capture.calls == 64
-            && command_scratch.reference_count == 0
             && command_scratch.acceleration_structure_geometry_count == 1,
-        "warm in-place updates reuse fixed lowering and reference storage with no temporary allocation");
+        "warm in-place updates reuse fixed lowering storage with no temporary allocation");
 
     command_scratch.acceleration_structure_geometry_count = 0;
     capture = {};
@@ -1791,62 +1755,39 @@ fn void acceleration_structure_build_tracks_emits_and_transitions_atomically() @
         &build,
         true,
         false,
-        false,
         &ops,
     )!!;
-    assert(capture.calls == 1 && command_scratch.reference_count == 0,
-        "trusted update retains the mandatory safety floor without reference work");
+    assert(capture.calls == 1,
+        "trusted update preserves the mandatory safety floor");
 
     destination_slot.build_eligibility =
         gpu::internal::AccelerationStructureBuildEligibility.UNBUILT;
     command_scratch.acceleration_structure_geometry_count = 0;
     capture = {};
     assert(@catch(record_acceleration_structure_build_with_ops(
-        &record,
-        &build,
-        true,
-        true,
-        true,
-        &ops,
+        record:   &record,
+        desc:     &build,
+        update:   true,
+        validate: true,
+        ops:      &ops,
     )) == gpu::INVALID_ARGUMENT);
     destination_slot.build_eligibility =
         gpu::internal::AccelerationStructureBuildEligibility.BUILT;
     destination_slot.desc.flags.allow_update = false;
     assert(@catch(record_acceleration_structure_build_with_ops(
-        &record,
-        &build,
-        true,
-        true,
-        true,
-        &ops,
+        record:   &record,
+        desc:     &build,
+        update:   true,
+        validate: true,
+        ops:      &ops,
     )) == gpu::INVALID_ARGUMENT);
     destination_slot.desc.flags.allow_update = true;
-    assert(capture.calls == 0 && command_scratch.reference_count == 0
+    assert(capture.calls == 0
             && command_scratch.acceleration_structure_geometry_count == 0,
         "update rejects unbuilt and static destinations before mutation");
-
-    destination_slot.build_eligibility =
-        gpu::internal::AccelerationStructureBuildEligibility.UNBUILT;
-    command_scratch.references = references[:2];
-    command_scratch.reference_count = 0;
-    command_scratch.acceleration_structure_geometry_count = 0;
-    capture = {};
-    assert(@catch(record_acceleration_structure_build_with_ops(
-        &record,
-        &build,
-        false,
-        true,
-        true,
-        &ops,
-    )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED);
-    assert(capture.calls == 0 && command_scratch.reference_count == 0
-            && command_scratch.acceleration_structure_geometry_count == 0
-            && destination_slot.build_eligibility
-                == gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
-        "reference exhaustion rolls back before emission and pending state");
 }
 
-fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @test {
+fn void acceleration_structure_clone_emits_and_transitions_atomically() @test {
     AllocationCell[] input_cells = mem::new_array(AllocationCell, 3);
     defer mem::free(input_cells.ptr);
     AccelerationStructureCell[] acceleration_structure_cells =
@@ -1971,11 +1912,9 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
             .pending_next = ACCELERATION_STRUCTURE_PENDING_NONE,
         })!!;
 
-    CommandResourceReference[2] references;
     vk::AccelerationStructureGeometryKHR[1] native_geometries;
     vk::AccelerationStructureBuildRangeInfoKHR[1] native_ranges;
     CommandScratch command_scratch = {
-        .references = references[..],
         .acceleration_structure_geometries = native_geometries[..],
         .acceleration_structure_ranges = native_ranges[..],
     };
@@ -1997,7 +1936,6 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
         record:           &record,
         source:           source,
         destination:      source,
-        track_references: true,
         ops:              &ops,
     )) == gpu::INVALID_ARGUMENT);
     AccelerationStructureSlot* source_slot =
@@ -2008,7 +1946,6 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
         record:           &record,
         source:           source,
         destination:      destination,
-        track_references: true,
         ops:              &ops,
     )) == gpu::INVALID_ARGUMENT);
     source_slot.build_eligibility =
@@ -2017,7 +1954,6 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
         record:           &record,
         source:           source,
         destination:      destination,
-        track_references: true,
         ops:              &ops,
     )) == gpu::INVALID_ARGUMENT);
     source_slot.build_eligibility =
@@ -2026,7 +1962,6 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
         record:           &record,
         source:           source,
         destination:      incompatible,
-        track_references: true,
         ops:              &ops,
     )) == gpu::INVALID_ARGUMENT);
     AccelerationStructureSlot* destination_slot =
@@ -2037,13 +1972,11 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
         record:           &record,
         source:           source,
         destination:      destination,
-        track_references: true,
         ops:              &ops,
     )) == gpu::RESOURCE_IN_USE);
     destination_slot.build_eligibility =
         gpu::internal::AccelerationStructureBuildEligibility.UNBUILT;
     assert(capture.calls == 0
-            && command_scratch.reference_count == 0
             && record.pending_acceleration_structure_head
                 == ACCELERATION_STRUCTURE_PENDING_NONE,
         "invalid clone endpoints cause no observable mutation");
@@ -2052,7 +1985,6 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
         record:           &record,
         source:           source,
         destination:      destination,
-        track_references: true,
         ops:              &ops,
     )!!;
     assert(capture.calls == 1
@@ -2061,14 +1993,7 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
             && capture.info.mode
                 == vk::CopyAccelerationStructureModeKHR.CLONE_KHR,
         "one clone emits the exact source, destination, and native mode");
-    assert(command_scratch.reference_count == 2
-            && source_slot.tracked_command_references.load(
-                AtomicOrdering.RELAXED,
-            ) == 1
-            && destination_slot.tracked_command_references.load(
-                AtomicOrdering.RELAXED,
-            ) == 1,
-        "full clone retains exactly its two explicit endpoints");
+
     assert(destination_slot.build_eligibility
                 == gpu::internal::AccelerationStructureBuildEligibility.PENDING
             && destination_slot.desc.geometries[0].built_vertex_count == 3
@@ -2079,6 +2004,18 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
     abandon_pending_acceleration_structure_builds(&record, false);
     assert(destination_slot.build_eligibility
         == gpu::internal::AccelerationStructureBuildEligibility.UNBUILT);
+    CommandRecord second_record = record;
+    second_record.pending_acceleration_structure_head =
+        ACCELERATION_STRUCTURE_PENDING_NONE;
+    assert(@catch(prepare_acceleration_structure_clone(
+        &second_record,
+        source,
+        destination,
+    )) == gpu::RESOURCE_IN_USE,
+        "a failed clone submission cannot relink its destination");
+    assert(destination_slot.pending_linked.load(AtomicOrdering.ACQUIRE)
+        && second_record.pending_acceleration_structure_head
+            == ACCELERATION_STRUCTURE_PENDING_NONE);
     activate_pending_acceleration_structure_builds(&record);
     assert(destination_slot.build_eligibility
         == gpu::internal::AccelerationStructureBuildEligibility.PENDING);
@@ -2088,7 +2025,7 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
             && record.pending_acceleration_structure_head
                 == ACCELERATION_STRUCTURE_PENDING_NONE,
         "discard, accepted retry, and retirement use the existing lifecycle");
-    clear_command_scratch_references(&command_scratch);
+    assert(!destination_slot.pending_linked.load(AtomicOrdering.ACQUIRE));
 
     BufferUsage input_usage = {
         .addressable,
@@ -2159,7 +2096,6 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
         record:           &record,
         source:           tlas_source,
         destination:      tlas_destination,
-        track_references: false,
         ops:              &ops,
     )!!;
     AccelerationStructureSlot* tlas_destination_slot =
@@ -2171,33 +2107,8 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
         "TLAS clone copies its completed instance shape");
     abandon_pending_acceleration_structure_builds(&record, true);
 
-    command_scratch.references = references[:1];
-    command_scratch.reference_count = 0;
     destination_slot.build_eligibility =
         gpu::internal::AccelerationStructureBuildEligibility.UNBUILT;
-    capture = {};
-    assert(@catch(record_acceleration_structure_clone_with_ops(
-        record:           &record,
-        source:           source,
-        destination:      destination,
-        track_references: true,
-        ops:              &ops,
-    )) == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED);
-    assert(capture.calls == 0
-            && command_scratch.reference_count == 0
-            && source_slot.tracked_command_references.load(
-                AtomicOrdering.RELAXED,
-            ) == 0
-            && destination_slot.tracked_command_references.load(
-                AtomicOrdering.RELAXED,
-            ) == 0
-            && destination_slot.build_eligibility
-                == gpu::internal::AccelerationStructureBuildEligibility.UNBUILT
-            && record.pending_acceleration_structure_head
-                == ACCELERATION_STRUCTURE_PENDING_NONE,
-        "second-endpoint retention failure rolls back before emission");
-
-    command_scratch.references = references[..];
     capture = {};
     mem::@scoped(&allocators::NULL_ALLOCATOR) {
         for (uint i = 0; i < 64; i++) {
@@ -2205,14 +2116,12 @@ fn void acceleration_structure_clone_tracks_emits_and_transitions_atomically() @
                 record:           &record,
                 source:           source,
                 destination:      destination,
-                track_references: false,
                 ops:              &ops,
             )!!;
             abandon_pending_acceleration_structure_builds(&record, true);
         }
     };
     assert(capture.calls == 64
-            && command_scratch.reference_count == 0
             && destination_slot.build_eligibility
                 == gpu::internal::AccelerationStructureBuildEligibility.UNBUILT,
         "warm trusted clone uses fixed storage and performs no allocation");

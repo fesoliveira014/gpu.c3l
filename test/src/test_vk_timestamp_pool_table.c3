@@ -217,7 +217,7 @@ fn void timestamp_pool_creation_is_transactional_and_copies_name() @test {
         "failed publication destroys the unpublished native pool");
 }
 
-fn void timestamp_pool_destruction_honors_tracked_references() @test {
+fn void timestamp_pool_destruction_releases_native_and_generation() @test {
     TimestampPoolCell[1] cells;
     TimestampPoolTable table = {
         .slots = cells[..],
@@ -233,18 +233,6 @@ fn void timestamp_pool_destruction_honors_tracked_references() @test {
         ops:        &ops,
     )!!;
     TimestampPoolSlot* slot = table.get(handle)!!;
-    slot.tracked_command_references.store(1, AtomicOrdering.RELAXED);
-
-    assert(@catch(destroy_timestamp_pool_with(
-        &table,
-        (vk::Device)null,
-        handle,
-        &ops,
-    )) == gpu::RESOURCE_IN_USE);
-    assert(probe.destroy_calls == 0 && table.get(handle)!! == slot,
-        "an in-use pool remains live and native");
-
-    slot.tracked_command_references.store(0, AtomicOrdering.RELAXED);
     vk::QueryPool native = slot.pool;
     destroy_timestamp_pool_with(
         &table,

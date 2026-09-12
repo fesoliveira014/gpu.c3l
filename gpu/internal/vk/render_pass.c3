@@ -9,11 +9,8 @@ import std::atomic;
 struct PreparedRenderPass {
     AttachmentViewSlot*[gpu::MAX_COLOR_ATTACHMENTS] color_slots;
     AttachmentViewSlot*[gpu::MAX_COLOR_ATTACHMENTS] resolve_slots;
-    gpu::AttachmentViewHandle[gpu::MAX_COLOR_ATTACHMENTS] color_handles;
-    gpu::AttachmentViewHandle[gpu::MAX_COLOR_ATTACHMENTS] resolve_handles;
     vk::RenderingAttachmentInfo[gpu::MAX_COLOR_ATTACHMENTS] attachments;
     AttachmentViewSlot*       depth_view;
-    gpu::AttachmentViewHandle depth_handle;
     vk::RenderingAttachmentInfo depth_attachment;
     vk::RenderingAttachmentInfo stencil_attachment;
     RenderCompatibility       compatibility;
@@ -44,7 +41,6 @@ struct LoweredGraphicsState {
 struct PreparedIndexedDraw {
     BoundPipeline*  pipeline;
     ResolvedSpan    index;
-    gpu::GpuSpan    index_span;
     gpu::GpuAddress vertex_root;
     gpu::GpuAddress fragment_root;
     uint            index_count;
@@ -55,7 +51,6 @@ struct PreparedIndexedDraw {
 struct PreparedIndirectDraw {
     BoundPipeline*  pipeline;
     ResolvedSpan    args;
-    gpu::GpuSpan    args_span;
     gpu::GpuAddress vertex_root;
     gpu::GpuAddress fragment_root;
     uint            draw_count;
@@ -65,8 +60,6 @@ struct PreparedIndexedIndirectDraw {
     BoundPipeline*  pipeline;
     ResolvedSpan    args;
     ResolvedSpan    index;
-    gpu::GpuSpan    args_span;
-    gpu::GpuSpan    index_span;
     gpu::GpuAddress vertex_root;
     gpu::GpuAddress fragment_root;
     uint            draw_count;
@@ -78,9 +71,6 @@ struct PreparedIndexedIndirectCountDraw {
     ResolvedSpan    args;
     ResolvedSpan    count;
     ResolvedSpan    index;
-    gpu::GpuSpan    args_span;
-    gpu::GpuSpan    count_span;
-    gpu::GpuSpan    index_span;
     gpu::GpuAddress vertex_root;
     gpu::GpuAddress fragment_root;
     uint            max_draw_count;
@@ -91,8 +81,6 @@ struct PreparedGeneratedDraw {
     BoundPipeline*                 pipeline;
     ResolvedSpan                   records;
     ResolvedSpan                   count;
-    gpu::GpuSpan                   records_span;
-    gpu::GpuSpan                   count_span;
     vk::IndirectCommandsLayoutEXT layout;
     uint                           max_count;
 }
@@ -102,9 +90,6 @@ struct PreparedGeneratedIndexedDraw {
     ResolvedSpan                   records;
     ResolvedSpan                   count;
     ResolvedSpan                   index;
-    gpu::GpuSpan                   records_span;
-    gpu::GpuSpan                   count_span;
-    gpu::GpuSpan                   index_span;
     vk::IndirectCommandsLayoutEXT layout;
     uint                           max_count;
     gpu::IndexType                 index_type;
@@ -121,8 +106,6 @@ struct PreparedMeshIndirectDraw {
     BoundPipeline*  pipeline;
     ResolvedSpan    args;
     ResolvedSpan    count;
-    gpu::GpuSpan    args_span;
-    gpu::GpuSpan    count_span;
     gpu::GpuAddress mesh_root;
     gpu::GpuAddress fragment_root;
     uint            draw_count;
@@ -322,7 +305,6 @@ fn PreparedRenderPass? lower_render_pass(
         AttachmentViewSlot* view = state.attachment_views.get(target.view)!;
         if (view.native == null) return gpu::INVALID_RESOURCE_STATE~;
         pass.color_slots[i] = view;
-        pass.color_handles[i] = target.view;
         pass.compatibility.color_formats[i] = view.format;
         if (!samples_initialized) {
             pass.compatibility.sample_count = view.sample_count;
@@ -349,7 +331,6 @@ fn PreparedRenderPass? lower_render_pass(
             )!;
             if (resolve.native == null) return gpu::INVALID_RESOURCE_STATE~;
             pass.resolve_slots[i] = resolve;
-            pass.resolve_handles[i] = target.resolve_view;
             attachment.resolve_mode = color_resolve_mode(view.format);
             attachment.resolve_image_view = resolve.native;
             attachment.resolve_image_layout = texture_layout_to_vk(
@@ -366,7 +347,6 @@ fn PreparedRenderPass? lower_render_pass(
         )!;
         if (depth.native == null) return gpu::INVALID_RESOURCE_STATE~;
         pass.depth_view = depth;
-        pass.depth_handle = desc.depth.view;
         pass.compatibility.depth_format = depth.format;
         if (!samples_initialized) {
             pass.compatibility.sample_count = depth.sample_count;
@@ -534,74 +514,6 @@ fn PreparedRenderPass? full_prepare_render_pass(
     return pass;
 }
 
-fn void? track_render_pass(
-    CommandRecord* commands,
-    PreparedRenderPass* pass,
-) {
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    CommandResourceReference[
-        gpu::MAX_COLOR_ATTACHMENTS * 2 + 1
-    ] references;
-    uint reference_count;
-    for (uint i = 0; i < pass.color_count; i++) {
-        gpu::AttachmentViewHandle color = pass.color_handles[i];
-        references[reference_count++] = {
-            .owner      = color.owner,
-            .index      = color.index,
-            .generation = color.generation,
-        };
-        gpu::AttachmentViewHandle resolve = pass.resolve_handles[i];
-        if (resolve.is_valid()) {
-            references[reference_count++] = {
-                .owner      = resolve.owner,
-                .index      = resolve.index,
-                .generation = resolve.generation,
-            };
-        }
-    }
-    if (pass.has_depth) {
-        references[reference_count++] = {
-            .owner      = pass.depth_handle.owner,
-            .index      = pass.depth_handle.index,
-            .generation = pass.depth_handle.generation,
-        };
-    }
-    preflight_command_references(
-        record,
-        references[:reference_count],
-    )!;
-    for (uint i = 0; i < pass.color_count; i++) {
-        gpu::AttachmentViewHandle color = pass.color_handles[i];
-        track_command_reference(
-            state,
-            record,
-            color.owner,
-            color.index,
-            color.generation,
-        )!;
-        gpu::AttachmentViewHandle resolve = pass.resolve_handles[i];
-        if (resolve.is_valid()) {
-            track_command_reference(
-                state,
-                record,
-                resolve.owner,
-                resolve.index,
-                resolve.generation,
-            )!;
-        }
-    }
-    if (pass.has_depth) {
-        track_command_reference(
-            state,
-            record,
-            pass.depth_handle.owner,
-            pass.depth_handle.index,
-            pass.depth_handle.generation,
-        )!;
-    }
-}
-
 fn void record_render_pass(
     CommandRecord* commands,
     PreparedRenderPass* pass,
@@ -646,13 +558,7 @@ fn void? full_begin_render_pass(
         desc,
         "cmd_begin_render_pass",
     )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_render_pass(commands, &pass)!;
+
     record_render_pass(commands, &pass);
 }
 
@@ -1626,7 +1532,6 @@ fn PreparedIndexedDraw? lower_indexed_draw(
             index_type: index_type,
             required:   required,
         )!,
-        .index_span    = index_span,
         .vertex_root   = vertex_root,
         .fragment_root = fragment_root,
         .index_count   = index_count,
@@ -1667,24 +1572,12 @@ fn PreparedIndexedDraw? full_prepare_indexed_draw(
             required:   (usz)index_count * index_size,
             operation:  "cmd_draw_indexed",
         )!,
-        .index_span     = index_span,
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
         .index_count    = index_count,
         .instance_count = instance_count,
         .index_type     = index_type,
     };
-}
-
-fn void? track_indexed_draw(
-    CommandRecord* commands,
-    PreparedIndexedDraw* draw,
-) {
-    return track_span_command_reference(
-        commands.device_state,
-        commands,
-        &draw.index_span,
-    );
 }
 
 fn void record_indexed_draw(
@@ -1752,7 +1645,7 @@ fn void? full_draw_indexed(
         instance_count: instance_count,
         index_type:     index_type,
     )!;
-    track_indexed_draw(commands, &draw)!;
+
     record_indexed_draw(commands, &draw);
 }
 
@@ -1776,7 +1669,6 @@ fn PreparedIndirectDraw? lower_indirect_draw(
             arg_size: gpu::DrawIndirectCommand::size,
             count:    draw_count,
         )!,
-        .args_span     = args,
         .vertex_root   = vertex_root,
         .fragment_root = fragment_root,
         .draw_count    = draw_count,
@@ -1814,22 +1706,10 @@ fn PreparedIndirectDraw? full_prepare_indirect_draw(
             rejected_field: "draw_count",
             max_count:      state.caps.max_draw_indirect_count,
         )!,
-        .args_span     = args,
         .vertex_root   = vertex_root,
         .fragment_root = fragment_root,
         .draw_count    = draw_count,
     };
-}
-
-fn void? track_indirect_draw(
-    CommandRecord* commands,
-    PreparedIndirectDraw* draw,
-) {
-    return track_span_command_reference(
-        commands.device_state,
-        commands,
-        &draw.args_span,
-    );
 }
 
 fn void record_indirect_draw(
@@ -1883,7 +1763,7 @@ fn void? full_draw_indirect(
         args:           args,
         draw_count:     draw_count,
     )!;
-    track_indirect_draw(commands, &draw)!;
+
     record_indirect_draw(commands, &draw);
 }
 
@@ -1930,8 +1810,6 @@ fn PreparedIndexedIndirectDraw? lower_indexed_indirect_draw(
             index_type: index_type,
             required:   0,
         )!,
-        .args_span      = args,
-        .index_span     = index_span,
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
         .draw_count     = draw_count,
@@ -1980,36 +1858,11 @@ fn PreparedIndexedIndirectDraw? full_prepare_indexed_indirect_draw(
             required:   0,
             operation:  "cmd_draw_indexed_indirect",
         )!,
-        .args_span      = args,
-        .index_span     = index_span,
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
         .draw_count     = draw_count,
         .index_type     = index_type,
     };
-}
-
-fn void? track_indexed_indirect_draw(
-    CommandRecord* commands,
-    PreparedIndexedIndirectDraw* draw,
-) {
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    CommandResourceReference[2] references = {
-        {
-            .owner      = draw.args_span.owner,
-            .index      = draw.args_span.index,
-            .generation = draw.args_span.generation,
-        },
-        {
-            .owner      = draw.index_span.owner,
-            .index      = draw.index_span.index,
-            .generation = draw.index_span.generation,
-        },
-    };
-    preflight_command_references(record, references[..])!;
-    track_span_command_reference(state, record, &draw.args_span)!;
-    track_span_command_reference(state, record, &draw.index_span)!;
 }
 
 fn void record_indexed_indirect_draw(
@@ -2077,13 +1930,7 @@ fn void? full_draw_indexed_indirect(
             index_span:     index_span,
             index_type:     index_type,
         )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_indexed_indirect_draw(commands, &draw)!;
+
     record_indexed_indirect_draw(commands, &draw);
 }
 
@@ -2125,9 +1972,6 @@ fn PreparedIndexedIndirectCountDraw? lower_indexed_indirect_count_draw(
             index_type: index_type,
             required:   0,
         )!,
-        .args_span      = args,
-        .count_span     = count_span,
-        .index_span     = index_span,
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
         .max_draw_count = max_draw_count,
@@ -2186,43 +2030,11 @@ fn PreparedIndexedIndirectCountDraw? full_prepare_indexed_indirect_count_draw(
             required:   0,
             operation:  "cmd_draw_indexed_indirect_count",
         )!,
-        .args_span      = args,
-        .count_span     = count_span,
-        .index_span     = index_span,
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
         .max_draw_count = max_draw_count,
         .index_type     = index_type,
     };
-}
-
-fn void? track_indexed_indirect_count_draw(
-    CommandRecord* commands,
-    PreparedIndexedIndirectCountDraw* draw,
-) {
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    CommandResourceReference[3] references = {
-        {
-            .owner      = draw.args_span.owner,
-            .index      = draw.args_span.index,
-            .generation = draw.args_span.generation,
-        },
-        {
-            .owner      = draw.count_span.owner,
-            .index      = draw.count_span.index,
-            .generation = draw.count_span.generation,
-        },
-        {
-            .owner      = draw.index_span.owner,
-            .index      = draw.index_span.index,
-            .generation = draw.index_span.generation,
-        },
-    };
-    preflight_command_references(record, references[..])!;
-    track_span_command_reference(state, record, &draw.args_span)!;
-    track_span_command_reference(state, record, &draw.count_span)!;
-    track_span_command_reference(state, record, &draw.index_span)!;
 }
 
 fn void record_indexed_indirect_count_draw(
@@ -2297,13 +2109,7 @@ fn void? full_draw_indexed_indirect_count(
             index_span:     index_span,
             index_type:     index_type,
         )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_indexed_indirect_count_draw(commands, &draw)!;
+
     record_indexed_indirect_count_draw(commands, &draw);
 }
 
@@ -2364,8 +2170,6 @@ fn PreparedGeneratedDraw? lower_generated_draw(
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedDraw draw = {
         .pipeline     = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
-        .records_span = records,
-        .count_span   = count_span,
         .layout       = state.generated_draw_layout,
         .max_count    = max_draw_count,
     };
@@ -2405,8 +2209,6 @@ fn PreparedGeneratedDraw? full_prepare_generated_draw(
             record,
             "cmd_draw_generated",
         )!,
-        .records_span = records,
-        .count_span   = count_span,
         .layout       = state.generated_draw_layout,
         .max_count    = max_draw_count,
     };
@@ -2431,29 +2233,6 @@ fn PreparedGeneratedDraw? full_prepare_generated_draw(
         rejected_field: "count_span",
     )!;
     return draw;
-}
-
-fn void? track_generated_draw(
-    CommandRecord* commands,
-    PreparedGeneratedDraw* draw,
-) {
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    CommandResourceReference[2] references = {
-        {
-            .owner      = draw.records_span.owner,
-            .index      = draw.records_span.index,
-            .generation = draw.records_span.generation,
-        },
-        {
-            .owner      = draw.count_span.owner,
-            .index      = draw.count_span.index,
-            .generation = draw.count_span.generation,
-        },
-    };
-    preflight_command_references(record, references[..])!;
-    track_span_command_reference(state, record, &draw.records_span)!;
-    track_span_command_reference(state, record, &draw.count_span)!;
 }
 
 fn void? record_generated_draw(
@@ -2502,13 +2281,7 @@ fn void? full_draw_generated(
         max_draw_count: max_draw_count,
     )!;
     if (draw.max_count == 0) return;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_generated_draw(commands, &draw)!;
+
     record_generated_draw(commands, &draw)!;
 }
 
@@ -2527,9 +2300,6 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedIndexedDraw draw = {
         .pipeline     = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
-        .records_span = records,
-        .count_span   = count_span,
-        .index_span   = index_span,
         .layout       = state.generated_indexed_draw_layout,
         .max_count    = max_draw_count,
         .index_type   = index_type,
@@ -2579,9 +2349,6 @@ fn PreparedGeneratedIndexedDraw? full_prepare_generated_indexed_draw(
             record,
             "cmd_draw_indexed_generated",
         )!,
-        .records_span = records,
-        .count_span   = count_span,
-        .index_span   = index_span,
         .layout       = state.generated_indexed_draw_layout,
         .max_count    = max_draw_count,
         .index_type   = index_type,
@@ -2615,35 +2382,6 @@ fn PreparedGeneratedIndexedDraw? full_prepare_generated_indexed_draw(
         operation:  "cmd_draw_indexed_generated",
     )!;
     return draw;
-}
-
-fn void? track_generated_indexed_draw(
-    CommandRecord* commands,
-    PreparedGeneratedIndexedDraw* draw,
-) {
-    VkDeviceState* state = commands.device_state;
-    CommandRecord* record = commands;
-    CommandResourceReference[3] references = {
-        {
-            .owner      = draw.records_span.owner,
-            .index      = draw.records_span.index,
-            .generation = draw.records_span.generation,
-        },
-        {
-            .owner      = draw.count_span.owner,
-            .index      = draw.count_span.index,
-            .generation = draw.count_span.generation,
-        },
-        {
-            .owner      = draw.index_span.owner,
-            .index      = draw.index_span.index,
-            .generation = draw.index_span.generation,
-        },
-    };
-    preflight_command_references(record, references[..])!;
-    track_span_command_reference(state, record, &draw.records_span)!;
-    track_span_command_reference(state, record, &draw.count_span)!;
-    track_span_command_reference(state, record, &draw.index_span)!;
 }
 
 fn void? record_generated_indexed_draw(
@@ -2704,13 +2442,7 @@ fn void? full_draw_indexed_generated(
             index_type:     index_type,
         )!;
     if (draw.max_count == 0) return;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_generated_indexed_draw(commands, &draw)!;
+
     record_generated_indexed_draw(commands, &draw)!;
 }
 
@@ -2896,8 +2628,6 @@ fn PreparedMeshIndirectDraw? lower_mesh_indirect_draw(
             arg_size: gpu::DrawMeshTasksIndirectCommand::size,
             count:    draw_count,
         )!,
-        .args_span     = args,
-        .count_span    = count_span,
         .mesh_root     = mesh_root,
         .fragment_root = fragment_root,
         .draw_count    = draw_count,
@@ -2944,8 +2674,6 @@ fn PreparedMeshIndirectDraw? full_prepare_mesh_indirect_draw(
             rejected_field: counted ? "args" : "draw_count",
             max_count:      counted ? uint::max : state.caps.max_draw_indirect_count,
         )!,
-        .args_span     = args,
-        .count_span    = count_span,
         .mesh_root     = mesh_root,
         .fragment_root = fragment_root,
         .draw_count    = draw_count,
@@ -2963,16 +2691,6 @@ fn PreparedMeshIndirectDraw? full_prepare_mesh_indirect_draw(
         )!;
     }
     return draw;
-}
-
-fn void? track_mesh_indirect_draw(
-    CommandRecord* commands,
-    PreparedMeshIndirectDraw* draw,
-) @private {
-    track_span_command_reference(commands.device_state, commands, &draw.args_span)!;
-    if (draw.counted) {
-        track_span_command_reference(commands.device_state, commands, &draw.count_span)!;
-    }
 }
 
 fn void? trusted_draw_mesh_tasks_indirect(
@@ -3011,13 +2729,7 @@ fn void? full_draw_mesh_tasks_indirect(
         counted:       false,
         operation:     "cmd_draw_mesh_tasks_indirect",
     )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_mesh_indirect_draw(commands, &draw)!;
+
     record_mesh_indirect_draw(commands, &draw);
 }
 
@@ -3059,12 +2771,6 @@ fn void? full_draw_mesh_tasks_indirect_count(
         counted:       true,
         operation:     "cmd_draw_mesh_tasks_indirect_count",
     )!;
-    CommandRecord* record = commands;
-    uint checkpoint = record.scratch.reference_count;
-    defer catch rollback_command_references(
-        record,
-        checkpoint,
-    );
-    track_mesh_indirect_draw(commands, &draw)!;
+
     record_mesh_indirect_draw(commands, &draw);
 }

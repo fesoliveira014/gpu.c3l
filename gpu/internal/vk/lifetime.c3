@@ -11,13 +11,6 @@ alias BeforeCompletionRetirementFn @feat(TESTING) = fn void (void*);
 
 const uint SUBMITTED_COMMAND_DRAIN_THRESHOLD = 64;
 
-struct CommandResourceReference {
-    ulong         owner;
-    uint          index;
-    uint          generation;
-    Atomic{uint}* retained_counter;
-}
-
 struct SparseBindReference {
     Atomic{uint}*       retained_counter;
     ulong               sequence;
@@ -28,99 +21,6 @@ struct CompletionRetirementOps {
     void* user_data @feat(TESTING);
     SemaphoreCounterQueryFn query;
     BeforeCompletionRetirementFn before_retirement @feat(TESTING);
-}
-
-fn bool same_resource_reference(
-    CommandResourceReference* left,
-    CommandResourceReference* right,
-) {
-    return left.owner == right.owner
-        && left.index == right.index
-        && left.generation == right.generation;
-}
-
-fn Atomic{uint}*? tracked_command_reference_counter(
-    VkDeviceState* state,
-    CommandResourceReference reference,
-) {
-    if (reference.owner == state.allocations.owner) {
-        gpu::GpuAllocation allocation = {
-            .owner = reference.owner, .index = reference.index,
-            .generation = reference.generation,
-        };
-        AllocationSlot* slot = state.allocations.get(allocation)!;
-        return &slot.tracked_command_references;
-    }
-    if (reference.owner == state.textures.owner) {
-        gpu::TextureHandle texture = {
-            .owner = reference.owner, .index = reference.index,
-            .generation = reference.generation,
-        };
-        TextureSlot* slot = state.textures.get(texture)!;
-        return &slot.tracked_command_references;
-    }
-    if (reference.owner == state.attachment_views.owner) {
-        gpu::AttachmentViewHandle view = {
-            .owner = reference.owner, .index = reference.index,
-            .generation = reference.generation,
-        };
-        AttachmentViewSlot* slot = state.attachment_views.get(view)!;
-        return &slot.tracked_command_references;
-    }
-    if (reference.owner == state.timestamp_pools.owner) {
-        gpu::TimestampPoolHandle pool = {
-            .owner      = reference.owner,
-            .index      = reference.index,
-            .generation = reference.generation,
-        };
-        TimestampPoolSlot* slot = state.timestamp_pools.get(pool)!;
-        return &slot.tracked_command_references;
-    }
-    if (reference.owner == state.acceleration_structures.owner) {
-        gpu::AccelerationStructureHandle acceleration_structure = {
-            .owner = reference.owner,
-            .index = reference.index,
-            .generation = reference.generation,
-        };
-        AccelerationStructureSlot* slot = state.acceleration_structures.get(
-            acceleration_structure,
-        )!;
-        return &slot.tracked_command_references;
-    }
-    if (reference.owner == state.pipelines.owner) {
-        gpu::PipelineHandle pipeline = {
-            .owner = reference.owner, .index = reference.index,
-            .generation = reference.generation,
-        };
-        PipelineSlot* slot = state.pipelines.get(pipeline)!;
-        return &slot.tracked_command_references;
-    }
-    return gpu::INVALID_HANDLE~;
-}
-
-fn void? retain_tracked_command_reference(
-    VkDeviceState* state,
-    CommandResourceReference* reference,
-) {
-    reference.retained_counter =
-        tracked_command_reference_counter(state, *reference)!;
-    reference.retained_counter.add(1, AtomicOrdering.RELAXED);
-}
-
-<* @require reference.retained_counter != null : "retained counter" *>
-fn void release_tracked_command_reference(
-    CommandResourceReference reference,
-) {
-    reference.retained_counter.sub(1, AtomicOrdering.RELAXED);
-}
-
-fn void release_tracked_command_references(
-    CommandResourceReference[] references,
-    uint count,
-) {
-    for (uint i = 0; i < count; i++) {
-        release_tracked_command_reference(references[i]);
-    }
 }
 
 fn void publish_pending_commands_locked(
@@ -190,9 +90,8 @@ fn CommandRecord* release_pending_command_locked(
     slot.mutex.lock()!!;
     record.state = gpu::internal::CommandState.INACTIVE;
     complete_pending_acceleration_structure_builds(record);
-    // Reference gates plus retirement/destroy serialization make resource_mutex unnecessary.
     CommandScratch* scratch = record.scratch;
-    clear_command_scratch_references(scratch);
+
     recycle_generated_preprocess_indices_locked(
         state,
         slot,

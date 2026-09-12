@@ -159,10 +159,9 @@ automatic stack sizing.
 gpu::destroy_pipeline(&device, pipeline)!;
 ```
 
-Destruction never waits. Under `FULL` validation a pipeline named by a
-recorded or submitted list returns `RESOURCE_IN_USE` until the list
-retires. Under `TRUSTED` the application must still keep it alive through
-use.
+Destruction never waits. Recording, ending, or submitting commands does not
+retain pipelines. Keep each pipeline alive through its last GPU use under
+every validation policy; cached command state does not extend its lifetime.
 
 Equal descriptions on one device share a private cached pipeline; each
 `PipelineHandle` is still a separate owner with its own lifetime. Pipeline

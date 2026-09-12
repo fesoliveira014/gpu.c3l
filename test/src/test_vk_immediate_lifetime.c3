@@ -268,240 +268,7 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
         "quiescent release does not wait for unrelated queue or device idle");
 }
 
-fn void recording_references_reject_allocation_release() @test {
-    gpu::Device device = make_lifetime_test_device();
-    defer destroy_test_device(&device)!!;
-
-    OwnedSpan src = make_lifetime_span(&device, "recording_src");
-    defer free_owned_span(&device, &src)!!;
-    OwnedSpan dst = make_lifetime_span(&device, "recording_dst");
-    defer free_owned_span(&device, &dst)!!;
-
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = record_lifetime_copy(&allocator, &src, &dst);
-    fault src_fault = @catch(gpu::free_allocation(&device, &src.allocation));
-    fault dst_fault = @catch(gpu::free_allocation(&device, &dst.allocation));
-    assert(src_fault == gpu::RESOURCE_IN_USE && dst_fault == gpu::RESOURCE_IN_USE,
-        "recording references reject release");
-    assert(src.allocation.is_valid() && dst.allocation.is_valid(),
-        "rejected release preserves both owning tokens");
-
-    gpu::discard_commands(&commands)!!;
-    gpu::free_allocation(&device, &src.allocation)!!;
-    src.span = {};
-    gpu::free_allocation(&device, &dst.allocation)!!;
-    dst.span = {};
-}
-
-fn void executable_references_reject_allocation_release() @test {
-    gpu::Device device = make_lifetime_test_device();
-    defer destroy_test_device(&device)!!;
-
-    OwnedSpan src = make_lifetime_span(&device, "executable_src");
-    defer free_owned_span(&device, &src)!!;
-    OwnedSpan dst = make_lifetime_span(&device, "executable_dst");
-    defer free_owned_span(&device, &dst)!!;
-    gpu::PipelineHandle pipeline = make_lifetime_compute_pipeline(&device);
-    defer (void)gpu::destroy_pipeline(&device, pipeline);
-
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = record_lifetime_copy(&allocator, &src, &dst);
-    bind_test_compute_pipeline(&commands, pipeline);
-    gpu::cmd_dispatch(&commands, (gpu::GpuAddress)1, { 0, 0, 0 })!!;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    assert(@catch(gpu::free_allocation(&device, &dst.allocation))
-        == gpu::RESOURCE_IN_USE, "executable references reject release");
-    assert(dst.allocation.is_valid(), "rejected executable release preserves ownership");
-    assert(@catch(gpu::destroy_pipeline(&device, pipeline))
-        == gpu::RESOURCE_IN_USE,
-        "executable command retains its bound pipeline");
-
-    gpu::discard_executable_commands(&executable)!!;
-    gpu::free_allocation(&device, &src.allocation)!!;
-    src.span = {};
-    gpu::free_allocation(&device, &dst.allocation)!!;
-    dst.span = {};
-    gpu::destroy_pipeline(&device, pipeline)!!;
-    pipeline = {};
-}
-
-fn void incomplete_submitted_commands_retain_references() @test {
-    gpu::Device device = make_lifetime_test_device();
-    defer destroy_test_device(&device)!!;
-
-    OwnedSpan src = make_lifetime_span(&device, "submitted_src");
-    defer free_owned_span(&device, &src)!!;
-    OwnedSpan dst = make_lifetime_span(&device, "submitted_dst");
-    defer free_owned_span(&device, &dst)!!;
-    gpu::PipelineHandle pipeline = make_lifetime_compute_pipeline(&device);
-    defer (void)gpu::destroy_pipeline(&device, pipeline);
-
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = record_lifetime_copy(&allocator, &src, &dst);
-    bind_test_compute_pipeline(&commands, pipeline);
-    gpu::cmd_dispatch(&commands, (gpu::GpuAddress)1, { 0, 0, 0 })!!;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    gpu::ExecutableCommandList[1] lists = { executable };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::CompletionPoint completion = submit_test_queue(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-        &submit,
-    )!!;
-
-    if (!gpu::poll_completion(completion)!!) {
-        assert(@catch(gpu::free_allocation(&device, &dst.allocation))
-            == gpu::RESOURCE_IN_USE,
-            "incomplete submitted work rejects release");
-        assert(dst.allocation.is_valid(),
-            "rejected submitted release preserves ownership");
-        assert(@catch(gpu::destroy_pipeline(&device, pipeline))
-            == gpu::RESOURCE_IN_USE,
-            "incomplete submitted command retains its bound pipeline");
-    }
-    gpu::wait_completion(completion)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::QueueCompletionState* queue_completion =
-        vk::queue_completion_state(state, queue.id)!!;
-    assert(queue_completion.submitted_count == 0,
-        "waiting releases completed validation-reference batches");
-    gpu::free_allocation(&device, &src.allocation)!!;
-    src.span = {};
-    gpu::free_allocation(&device, &dst.allocation)!!;
-    dst.span = {};
-    gpu::destroy_pipeline(&device, pipeline)!!;
-    pipeline = {};
-}
-
-fn void borrowed_attachment_view_reference_releases_after_completion_drain() @test {
-    gpu::Device device = make_lifetime_test_device();
-    defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-
-    vk::AttachmentViewSlot borrowed_view = { .swapchain_owned = true };
-    gpu::AttachmentViewHandle view =
-        state.attachment_views.alloc(borrowed_view)!!;
-    defer state.attachment_views.free(view)!!;
-    vk::AttachmentViewSlot* slot = state.attachment_views.get(view)!!;
-
-    gpu::Queue queue = gpu::get_queue(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    vk::track_command_reference(
-        state:      state,
-        record:     record,
-        owner:      view.owner,
-        index:      view.index,
-        generation: view.generation,
-    )!!;
-    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 1,
-        "recording retains the borrowed attachment view");
-
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    gpu::ExecutableCommandList[1] lists = { executable };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
-    vk::QueueCompletionState* queue_completion =
-        vk::queue_completion_state(state, queue.id)!!;
-    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 1
-        && queue_completion.submitted_count == 1,
-        "submission transfers the borrowed-view reference to the completion batch");
-
-    ulong sequence = gpu::internal::completion_point_sequence(completion);
-    vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
-        .set_semaphore_count(1)
-        .set_semaphores((&queue_completion.timeline)[:1])
-        .set_values((&sequence)[:1]);
-    assert(vk::wait_semaphores(
-        device:        state.device,
-        p_wait_info:   &wait_info,
-        timeout:       ulong::max,
-    ) == vk::Result.SUCCESS, "the submitted command reaches completion");
-    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 1
-        && queue_completion.submitted_count == 1,
-        "completion alone preserves the borrowed-view reference until drain");
-
-    vk::drain_completed_submitted_commands(state)!!;
-    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 0
-        && queue_completion.submitted_count == 0,
-        "drain releases the completed borrowed-view reference");
-    vk::QueueCompletionState* completion_state =
-        vk::queue_completion_state(
-            state,
-            gpu::internal::completion_point_queue_id(completion),
-        )!!;
-    assert(completion_state.retired_sequence.load(AtomicOrdering.ACQUIRE)
-        == gpu::internal::completion_point_sequence(completion),
-        "the explicit drain publishes the retired prefix");
-    assert(gpu::poll_completion(completion)!!,
-        "the drained point uses the cached poll path");
-    vk::drain_completed_submitted_commands(state)!!;
-    assert(slot.tracked_command_references.load(AtomicOrdering.RELAXED) == 0
-        && queue_completion.submitted_count == 0,
-        "a repeated drain cannot release the borrowed-view reference twice");
-}
-
-fn void explicit_texture_and_pipeline_references_reject_destroy() @test {
-    gpu::Device device = make_lifetime_test_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc texture_desc = {
-        .access    = { .graphics, .compute, .transfer },
-        .width     = 8,
-        .height    = 8,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .sampled, .transfer_dst },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &texture_desc)!!;
-    defer (void)gpu::destroy_texture(&device, texture);
-
-    gpu::PipelineHandle pipeline = make_lifetime_compute_pipeline(&device);
-    defer (void)gpu::destroy_pipeline(&device, pipeline);
-
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    gpu::TextureBarrier barrier = {
-        .texture = texture,
-        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
-        .after   = {
-            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
-            .stages = { .transfer },
-            .access = { .write },
-        },
-    };
-    gpu::cmd_texture_barrier(&commands, &barrier)!!;
-    bind_test_compute_pipeline(&commands, pipeline);
-
-    assert(@catch(gpu::destroy_texture(&device, texture))
-        == gpu::RESOURCE_IN_USE, "recorded texture references reject destroy");
-    assert(@catch(gpu::destroy_pipeline(&device, pipeline))
-        == gpu::RESOURCE_IN_USE, "recorded pipeline references reject destroy");
-
-    gpu::cmd_dispatch(&commands, (gpu::GpuAddress)1, { 1, 1, 1 })!!;
-
-    gpu::discard_commands(&commands)!!;
-    gpu::destroy_texture(&device, texture)!!;
-    texture = {};
-    gpu::destroy_pipeline(&device, pipeline)!!;
-    pipeline = {};
-}
-
-fn void failed_command_validation_retains_no_resource_reference() @test {
+fn void failed_texture_validation_preserves_resource_teardown() @test {
     gpu::Device device = make_lifetime_test_device();
 
     defer destroy_test_device(&device)!!;
@@ -530,7 +297,7 @@ fn void failed_command_validation_retains_no_resource_reference() @test {
     gpu::discard_commands(&commands)!!;
 }
 
-fn void incomplete_reference_drain_is_deterministic() @test {
+fn void incomplete_command_drain_is_deterministic() @test {
     vk::VkDeviceState state = {
         .validation_policy = {
             .contract = gpu::ContractValidation.FULL,
@@ -582,7 +349,7 @@ fn void incomplete_reference_drain_is_deterministic() @test {
         &lifetime_counter_query,
     )!!;
     assert(completions[0].submitted_count == 1,
-        "an incomplete counter preserves the submitted reference batch");
+        "an incomplete counter preserves the submitted command batch");
 
     lifetime_counter_value = 7;
     vk::drain_completed_submitted_commands_with_query(
@@ -590,7 +357,7 @@ fn void incomplete_reference_drain_is_deterministic() @test {
         &lifetime_counter_query,
     )!!;
     assert(completions[0].submitted_count == 0,
-        "the reached counter releases the submitted reference batch");
+        "the reached counter releases the submitted command batch");
 }
 
 fn void sparse_only_completion_drain_advances_the_retired_prefix() @test {
@@ -752,40 +519,20 @@ fn void completed_submission_release_boundary_is_exact() @test {
         .id     = 0,
         .roles  = { .graphics },
     };
-    Atomic{uint} first_tracked_command_reference;
-    Atomic{uint} second_tracked_command_reference;
-    Atomic{uint} third_tracked_command_reference;
-    first_tracked_command_reference.store(1, AtomicOrdering.RELAXED);
-    second_tracked_command_reference.store(1, AtomicOrdering.RELAXED);
-    third_tracked_command_reference.store(1, AtomicOrdering.RELAXED);
-    vk::CommandResourceReference[1] first_references = {{
-        .retained_counter = &first_tracked_command_reference,
-    }};
-    vk::CommandResourceReference[1] second_references = {{
-        .retained_counter = &second_tracked_command_reference,
-    }};
-    vk::CommandResourceReference[1] third_references = {{
-        .retained_counter = &third_tracked_command_reference,
-    }};
+
     uint[1] first_preprocess = { 0 };
     uint[1] second_preprocess = { 0 };
     uint[1] third_preprocess = { 1 };
     vk::CommandScratch[1] first_scratch = {{
-        .references                   = first_references[..],
-        .reference_count              = 1,
         .generated_preprocess_indices = first_preprocess[..],
         .generated_preprocess_count   = 1,
         .in_use                      = true,
     }};
     vk::CommandScratch[2] second_scratch = {{
-        .references                   = second_references[..],
-        .reference_count              = 1,
         .generated_preprocess_indices = second_preprocess[..],
         .generated_preprocess_count   = 1,
         .in_use                      = true,
     }, {
-        .references                   = third_references[..],
-        .reference_count              = 1,
         .generated_preprocess_indices = third_preprocess[..],
         .generated_preprocess_count   = 1,
         .in_use                      = true,
@@ -863,10 +610,7 @@ fn void completed_submission_release_boundary_is_exact() @test {
     completions[0].retirement_mutex.unlock();
     assert(completions[0].submitted_count == 2,
         "sequence N - 1 retires only its covered batch");
-    assert(first_tracked_command_reference.load(AtomicOrdering.RELAXED) == 0
-        && second_tracked_command_reference.load(AtomicOrdering.RELAXED) == 1
-        && third_tracked_command_reference.load(AtomicOrdering.RELAXED) == 1,
-        "sequence N - 1 releases only its stable retained counter pointer");
+
     assert(!reserved_preprocess[0].reservation_in_use
         && reserved_preprocess[1].reservation_in_use
         && reserved_preprocess[2].reservation_in_use,
@@ -889,9 +633,7 @@ fn void completed_submission_release_boundary_is_exact() @test {
     completions[0].retirement_mutex.unlock();
     assert(completions[0].submitted_count == 0,
         "sequence N retires every batch covered by that sequence");
-    assert(second_tracked_command_reference.load(AtomicOrdering.RELAXED) == 0
-        && third_tracked_command_reference.load(AtomicOrdering.RELAXED) == 0,
-        "sequence N releases every stable retained counter pointer");
+
     assert(!reserved_preprocess[1].reservation_in_use
         && !reserved_preprocess[2].reservation_in_use,
         "sequence N recycles every covered preprocess reservation");
@@ -937,28 +679,15 @@ fn void device_loss_teardown_returns_each_in_flight_allocator_unit() @test {
         .id     = 0,
         .roles  = { .graphics },
     };
-    Atomic{uint} first_reference;
-    Atomic{uint} second_reference;
-    first_reference.store(1, AtomicOrdering.RELAXED);
-    second_reference.store(1, AtomicOrdering.RELAXED);
-    vk::CommandResourceReference[1] first_references = {{
-        .retained_counter = &first_reference,
-    }};
-    vk::CommandResourceReference[1] second_references = {{
-        .retained_counter = &second_reference,
-    }};
+
     uint[1] first_preprocess = { 0 };
     uint[1] second_preprocess = { 0 };
     vk::CommandScratch[1] first_scratch = {{
-        .references                   = first_references[..],
-        .reference_count              = 1,
         .generated_preprocess_indices = first_preprocess[..],
         .generated_preprocess_count   = 1,
         .in_use                       = true,
     }};
     vk::CommandScratch[1] second_scratch = {{
-        .references                   = second_references[..],
-        .reference_count              = 1,
         .generated_preprocess_indices = second_preprocess[..],
         .generated_preprocess_count   = 1,
         .in_use                       = true,
@@ -1025,9 +754,7 @@ fn void device_loss_teardown_returns_each_in_flight_allocator_unit() @test {
             && completions[0].submitted_head == null
             && completions[0].submitted_tail == null,
         "device-loss teardown consumes every submitted batch");
-    assert(first_reference.load(AtomicOrdering.RELAXED) == 0
-            && second_reference.load(AtomicOrdering.RELAXED) == 0,
-        "device-loss teardown releases references from every allocator");
+
     assert(!first_reservations[0].reservation_in_use
             && !second_reservations[0].reservation_in_use
             && first_slot.generated_reservations_in_use == 0

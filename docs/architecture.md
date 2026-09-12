@@ -12,7 +12,7 @@ application controls those operations explicitly.
 
 Normal command recording uses preallocated scratch and inserts no implicit
 GPU work or waits. Validation and completion retirement perform bookkeeping
-whose cost depends on the references and submissions processed. Recycling
+whose cost depends on the commands and submissions processed. Recycling
 completed command storage does not transfer ownership of application resources.
 
 ## Modules
@@ -78,17 +78,19 @@ cleanup with its own failure contract.
 
 - **Creation is transactional.** A create call returns a complete object or a
   fault with nothing left behind.
-- **Destruction never waits.** A destroy call returns `RESOURCE_IN_USE` while
-  a child is live and `DEVICE_BUSY` while work is incomplete. The handle stays
-  valid on either fault. Wait on a completion point, destroy the child, retry.
+- **Destruction never waits.** The application establishes completion before
+  destroying resources. Actual child ownership and backend operations can
+  return `RESOURCE_IN_USE` or `DEVICE_BUSY`, preserving the handle for retry.
 - **Completion is the only fence.** `submit` returns a `CompletionPoint`.
   Reusing memory, reusing a command allocator, destroying a resource, and
   freeing an allocation all wait on the point that covers the last use.
-- **Validation is optional.** `ContractValidation.FULL` adds ownership,
-  generation, state, and lifetime checks, and retains resources named by a
-  command list until it retires. `TRUSTED` checks only what is needed for host
-  safety. Neither policy tracks memory reached through a `GpuAddress` or a
-  shader index.
+- **Application resources remain application-owned.** Recording, ending, or
+  submitting commands does not retain application resources. Keep them alive
+  and unmodified as required until their last GPU use completes. Destroy and
+  update calls do not infer shader use or wait for completion.
+- **Validation is optional.** `ContractValidation.FULL` adds detailed command
+  semantic checks. `TRUSTED` checks what is needed for host safety. Neither
+  policy infers shader use through a `GpuAddress` or descriptor index.
 
 ## Runtime, adapters, devices
 
@@ -332,10 +334,10 @@ switches. `RuntimeDesc.debug_callback` receives structured `DebugMessage`
 values synchronously, possibly from any thread. The callback must not call
 back into the library.
 
-Library scratch for normal recording is preallocated per allocator. FULL
-validation adds a linear duplicate scan per retained reference. Completion
-observation and lifetime operations can retire completed submissions, release
-retained references, and recycle command units; this work is workload-dependent.
+Library scratch for normal recording is preallocated per allocator. Completion
+observation can retire completed submissions, recycle command units and generated
+work storage, and finish backend-owned texture initialization and sparse binds.
+This work depends on the submitted workload.
 
 Non-wait operations insert no implicit GPU wait. Explicit completion waits
 still block as requested. These guarantees imply neither fixed driver latency

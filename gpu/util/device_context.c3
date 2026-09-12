@@ -68,7 +68,6 @@ fn DeviceContextDesc default_device_context_desc() {
         .command_queue = gpu::QueueKind.GRAPHICS,
         .command_allocator = {
             .command_buffer_capacity = gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY,
-            .max_resource_references_per_list = gpu::DEFAULT_COMMAND_REFERENCES_PER_LIST,
         },
         .swapchain = {
             .preferred_format = gpu::Format.BGRA8_UNORM,

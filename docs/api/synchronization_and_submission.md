@@ -116,8 +116,8 @@ never consume it. It is the only fence in the API: memory reuse, allocator
 reuse, resource destruction, and presentation all wait on it. It does not
 keep anything alive.
 
-Both calls are thread-safe and may retire command units and retained
-references as a side effect.
+Both calls are thread-safe and may retire command units and backend-owned
+initialization or sparse-bind operations as a side effect.
 
 ## Submission
 
@@ -142,6 +142,9 @@ ray stages.
 
 On success every list token and the readiness are consumed. On any
 failure the lists stay executable and readiness stays unconsumed.
+Submitting commands and holding a completion point do not retain application
+resources; keep them alive and unmodified as required until their last GPU use
+completes. Destroy and update calls do not infer shader use or wait for completion.
 Submission is externally synchronized with other submit, present, and
 sparse-bind calls on the same native queue, including aliased semantic roles.
 See [Threading](../architecture.md#threading). This host synchronization does
