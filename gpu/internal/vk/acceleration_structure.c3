@@ -720,7 +720,6 @@ prepare_acceleration_structure_build_mode(
                     || input.triangles.primitive_count
                         > schema.max_primitive_count
                     || input.triangles.vertex_stride < 12
-                    || input.triangles.vertex_stride % 4 != 0
                     || !gpu_span_is_zero(input.triangles.transform)
                         != schema.has_transform
                     || (!indirect && update
@@ -814,7 +813,6 @@ prepare_acceleration_structure_build_mode(
                     || input.aabbs.primitive_count
                         > schema.max_primitive_count
                     || input.aabbs.stride < 24
-                    || input.aabbs.stride % 8 != 0
                     || (!indirect && update
                         && input.aabbs.primitive_count
                             != schema.built_primitive_count)) {

@@ -123,7 +123,7 @@ c3c test vk_sparse_bind --path test --test-show-output
 | `vk_unified_layouts` | the `vk_core` sources built with `UNIFIED_LAYOUTS`: one image layout per texture, barriers and render passes through the unified path |
 | `vk_sparse_texture` | sparse descriptor validation, flags, requirement translation, transaction rollback, cached queries, capability-gated image lifecycle |
 | `vk_sparse_bind` | tile and tail geometry, unbind, allocation compatibility and overlap, allocation-failure rollback, timeline chaining, result mapping, retention and retirement, cross-thread lock boundaries, capability-gated bind/use/unbind with readback |
-| `vk_core` | device selection, allocations, spans, textures, views, samplers, reflection and root ABI, pipelines and cache, command lifecycle, graphics/compute/transfer output, depth, threading, queues, submission and completion, timestamps, diagnostics, rollback, validation policy |
+| `vk_core` | device selection, allocations, spans, textures, views, samplers, reflection and root ABI, pipelines and cache, command lifecycle, graphics/compute/transfer output, depth, threading, queues, submission and completion, timestamps, diagnostics, rollback |
 | `vk_wsi` | swapchain configuration, acquire, present, resize, ownership, result mapping, WSI diagnostics; no native window needed |
 | `vk_optional_generated_work` | indirect and generated dispatch and draw, reservation and exhaustion, caller-owned spans, output when the driver supports it |
 | `vk_ray_tracing` | on a capable device: BLAS and TLAS builds, clone, SBT packing, direct and indirect trace, dynamic stack size, indirect build ranges. On an adapter without ray-tracing pipelines it fails with `UNSUPPORTED_FEATURE`; that is not a skip. |
@@ -135,8 +135,8 @@ those seams are not public interfaces.
 Timestamp tests keep two contracts distinct: `cmd_resolve_timestamps` records
 a device-side availability wait; `read_timestamps` requests no wait and
 returns `DEVICE_BUSY` with unspecified output when values are not ready.
-Neither validation policy tracks per-slot reset or write history, so tests do
-not assert diagnostics for it.
+The library does not track per-slot reset or write history, so tests do not
+assert diagnostics for it.
 
 ## Benchmarks
 

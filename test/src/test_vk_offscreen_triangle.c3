@@ -691,10 +691,10 @@ fn void dynamic_viewport_scissor_pixels() @test {
     char* reset_pixels = viewport_pixels + RT_BYTES * 3;
     assert(reset_pixels[right_green] != 0,
         "an explicit complete replacement restores full raster coverage");
-    char* atomic_pixels = viewport_pixels + RT_BYTES * 4;
-    assert(atomic_pixels[left_green] != 0
-        && atomic_pixels[right_green] != 0,
-        "late color failure emits no viewport, scissor, raster, or depth state");
+    char* repeated_pixels = viewport_pixels + RT_BYTES * 4;
+    assert(repeated_pixels[left_green] != 0
+        && repeated_pixels[right_green] != 0,
+        "repeating the complete graphics state preserves full raster coverage");
 }
 
 fn void complete_color_state_output_matches_expected() @test {

@@ -5,18 +5,18 @@ import gpu @public;
 import gpu::internal::vk @public;
 import std::atomic::types;
 
-const char[*] POLICY_MATRIX_COMP_SPIRV =
+const char[*] COMMAND_FAMILY_COMP_SPIRV =
     $embed("shaders/root_pointer.comp.spv");
-const char[*] POLICY_MATRIX_VERT_SPIRV =
+const char[*] COMMAND_FAMILY_VERT_SPIRV =
     $embed("shaders/offscreen.vert.spv");
-const char[*] POLICY_MATRIX_FRAG_SPIRV =
+const char[*] COMMAND_FAMILY_FRAG_SPIRV =
     $embed("shaders/offscreen.frag.spv");
 
 fn gpu::PipelineHandle create_command_family_compute_pipeline(
     gpu::Device* device,
 ) {
     gpu::ShaderDesc shader_desc = {
-        .spirv       = POLICY_MATRIX_COMP_SPIRV[..],
+        .spirv       = COMMAND_FAMILY_COMP_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ComputePipelineDesc pipeline_desc = {
@@ -29,11 +29,11 @@ fn gpu::PipelineHandle create_command_family_graphics_pipeline(
     gpu::Device* device,
 ) {
     gpu::ShaderDesc vertex_desc = {
-        .spirv       = POLICY_MATRIX_VERT_SPIRV[..],
+        .spirv       = COMMAND_FAMILY_VERT_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ShaderDesc fragment_desc = {
-        .spirv       = POLICY_MATRIX_FRAG_SPIRV[..],
+        .spirv       = COMMAND_FAMILY_FRAG_SPIRV[..],
         .entry_point = "main",
     };
     gpu::ShaderDesc vertex = vertex_desc;

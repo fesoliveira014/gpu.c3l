@@ -53,7 +53,7 @@ Public resources are named by handles: small copyable values such as
 `TextureHandle`, `PipelineHandle`, and `SwapchainHandle`. A handle carries
 the identity of its device and a generation counter. Copying a handle copies
 a name, not ownership; destroying the resource makes every copy stale, and a
-stale handle is rejected when validation is on.
+stale handle is rejected by library handle resolution.
 
 Objects form a tree. A `Runtime` owns adapters and surfaces; a `Device` owns
 allocations, textures, pipelines, command allocators, and swapchains; a
@@ -95,8 +95,8 @@ fn void? handles_and_ownership() {
 ```
 
 `is_valid` checks shape only: a nonzero handle is valid in shape even after
-the resource is destroyed. Whether it still names a live resource is what
-validation checks at each use.
+the resource is destroyed. Library handle resolution checks that it still
+names a live resource whenever an operation resolves it.
 
 Three public values are not handles: `GpuAddress`, `TextureIndex`, and
 `SamplerIndex`. They are plain numbers that shaders read. The
@@ -167,8 +167,8 @@ fn void? memory_spans_and_mapping(gpu::Device* device) {
 ```
 
 `access` lists the queue roles that will touch the memory. The library uses
-it to place the allocation where every listed queue can reach it; a queue you
-did not list is rejected at use.
+it to place the allocation where every listed queue can reach it. Applications
+must restrict GPU use to the listed roles.
 
 Contract: [Memory](architecture.md#memory).
 
@@ -399,10 +399,11 @@ fn void? completion_points(
 ```
 
 `poll_completion` never blocks; `wait_completion` blocks until the point
-completes or a timeout passes. A destroy or free that runs too early does no
-harm: it returns `DEVICE_BUSY` while the work is incomplete, or
-`RESOURCE_IN_USE` while a child object is still live, and the object stays
-intact for a retry after waiting or after destroying the child.
+completes or a timeout passes. Wait for the last GPU use before destroying a
+resource or freeing its memory: those calls do not infer application GPU use
+or wait. Live library dependents can still cause `RESOURCE_IN_USE`, and
+incomplete library-owned work can cause `DEVICE_BUSY`; the object stays
+intact for a retry.
 
 Points are values. Copy them, store one per frame, pass them across threads.
 A point stays meaningful until its device is destroyed. `CompletionPoint`'s
@@ -471,7 +472,7 @@ fn void? texture_state(gpu::CommandList* commands, gpu::TextureHandle texture) {
 ```
 
 The library does not remember a texture's layout. If `before` is wrong, the
-transition is wrong, and validation reports it when it can observe it. The
+transition is wrong. Explicit Vulkan validation can help diagnose it. The
 first transition of a new texture starts from the zero state, layout
 `UNDEFINED`, whose contents are unspecified.
 

@@ -1131,7 +1131,7 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
         &build,
         false,
     )) == gpu::INVALID_ARGUMENT,
-        "AABB dynamic input requires a 24-byte aligned record stride");
+        "AABB dynamic input requires a record stride of at least 24 bytes");
 }
 
 fn void acceleration_structure_dynamic_tlas_uses_exact_instance_abi() @test {

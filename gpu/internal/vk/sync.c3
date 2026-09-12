@@ -25,7 +25,6 @@ struct TextureStateScope {
 }
 
 struct LoweredTextureBarrier {
-    TextureSlot*            slot;
     vk::ImageMemoryBarrier2 native;
 }
 
@@ -312,7 +311,7 @@ fn LoweredTextureBarrier? lower_texture_barrier(
         .set_dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
         .set_image(slot.image)
         .set_subresource_range(range);
-    return { .slot = slot, .native = native };
+    return { .native = native };
 }
 
 fn void emit_texture_barrier(
