@@ -198,8 +198,9 @@ gpu::TextureView[2] views;
 gpu::create_texture_views(&device, descs[..], views[..])!;
 ```
 
-Indices are independent values unless they come from a reservation. The
-texture must have `sampled` or `storage` usage. `DESCRIPTOR_HEAP_FULL`
+General views receive independently allocated indices; reservations provide
+contiguous indices. Both are non-owning shader values. The texture must have
+`sampled` or `storage` usage. `DESCRIPTOR_HEAP_FULL`
 means the runtime's `texture_heap_capacity` is exhausted.
 
 A reservation is `count` contiguous ascending slots that `create_texture_view`
@@ -230,6 +231,11 @@ before the call are stale. Releasing the lowest reservation returns it and any r
 reservations above it to the general region. A slot whose generation is
 exhausted stays reserved and out of both regions. The hazard rule is the same
 as for creation and destruction: no executing command may read the slot.
+
+Keeping a reservation does not keep a destroyed view usable. A copied index
+does not retain its view or guarantee a fallback value after destruction.
+Publish a live view before accessing the slot again, and order descriptor
+updates, destruction, and reuse against all GPU accesses in the application.
 
 A view with `cube` set publishes six consecutive layers from `base_layer`
 as one sampled cube. The texture must be `cube_compatible` with `sampled`
