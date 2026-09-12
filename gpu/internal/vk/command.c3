@@ -1201,6 +1201,7 @@ fn void record_swapchain_transition(
     CommandRecord* record,
     gpu::TextureHandle texture,
     bool acquire,
+    BarrierEmitOps* ops,
 ) {
     TextureSlot*? slot = state.textures.get(texture);
     if (catch slot) return;
@@ -1217,7 +1218,9 @@ fn void record_swapchain_transition(
             .set_dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
             .set_image(slot.image)
             .set_subresource_range(full_image_range(slot.format));
-    emit_image_barriers(record, (&barrier)[:1]);
+    vk::DependencyInfo dependency = vk::dependency_info()
+        .set_image_memory_barriers((&barrier)[:1]);
+    ops.emit(ops.user_data, record.command_buffer, &dependency);
 }
 
 fn vk::ImageMemoryBarrier2 texture_init_barrier(
@@ -1774,11 +1777,7 @@ fn ResolvedSpan? lower_indirect_span(
     usz arg_size,
     uint count,
 ) {
-    usz required = gpu::internal::indirect_argument_bytes(
-        argument_size: arg_size,
-        count:         count,
-        max_count:     uint::max,
-    )!;
+    usz required = gpu::internal::indirect_argument_bytes(arg_size, count)!;
     ResolvedSpan resolved = resolve_span_slot(state, span, required)!;
     return resolved;
 }
@@ -2068,11 +2067,7 @@ fn ResolvedSpan? lower_generated_work_records(
     usz record_size,
     uint max_count,
 ) {
-    usz required = gpu::internal::generated_work_bytes(
-        record_size,
-        max_count,
-        uint::max,
-    )!;
+    usz required = gpu::internal::indirect_argument_bytes(record_size, max_count)!;
     ResolvedSpan resolved = resolve_span_slot(state, records, required)!;
     return resolved;
 }

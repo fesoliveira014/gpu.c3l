@@ -670,9 +670,8 @@ fn PreparedIndexedDraw? lower_indexed_draw(
     }
     VkDeviceState* state = commands.device_state;
     usz required = gpu::internal::indirect_argument_bytes(
-        argument_size: index_element_bytes(index_type),
-        count:         index_count,
-        max_count:     uint::max,
+        index_element_bytes(index_type),
+        index_count,
     )!;
     return {
         .pipeline      = borrow_bound_pipeline(record)!,

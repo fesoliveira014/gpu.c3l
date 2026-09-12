@@ -72,7 +72,7 @@
         "../src/test_device_fixture.c3",
         "../src/test_device_registry.c3",
         "../src/test_diagnostics.c3",
-        "../src/test_workload_limits.c3"
+        "../src/test_argument_bytes.c3"
       ]
     },
     "shader_abi": {

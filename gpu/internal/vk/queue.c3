@@ -32,6 +32,7 @@ enum SubmissionCheckpoint : uint @feat(TESTING) {
 struct QueueSubmitOps @private {
     QueueSubmit2Fn              submit;
     SemaphoreCounterQueryFn     counter_query;
+    BarrierEmitOps              swapchain_barrier @feat(TESTING);
     void*                       checkpoint_user_data @feat(TESTING);
     SubmissionCheckpointFn      checkpoint @feat(TESTING);
 }
@@ -1336,7 +1337,12 @@ fn CommandRecord*[]? record_unified_batch(
     CommandRecord*[] records,
     SwapchainSlot* swapchain,
     gpu::TextureHandle[] pending,
+    QueueSubmitOps* ops,
 ) @private {
+    BarrierEmitOps barrier_ops = barrier_emit_ops_real();
+    $if env::TESTING:
+        if (ops.swapchain_barrier.emit != null) barrier_ops = ops.swapchain_barrier;
+    $endif
     QueueSubmitScratch* scratch = completion.submit_scratch;
     CommandRecord*[2] created;
     usz created_count = 0;
@@ -1357,6 +1363,7 @@ fn CommandRecord*[]? record_unified_batch(
                 record:  prologue,
                 texture: swapchain.textures[swapchain.pending_image],
                 acquire: true,
+                ops:     &barrier_ops,
             );
         }
         end_internal_commands(state, prologue)!;
@@ -1371,6 +1378,7 @@ fn CommandRecord*[]? record_unified_batch(
             record:  epilogue,
             texture: swapchain.textures[swapchain.pending_image],
             acquire: false,
+            ops:     &barrier_ops,
         );
         end_internal_commands(state, epilogue)!;
         scratch.batch[count++] = epilogue;
@@ -1550,6 +1558,7 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
             records:    records,
             swapchain:  inputs.swapchain,
             pending:    pending,
+            ops:        ops,
         )!;
         claimed = records.len > 0;
     }

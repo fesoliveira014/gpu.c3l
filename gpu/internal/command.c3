@@ -2,30 +2,11 @@ module gpu::internal @private;
 
 import gpu;
 
-fn void? validate_dispatch_groups(Vec3u groups, Vec3u limit) @private {
-    if (groups.x > limit.x || groups.y > limit.y || groups.z > limit.z) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-}
-
-fn usz? indirect_argument_bytes(
-    usz argument_size,
-    uint count,
-    uint max_count,
-) @private {
-    if (count > max_count) return gpu::INVALID_ARGUMENT~;
+fn usz? indirect_argument_bytes(usz argument_size, uint count) @private {
     if (count == 0) return 0;
     usz size_count = (usz)count;
     if (argument_size > usz::max / size_count) return gpu::INVALID_ARGUMENT~;
     return argument_size * size_count;
-}
-
-fn usz? generated_work_bytes(
-    usz record_size,
-    uint count,
-    uint max_count,
-) @private {
-    return indirect_argument_bytes(record_size, count, max_count);
 }
 
 fn gpu::internal::vk::CommandRecord*? direct_command_record(
