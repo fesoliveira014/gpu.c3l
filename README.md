@@ -65,7 +65,7 @@ the `linux-x64` and `windows-x64` builds that match the pinned `vma` binding:
 
 ```sh
 git submodule add https://github.com/fesoliveira014/gpu.c3l lib/gpu.c3l
-git -C lib/gpu.c3l checkout v0.5.1
+git -C lib/gpu.c3l checkout v0.6.0
 git submodule update --init --recursive lib/gpu.c3l
 git config -f .gitmodules submodule.lib/gpu.c3l.shallow true
 python3 lib/gpu.c3l/scripts/fetch_vma_libs.py
