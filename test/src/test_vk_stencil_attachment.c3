@@ -558,7 +558,6 @@ fn void stencil_validation_faults_under(gpu::ContractValidation policy) {
 
 struct StencilDiagnosticCapture {
     uint performance;
-    uint public_contract;
     uint faults;
     bool field_matches;
 }
@@ -568,13 +567,11 @@ fn void capture_stencil_diagnostic(gpu::DebugMessage* message, void* user_data) 
     StencilDiagnosticCapture* capture = (StencilDiagnosticCapture*)user_data;
     if (message.has_fault) capture.faults++;
     if (message.category.performance) capture.performance++;
-    if (message.category.public_contract) capture.public_contract++;
     capture.field_matches = message.rejected_field != null
-        && (message.rejected_field.str_view() == "GraphicsState.stencil.test_enable"
-            || message.rejected_field.str_view() == "DepthTargetDesc.stencil_load_op");
+        && message.rejected_field.str_view() == "GraphicsState.stencil.test_enable";
 }
 
-fn void stencil_full_diagnostics_report_without_faulting() @test {
+fn void stencil_without_aspect_reports_performance_diagnostic() @test {
     StencilDiagnosticCapture capture;
     gpu::RuntimeDesc device_desc = {
         .contract_validation      = gpu::ContractValidation.FULL,
@@ -585,17 +582,9 @@ fn void stencil_full_diagnostics_report_without_faulting() @test {
     };
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::Format format = gpu::get_device_caps(&device)!!.depth_stencil_format;
     DepthCtx ctx = make_depth_ctx();
     gpu::PipelineHandle no_stencil = make_stencil_pipeline(&device, &ctx, gpu::Format.D32_FLOAT);
     defer gpu::destroy_pipeline(&device, no_stencil)!!;
-    gpu::PipelineHandle with_stencil = make_stencil_pipeline(
-        device:     &device,
-        ctx:        &ctx,
-        format:     format,
-        with_color: false,
-    );
-    defer gpu::destroy_pipeline(&device, with_stencil)!!;
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -607,18 +596,10 @@ fn void stencil_full_diagnostics_report_without_faulting() @test {
     defer gpu::destroy_texture(&device, target)!!;
     gpu::AttachmentViewHandle target_view = create_test_attachment_view(&device, target)!!;
     defer destroy_test_attachment_view(&device, &target_view)!!;
-    gpu::TextureHandle ds = make_stencil_texture(&device, format);
-    defer gpu::destroy_texture(&device, ds)!!;
-    gpu::AttachmentViewHandle ds_view = create_test_attachment_view(&device, ds)!!;
-    defer destroy_test_attachment_view(&device, &ds_view)!!;
-    gpu::AttachmentViewHandle ds_alias = create_test_attachment_view(&device, ds)!!;
-    defer destroy_test_attachment_view(&device, &ds_alias)!!;
-
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_color_to_attach(&cmd, target);
     record_depth_to_attach(&cmd, depth);
-    record_depth_to_attach(&cmd, ds);
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view }};
     gpu::DepthTargetDesc depth_target = { .view = depth_view };
     gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
@@ -634,50 +615,6 @@ fn void stencil_full_diagnostics_report_without_faulting() @test {
     assert(capture.performance == 1 && capture.faults == 0 && capture.field_matches,
         "an enabled stencil test without a stencil aspect reports one performance diagnostic");
     gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::CommandList passes = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&passes)!!;
-
-    gpu::DepthTargetDesc discard = {
-        .view = ds_view,
-        .stencil_load_op = gpu::LoadOp.CLEAR, .stencil_store_op = gpu::StoreOp.DONT_CARE,
-    };
-    gpu::RenderPassDesc discard_pass = { .depth = &discard, .width = DP_RT, .height = DP_RT };
-    gpu::cmd_begin_render_pass(&passes, &discard_pass)!!;
-    gpu::cmd_end_render_pass(&passes)!!;
-    assert(capture.public_contract == 0, "a DONT_CARE store reports nothing by itself");
-    gpu::DepthTargetDesc load = {
-        .view = ds_view,
-        .stencil_load_op = gpu::LoadOp.LOAD, .stencil_store_op = gpu::StoreOp.STORE,
-    };
-    gpu::RenderPassDesc load_pass = { .depth = &load, .width = DP_RT, .height = DP_RT };
-    gpu::cmd_begin_render_pass(&passes, &load_pass)!!;
-    gpu::cmd_end_render_pass(&passes)!!;
-    assert(capture.public_contract == 1 && capture.faults == 0 && capture.field_matches,
-        "a stencil LOAD after a DONT_CARE store reports one public-contract diagnostic");
-    gpu::cmd_begin_render_pass(&passes, &load_pass)!!;
-    gpu::cmd_end_render_pass(&passes)!!;
-    assert(capture.public_contract == 1, "a LOAD after a STORE reports nothing");
-    gpu::cmd_begin_render_pass(&passes, &discard_pass)!!;
-    gpu::cmd_end_render_pass(&passes)!!;
-    gpu::DepthTargetDesc alias_load = {
-        .view = ds_alias,
-        .stencil_load_op = gpu::LoadOp.LOAD, .stencil_store_op = gpu::StoreOp.STORE,
-    };
-    gpu::RenderPassDesc alias_pass = { .depth = &alias_load, .width = DP_RT, .height = DP_RT };
-    gpu::cmd_begin_render_pass(&passes, &alias_pass)!!;
-    gpu::cmd_end_render_pass(&passes)!!;
-    assert(capture.public_contract == 2 && capture.field_matches,
-        "a LOAD through another view of the discarded subresource reports the diagnostic");
-    gpu::CommandList other = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&other)!!;
-    gpu::RenderPassDesc oversized = { .depth = &discard, .width = DP_RT * 2, .height = DP_RT * 2 };
-    assert(@catch(gpu::cmd_begin_render_pass(&other, &oversized)) == gpu::INVALID_ARGUMENT,
-        "a render area past the attachment is rejected");
-    assert(vk::resolve_command(&other)!!.scratch.stencil_discard_count == 0,
-        "a rejected begin records no stencil history");
-    gpu::cmd_begin_render_pass(&other, &load_pass)!!;
-    gpu::cmd_end_render_pass(&other)!!;
-    assert(capture.public_contract == 2, "a discard in one list does not mark a LOAD in another");
 }
 
 fn void stencil_aspect_fetches_in_fragment_stage() @test {

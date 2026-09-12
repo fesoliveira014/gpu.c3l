@@ -129,20 +129,9 @@ struct CommandRecordingOps @private {
     EndCommandBufferFn   end;
 }
 
-
-<* One stencil subresource whose last recorded store in this list was
-   DONT_CARE. *>
-struct StencilDiscardKey {
-    gpu::TextureHandle texture;
-    uint               mip_level;
-    uint               array_layer;
-}
-
 struct CommandScratch {
     CommandResourceReference[] references;
     uint                       reference_count;
-    StencilDiscardKey[] stencil_discards;
-    uint                stencil_discard_count;
     uint[]                     generated_preprocess_indices;
     uint                       generated_preprocess_count;
     vk::AccelerationStructureGeometryKHR[]
@@ -160,7 +149,6 @@ struct CommandAllocatorSlot {
     vk::CommandBuffer[]          command_buffers;
     CommandScratch[]             scratch;
     CommandResourceReference[]   reference_storage;
-    StencilDiscardKey[]          stencil_discard_storage;
     uint[]                       preprocess_index_storage;
     vk::AccelerationStructureGeometryKHR[]
         acceleration_structure_geometry_storage;
@@ -319,9 +307,6 @@ fn void destroy_command_allocator_slot_with_ops(
     if (slot.reference_storage.ptr != null) {
         alloc::free(state.host_allocator, slot.reference_storage.ptr);
     }
-    if (slot.stencil_discard_storage.ptr != null) {
-        alloc::free(state.host_allocator, slot.stencil_discard_storage.ptr);
-    }
     if (slot.preprocess_index_storage.ptr != null) {
         alloc::free(state.host_allocator, slot.preprocess_index_storage.ptr);
     }
@@ -407,13 +392,6 @@ fn void? initialize_command_allocator_slot_with_ops(
             return gpu::OUT_OF_HOST_MEMORY~;
         }
         slot.reference_storage = reference_storage;
-        StencilDiscardKey[]? stencil_storage = alloc::new_array_try(
-            state.host_allocator,
-            StencilDiscardKey,
-            (usz)capacity * (usz)reference_capacity,
-        );
-        if (catch err = stencil_storage) return gpu::OUT_OF_HOST_MEMORY~;
-        slot.stencil_discard_storage = stencil_storage;
     }
     uint acceleration_structure_geometry_capacity =
         desc.max_acceleration_structure_geometries_per_build;
@@ -449,9 +427,6 @@ fn void? initialize_command_allocator_slot_with_ops(
         if (reference_capacity > 0) {
             usz start = (usz)i * (usz)reference_capacity;
             slot.scratch[i].references = slot.reference_storage[
-                start:reference_capacity
-            ];
-            slot.scratch[i].stencil_discards = slot.stencil_discard_storage[
                 start:reference_capacity
             ];
         }
@@ -953,7 +928,6 @@ fn void return_allocator_buffer_locked(
 ) {
     CommandScratch* scratch = &slot.scratch[buffer_index];
     scratch.reference_count = 0;
-    scratch.stencil_discard_count = 0;
     scratch.generated_preprocess_count = 0;
     scratch.acceleration_structure_geometry_count = 0;
     scratch.in_use = false;
@@ -1060,7 +1034,6 @@ fn CommandRecord*? begin_commands_locked(
     CommandScratch* scratch = &slot.scratch[buffer_index];
     scratch.in_use = true;
     scratch.reference_count = 0;
-    scratch.stencil_discard_count = 0;
     scratch.generated_preprocess_count = 0;
     scratch.acceleration_structure_geometry_count = 0;
     slot.live_recordings++;
