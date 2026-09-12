@@ -453,9 +453,8 @@ fn void timestamp_full_write_rejects_stage_absent_from_recording_queue() @test {
         ops:    &ops,
     )) == gpu::INVALID_ARGUMENT,
         "a stage the recording queue family cannot execute is rejected");
-    assert(probe.write_calls == 0
-        ,
-        "the rejected stage reaches no native write and tracks nothing");
+    assert(probe.write_calls == 0,
+        "the rejected stage reaches no native write");
 
     full_write_timestamp_with(
         record: fixture.record,
@@ -746,11 +745,6 @@ fn void timestamp_trusted_mode_emits_commands() @test {
     defer destroy_timestamp_command_fixture(&fixture)!!;
     TimestampCommandProbe probe;
     TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
-    TimestampPoolSlot* pool_slot =
-        fixture.state.timestamp_pools.get(fixture.pool)!!;
-    AllocationSlot* allocation_slot =
-        fixture.state.allocations.get(fixture.allocation)!!;
-
     trusted_reset_timestamps_with(
         record: fixture.record,
         pool:   fixture.pool,

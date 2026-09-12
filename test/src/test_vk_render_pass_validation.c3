@@ -1490,11 +1490,6 @@ fn void state_failure_after_begin_is_retryable_and_discardable() @test {
     graphics.color.targets = color_targets[..];
     vk::CommandRecord* record = vk::resolve_command(&fixture.commands)!!;
 
-    vk::AttachmentViewSlot* view = render_validation_view_slot(
-        &fixture.device,
-        fixture.view,
-    );
-
     gpu::cmd_begin_render_pass(&fixture.commands, &pass)!!;
     gpu::Format[1] color_formats = {
         gpu::Format.RGBA8_UNORM,

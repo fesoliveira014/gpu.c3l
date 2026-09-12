@@ -623,14 +623,6 @@ fn void prove_submission_publication_gap(
         gpu::internal::completion_point_sequence(prior) + 1,
     )!!;
 
-    OwnedSpan retained = allocate_owned_span(
-        device:       &device,
-        size:         256,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics },
-        debug_name:   "publication_retained_resource",
-    )!!;
-
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
     uint allocator_buffer = record.allocator_buffer;
@@ -742,8 +734,6 @@ fn void prove_submission_publication_gap(
         scratch_in_use: false,
         message:        "retirement returns the allocator buffer and scratch",
     );
-    gpu::free_allocation(&device, &retained.allocation)!!;
-    retained.span = {};
 }
 
 fn void native_acceptance_remains_capped_before_batch_publication() @test {

@@ -699,8 +699,6 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
         &desc,
         &ops,
     )!!;
-    vk::AllocationSlot* slot = fixture.state.allocations.get(allocation)!!;
-
     gpu::Queue queue = {
         .device = { .generation = 1 },
         .id     = 0,

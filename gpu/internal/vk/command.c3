@@ -103,8 +103,6 @@ struct PreparedGeneratedDispatch {
     BoundPipeline*                 pipeline;
     ResolvedSpan                   records;
     ResolvedSpan                   count;
-    gpu::GpuSpan                   records_span;
-    gpu::GpuSpan                   count_span;
     vk::IndirectCommandsLayoutEXT layout;
     uint                           max_count;
 }
@@ -2816,8 +2814,6 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch_inputs(
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedDispatch dispatch = {
         .pipeline     = borrow_bound_pipeline(record)!,
-        .records_span = records,
-        .count_span   = count_span,
         .max_count    = max_dispatch_count,
     };
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;
@@ -2896,8 +2892,6 @@ fn PreparedGeneratedDispatch? full_prepare_generated_dispatch(
             expected_kind: PipelineKind.COMPUTE,
             operation:     "cmd_dispatch_generated",
         )!,
-        .records_span = records,
-        .count_span   = count_span,
         .max_count    = max_dispatch_count,
     };
     if (!state.generated_work.enabled) return gpu::UNSUPPORTED_FEATURE~;

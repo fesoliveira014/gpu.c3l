@@ -1453,9 +1453,6 @@ fn void texture_barrier_invalid_state_prevents_emission() @test {
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::TextureSlot* slot = state.textures.get(texture)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands)!!;
 
     TextureBarrierEmitCapture capture;

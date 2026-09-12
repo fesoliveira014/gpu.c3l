@@ -2781,8 +2781,6 @@ fn void render_pass_attachment_extents_validate_before_recording() @test {
         "one mixed-size attachment that cannot cover the pass faults INVALID_ARGUMENT");
     assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "mixed-size rejection records no pass");
 
-    vk::CommandRecord* record = vk::resolve_command(&cmd)!!;
-
     gpu::ColorTargetDesc[2] invalid_later = {
         { .view = large_mip_two },
         { .view = stale_view },

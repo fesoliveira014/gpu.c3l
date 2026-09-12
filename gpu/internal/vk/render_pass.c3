@@ -9,11 +9,8 @@ import std::atomic;
 struct PreparedRenderPass {
     AttachmentViewSlot*[gpu::MAX_COLOR_ATTACHMENTS] color_slots;
     AttachmentViewSlot*[gpu::MAX_COLOR_ATTACHMENTS] resolve_slots;
-    gpu::AttachmentViewHandle[gpu::MAX_COLOR_ATTACHMENTS] color_handles;
-    gpu::AttachmentViewHandle[gpu::MAX_COLOR_ATTACHMENTS] resolve_handles;
     vk::RenderingAttachmentInfo[gpu::MAX_COLOR_ATTACHMENTS] attachments;
     AttachmentViewSlot*       depth_view;
-    gpu::AttachmentViewHandle depth_handle;
     vk::RenderingAttachmentInfo depth_attachment;
     vk::RenderingAttachmentInfo stencil_attachment;
     RenderCompatibility       compatibility;
@@ -44,7 +41,6 @@ struct LoweredGraphicsState {
 struct PreparedIndexedDraw {
     BoundPipeline*  pipeline;
     ResolvedSpan    index;
-    gpu::GpuSpan    index_span;
     gpu::GpuAddress vertex_root;
     gpu::GpuAddress fragment_root;
     uint            index_count;
@@ -55,7 +51,6 @@ struct PreparedIndexedDraw {
 struct PreparedIndirectDraw {
     BoundPipeline*  pipeline;
     ResolvedSpan    args;
-    gpu::GpuSpan    args_span;
     gpu::GpuAddress vertex_root;
     gpu::GpuAddress fragment_root;
     uint            draw_count;
@@ -65,8 +60,6 @@ struct PreparedIndexedIndirectDraw {
     BoundPipeline*  pipeline;
     ResolvedSpan    args;
     ResolvedSpan    index;
-    gpu::GpuSpan    args_span;
-    gpu::GpuSpan    index_span;
     gpu::GpuAddress vertex_root;
     gpu::GpuAddress fragment_root;
     uint            draw_count;
@@ -78,9 +71,6 @@ struct PreparedIndexedIndirectCountDraw {
     ResolvedSpan    args;
     ResolvedSpan    count;
     ResolvedSpan    index;
-    gpu::GpuSpan    args_span;
-    gpu::GpuSpan    count_span;
-    gpu::GpuSpan    index_span;
     gpu::GpuAddress vertex_root;
     gpu::GpuAddress fragment_root;
     uint            max_draw_count;
@@ -91,8 +81,6 @@ struct PreparedGeneratedDraw {
     BoundPipeline*                 pipeline;
     ResolvedSpan                   records;
     ResolvedSpan                   count;
-    gpu::GpuSpan                   records_span;
-    gpu::GpuSpan                   count_span;
     vk::IndirectCommandsLayoutEXT layout;
     uint                           max_count;
 }
@@ -102,9 +90,6 @@ struct PreparedGeneratedIndexedDraw {
     ResolvedSpan                   records;
     ResolvedSpan                   count;
     ResolvedSpan                   index;
-    gpu::GpuSpan                   records_span;
-    gpu::GpuSpan                   count_span;
-    gpu::GpuSpan                   index_span;
     vk::IndirectCommandsLayoutEXT layout;
     uint                           max_count;
     gpu::IndexType                 index_type;
@@ -121,8 +106,6 @@ struct PreparedMeshIndirectDraw {
     BoundPipeline*  pipeline;
     ResolvedSpan    args;
     ResolvedSpan    count;
-    gpu::GpuSpan    args_span;
-    gpu::GpuSpan    count_span;
     gpu::GpuAddress mesh_root;
     gpu::GpuAddress fragment_root;
     uint            draw_count;
@@ -322,7 +305,6 @@ fn PreparedRenderPass? lower_render_pass(
         AttachmentViewSlot* view = state.attachment_views.get(target.view)!;
         if (view.native == null) return gpu::INVALID_RESOURCE_STATE~;
         pass.color_slots[i] = view;
-        pass.color_handles[i] = target.view;
         pass.compatibility.color_formats[i] = view.format;
         if (!samples_initialized) {
             pass.compatibility.sample_count = view.sample_count;
@@ -349,7 +331,6 @@ fn PreparedRenderPass? lower_render_pass(
             )!;
             if (resolve.native == null) return gpu::INVALID_RESOURCE_STATE~;
             pass.resolve_slots[i] = resolve;
-            pass.resolve_handles[i] = target.resolve_view;
             attachment.resolve_mode = color_resolve_mode(view.format);
             attachment.resolve_image_view = resolve.native;
             attachment.resolve_image_layout = texture_layout_to_vk(
@@ -366,7 +347,6 @@ fn PreparedRenderPass? lower_render_pass(
         )!;
         if (depth.native == null) return gpu::INVALID_RESOURCE_STATE~;
         pass.depth_view = depth;
-        pass.depth_handle = desc.depth.view;
         pass.compatibility.depth_format = depth.format;
         if (!samples_initialized) {
             pass.compatibility.sample_count = depth.sample_count;
@@ -1552,7 +1532,6 @@ fn PreparedIndexedDraw? lower_indexed_draw(
             index_type: index_type,
             required:   required,
         )!,
-        .index_span    = index_span,
         .vertex_root   = vertex_root,
         .fragment_root = fragment_root,
         .index_count   = index_count,
@@ -1593,7 +1572,6 @@ fn PreparedIndexedDraw? full_prepare_indexed_draw(
             required:   (usz)index_count * index_size,
             operation:  "cmd_draw_indexed",
         )!,
-        .index_span     = index_span,
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
         .index_count    = index_count,
@@ -1691,7 +1669,6 @@ fn PreparedIndirectDraw? lower_indirect_draw(
             arg_size: gpu::DrawIndirectCommand::size,
             count:    draw_count,
         )!,
-        .args_span     = args,
         .vertex_root   = vertex_root,
         .fragment_root = fragment_root,
         .draw_count    = draw_count,
@@ -1729,7 +1706,6 @@ fn PreparedIndirectDraw? full_prepare_indirect_draw(
             rejected_field: "draw_count",
             max_count:      state.caps.max_draw_indirect_count,
         )!,
-        .args_span     = args,
         .vertex_root   = vertex_root,
         .fragment_root = fragment_root,
         .draw_count    = draw_count,
@@ -1834,8 +1810,6 @@ fn PreparedIndexedIndirectDraw? lower_indexed_indirect_draw(
             index_type: index_type,
             required:   0,
         )!,
-        .args_span      = args,
-        .index_span     = index_span,
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
         .draw_count     = draw_count,
@@ -1884,8 +1858,6 @@ fn PreparedIndexedIndirectDraw? full_prepare_indexed_indirect_draw(
             required:   0,
             operation:  "cmd_draw_indexed_indirect",
         )!,
-        .args_span      = args,
-        .index_span     = index_span,
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
         .draw_count     = draw_count,
@@ -2000,9 +1972,6 @@ fn PreparedIndexedIndirectCountDraw? lower_indexed_indirect_count_draw(
             index_type: index_type,
             required:   0,
         )!,
-        .args_span      = args,
-        .count_span     = count_span,
-        .index_span     = index_span,
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
         .max_draw_count = max_draw_count,
@@ -2061,9 +2030,6 @@ fn PreparedIndexedIndirectCountDraw? full_prepare_indexed_indirect_count_draw(
             required:   0,
             operation:  "cmd_draw_indexed_indirect_count",
         )!,
-        .args_span      = args,
-        .count_span     = count_span,
-        .index_span     = index_span,
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
         .max_draw_count = max_draw_count,
@@ -2204,8 +2170,6 @@ fn PreparedGeneratedDraw? lower_generated_draw(
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedDraw draw = {
         .pipeline     = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
-        .records_span = records,
-        .count_span   = count_span,
         .layout       = state.generated_draw_layout,
         .max_count    = max_draw_count,
     };
@@ -2245,8 +2209,6 @@ fn PreparedGeneratedDraw? full_prepare_generated_draw(
             record,
             "cmd_draw_generated",
         )!,
-        .records_span = records,
-        .count_span   = count_span,
         .layout       = state.generated_draw_layout,
         .max_count    = max_draw_count,
     };
@@ -2338,9 +2300,6 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
     VkDeviceState* state = commands.device_state;
     PreparedGeneratedIndexedDraw draw = {
         .pipeline     = borrow_bound_pipeline_of_kind(record, PipelineKind.GRAPHICS)!,
-        .records_span = records,
-        .count_span   = count_span,
-        .index_span   = index_span,
         .layout       = state.generated_indexed_draw_layout,
         .max_count    = max_draw_count,
         .index_type   = index_type,
@@ -2390,9 +2349,6 @@ fn PreparedGeneratedIndexedDraw? full_prepare_generated_indexed_draw(
             record,
             "cmd_draw_indexed_generated",
         )!,
-        .records_span = records,
-        .count_span   = count_span,
-        .index_span   = index_span,
         .layout       = state.generated_indexed_draw_layout,
         .max_count    = max_draw_count,
         .index_type   = index_type,
@@ -2672,8 +2628,6 @@ fn PreparedMeshIndirectDraw? lower_mesh_indirect_draw(
             arg_size: gpu::DrawMeshTasksIndirectCommand::size,
             count:    draw_count,
         )!,
-        .args_span     = args,
-        .count_span    = count_span,
         .mesh_root     = mesh_root,
         .fragment_root = fragment_root,
         .draw_count    = draw_count,
@@ -2720,8 +2674,6 @@ fn PreparedMeshIndirectDraw? full_prepare_mesh_indirect_draw(
             rejected_field: counted ? "args" : "draw_count",
             max_count:      counted ? uint::max : state.caps.max_draw_indirect_count,
         )!,
-        .args_span     = args,
-        .count_span    = count_span,
         .mesh_root     = mesh_root,
         .fragment_root = fragment_root,
         .draw_count    = draw_count,

@@ -1470,7 +1470,7 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
             )!!;
         }
     };
-    assert(capture.calls == 64 ,
+    assert(capture.calls == 64,
         "warmed trusted indirect updates allocate no storage");
 }
 
@@ -1757,8 +1757,34 @@ fn void acceleration_structure_build_emits_and_transitions_atomically() @test {
         false,
         &ops,
     )!!;
-    assert(capture.calls == 1 ,
+    assert(capture.calls == 1,
         "trusted update preserves the mandatory safety floor");
+
+    destination_slot.build_eligibility =
+        gpu::internal::AccelerationStructureBuildEligibility.UNBUILT;
+    command_scratch.acceleration_structure_geometry_count = 0;
+    capture = {};
+    assert(@catch(record_acceleration_structure_build_with_ops(
+        record:   &record,
+        desc:     &build,
+        update:   true,
+        validate: true,
+        ops:      &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    destination_slot.build_eligibility =
+        gpu::internal::AccelerationStructureBuildEligibility.BUILT;
+    destination_slot.desc.flags.allow_update = false;
+    assert(@catch(record_acceleration_structure_build_with_ops(
+        record:   &record,
+        desc:     &build,
+        update:   true,
+        validate: true,
+        ops:      &ops,
+    )) == gpu::INVALID_ARGUMENT);
+    destination_slot.desc.flags.allow_update = true;
+    assert(capture.calls == 0
+            && command_scratch.acceleration_structure_geometry_count == 0,
+        "update rejects unbuilt and static destinations before mutation");
 }
 
 fn void acceleration_structure_clone_emits_and_transitions_atomically() @test {
