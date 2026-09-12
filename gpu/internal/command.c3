@@ -81,6 +81,14 @@ fn gpu::internal::vk::CommandRecord*? recording_command(
     return record;
 }
 
+fn gpu::internal::vk::CommandRecord* required_recording_command(
+    CommandList* commands,
+) @private {
+    gpu::internal::vk::CommandRecord*? record = recording_command(commands);
+    if (catch err = record) abort("Invalid recording command: %s", err);
+    return record;
+}
+
 fn gpu::internal::vk::CommandRecord*? executable_command(
     ExecutableCommandList* commands,
 ) @private {

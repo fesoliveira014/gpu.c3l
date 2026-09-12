@@ -1208,7 +1208,7 @@ fn void viewport_device_bounds_accept_native_shapes_exactly() @test {
         .height    = (float)VAL_RT,
         .max_depth = 1.0f,
     };
-    gpu::cmd_set_viewport(&fixture.commands, &inside)!!;
+    gpu::cmd_set_viewport(&fixture.commands, &inside);
     gpu::Viewport device_edges = {
         .y         = 80.0f,
         .width     = 100.0f,
@@ -1216,7 +1216,7 @@ fn void viewport_device_bounds_accept_native_shapes_exactly() @test {
         .min_depth = 1.0f,
         .max_depth = 0.0f,
     };
-    gpu::cmd_set_viewport(&fixture.commands, &device_edges)!!;
+    gpu::cmd_set_viewport(&fixture.commands, &device_edges);
     gpu::Viewport negative_origin = {
         .x         = -50.0f,
         .y         = -50.0f,
@@ -1224,7 +1224,7 @@ fn void viewport_device_bounds_accept_native_shapes_exactly() @test {
         .height    = 10.0f,
         .max_depth = 1.0f,
     };
-    gpu::cmd_set_viewport(&fixture.commands, &negative_origin)!!;
+    gpu::cmd_set_viewport(&fixture.commands, &negative_origin);
 
     vk::Viewport native = vk::lower_viewport(&negative_origin);
     assert(native_viewport_matches(&native, &negative_origin),
@@ -1242,12 +1242,12 @@ fn void scissor_representation_accepts_overscan_and_empty_clip() @test {
         .width  = 32,
         .height = 32,
     };
-    gpu::cmd_set_scissor(&fixture.commands, &overscan)!!;
+    gpu::cmd_set_scissor(&fixture.commands, &overscan);
     gpu::ScissorRect empty = {
         .x = int::max,
         .y = int::max,
     };
-    gpu::cmd_set_scissor(&fixture.commands, &empty)!!;
+    gpu::cmd_set_scissor(&fixture.commands, &empty);
     vk::Rect2D native = vk::lower_scissor(&empty);
     assert(native_scissor_matches(&native, &empty),
         "empty scissor preserves exact native offset and extent");

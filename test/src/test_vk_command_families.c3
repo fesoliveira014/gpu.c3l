@@ -261,12 +261,12 @@ fn void exercise_command_family_render(
         .height    = 8.0f,
         .max_depth = 1.0f,
     };
-    gpu::cmd_set_viewport(&commands, &viewport)!!;
+    gpu::cmd_set_viewport(&commands, &viewport);
     gpu::ScissorRect scissor = {
         .width  = 8,
         .height = 8,
     };
-    gpu::cmd_set_scissor(&commands, &scissor)!!;
+    gpu::cmd_set_scissor(&commands, &scissor);
     gpu::cmd_draw(
         commands:       &commands,
         vertex_root:    (gpu::GpuAddress)1,
@@ -340,8 +340,8 @@ fn void exercise_command_family_labels(
     gpu::CommandAllocator* allocator,
 ) {
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
-    gpu::cmd_begin_label(&commands, "command_family")!!;
-    gpu::cmd_end_label(&commands)!!;
+    gpu::cmd_begin_label(&commands, "command_family");
+    gpu::cmd_end_label(&commands);
     gpu::discard_commands(&commands)!!;
 }
 

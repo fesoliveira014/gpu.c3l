@@ -55,6 +55,13 @@ no-ops after a successful consume and free the unit on an early fault.
 Copies of a token are aliases of one record. All aliases are confined to
 the recording thread and die together.
 
+`cmd_set_viewport`, `cmd_set_scissor`, `cmd_begin_label`, and `cmd_end_label`
+return `void`. Call them on the recording thread with a live, unconsumed
+recording token and readable, non-null state or label pointers. Invalid tokens,
+wrong recording phases, and null required pointers are programming errors
+that terminate in every build mode. Other recording operations return optionals
+for the faults described below.
+
 Recording, ending, or submitting commands does not retain application resources.
 Keep them alive and unmodified as required until their last GPU use completes.
 Destroy and update calls do not infer shader use or wait for completion.
@@ -171,9 +178,9 @@ state.stencil = {
 gpu::cmd_set_graphics_state(&commands, &state)!;
 
 gpu::Viewport half = { .width = width / 2.0f, .height = (float)height, .max_depth = 1.0f };
-gpu::cmd_set_viewport(&commands, &half)!;
+gpu::cmd_set_viewport(&commands, &half);
 gpu::ScissorRect clip = { .x = 10, .y = 10, .width = 100, .height = 100 };
-gpu::cmd_set_scissor(&commands, &clip)!;
+gpu::cmd_set_scissor(&commands, &clip);
 ```
 
 `cmd_set_graphics_state` applies the whole packet. `cmd_set_viewport` and
@@ -366,12 +373,13 @@ pipelines and is invalidated by binding a static-stack ray pipeline.
 ## Labels
 
 ```c3
-gpu::cmd_begin_label(&commands, "shadow pass", { 1, 0.5f, 0, 1 })!;
+gpu::cmd_begin_label(&commands, "shadow pass", { 1, 0.5f, 0, 1 });
 ...
-gpu::cmd_end_label(&commands)!;
+gpu::cmd_end_label(&commands);
 ```
 
-No-ops without debug-utils support. Nesting must balance.
+No-ops without debug-utils support. Nesting must balance before ending the
+command list; label text is borrowed only for the begin call.
 
 ## Faults
 
@@ -386,4 +394,4 @@ No-ops without debug-utils support. Nesting must balance.
 | generated reservation exceeded | `GENERATED_SCRATCH_EXHAUSTED` |
 | no free unit | `DEVICE_BUSY` |
 
-A failed `cmd_*` call records nothing.
+A fallible `cmd_*` call that returns a fault records nothing.

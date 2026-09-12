@@ -1885,13 +1885,9 @@ fn void? vk_cmd_clone_acceleration_structure(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn void? vk_cmd_begin_label(CommandRecord* commands, ZString label, float[4] color)  {
-    return gpu::UNSUPPORTED_FEATURE~;
-}
+fn void vk_cmd_begin_label(CommandRecord* commands, ZString label, float[4] color) {}
 
-fn void? vk_cmd_end_label(CommandRecord* commands)  {
-    return gpu::UNSUPPORTED_FEATURE~;
-}
+fn void vk_cmd_end_label(CommandRecord* commands) {}
 
 fn void? vk_cmd_copy_buffer(
     CommandRecord* commands,
@@ -1971,15 +1967,12 @@ fn void? vk_cmd_begin_render_pass(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn void? vk_cmd_set_viewport(
+fn void vk_cmd_set_viewport(
     CommandRecord* commands,
     gpu::Viewport* viewport,
 ) {
     $if $feat(COMMAND_WRAPPER_BENCH):
         gpu::observe_viewport();
-        return;
-    $else
-    return gpu::UNSUPPORTED_FEATURE~;
     $endif
 }
 
@@ -1990,11 +1983,10 @@ fn void? vk_cmd_set_graphics_state(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn void? vk_cmd_set_scissor(
+fn void vk_cmd_set_scissor(
     CommandRecord* commands,
     gpu::ScissorRect* scissor,
 ) {
-    return gpu::UNSUPPORTED_FEATURE~;
 }
 
 fn void? vk_cmd_end_render_pass(CommandRecord* commands)  {

@@ -217,13 +217,13 @@ fn void measure_viewport(
             samples.direct[repetition] = sample_elapsed(direct_start);
             std::time::Clock public_start = std::time::clock::now();
             for (uint index = 0; index < WRAPPER_BENCH_ITERATIONS; index++) {
-                cmd_set_viewport(commands, &viewport)!!;
+                cmd_set_viewport(commands, &viewport);
             }
             samples.public[repetition] = sample_elapsed(public_start);
         } else {
             std::time::Clock public_start = std::time::clock::now();
             for (uint index = 0; index < WRAPPER_BENCH_ITERATIONS; index++) {
-                cmd_set_viewport(commands, &viewport)!!;
+                cmd_set_viewport(commands, &viewport);
             }
             samples.public[repetition] = sample_elapsed(public_start);
             std::time::Clock direct_start = std::time::clock::now();
