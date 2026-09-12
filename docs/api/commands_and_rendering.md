@@ -325,9 +325,10 @@ read one `AccelerationStructureIndirectBuildRange` per geometry from
 
 None of these insert barriers. Order them with
 `.acceleration_structure_build` on both sides of a `Barrier`. Keep the destination
-and every named span valid through their last GPU use. Pending build destinations
-remain unavailable for destruction or another build/clone until their command is
-discarded or retired, including after failed submission. Details: [memory and resources](memory_and_resources.md#acceleration-structures).
+and every named span valid through their last GPU use, including scratch reuse.
+Dependent clone and compatible update commands may be recorded before the
+producer's completion is polled. Source construction must precede their GPU
+execution; the application supplies compatible updates. Details: [memory and resources](memory_and_resources.md#acceleration-structures).
 
 ## Ray tracing commands
 

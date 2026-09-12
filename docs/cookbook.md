@@ -1022,7 +1022,8 @@ gpu::AccelerationStructureBuildDesc build = {
 gpu::cmd_build_acceleration_structure(&commands, &build)!;
 ```
 
-After the BLAS build completes, pack instances and build the TLAS:
+Pack instances using the live BLAS address, then order the TLAS build after
+the BLAS build on the GPU:
 
 ```c3
 gpu::AccelerationStructureInstanceDesc instance_desc = {
@@ -1048,6 +1049,11 @@ gpu::AccelerationStructureBuildDesc tlas_build = {
     .instance_count = 1,
     .scratch        = tlas_scratch_span,
 };
+gpu::Barrier blas_ready = {
+    .before = { .acceleration_structure_build },
+    .after  = { .acceleration_structure_build },
+};
+gpu::cmd_barrier(&commands, &blas_ready)!;
 gpu::cmd_build_acceleration_structure(&commands, &tlas_build)!;
 
 gpu::AccelerationStructureView tlas_view =
@@ -1075,20 +1081,42 @@ gpu::cmd_barrier(&commands, &ranges_ready)!;
 gpu::cmd_build_acceleration_structure_indirect(&commands, &build, ranges_span)!;
 ```
 
-After an indirect build the CPU does not know the actual counts, so only
-indirect updates or a new direct build may follow.
+Direct or indirect updates may follow either build form. Supply compatible
+actual GPU counts and geometry; the descriptor maxima are only bounds.
 
-### Clone a completed structure
+### Clone a structure
 
-Create a destination from the same descriptor, then:
+Create a destination from the same descriptor and record its clone after
+the source build with an explicit dependency:
 
 ```c3
+gpu::Barrier source_ready = {
+    .before = { .acceleration_structure_build },
+    .after  = { .acceleration_structure_build },
+};
+gpu::cmd_barrier(&commands, &source_ready)!;
 gpu::cmd_clone_acceleration_structure(&commands, blas, clone)!;
+gpu::cmd_barrier(&commands, &source_ready)!;
 ```
 
-No scratch, no barrier, no wait. A cloned BLAS has a new address; existing
-instance records still point at the source. A cloned TLAS needs its own
-view.
+The second barrier makes the clone available to a following TLAS build.
+For a query or trace, use the querying shader stage as its destination.
+The clone command uses no scratch and adds no barriers or waits itself.
+A dependent list may be recorded before the producer is polled, then submitted
+with a completion wait at its first dependent stage.
+
+A cloned BLAS has a distinct address; explicitly write that address into
+instances intended to use it. A cloned TLAS needs its own view and retains
+the original BLAS references represented by its instances. It neither owns
+those BLASes nor retargets their addresses; keep them alive through its uses.
+
+### Update in place
+
+Create with `allow_update`, provide inputs compatible with the preceding
+build, and use the queried update scratch size. A build and update can share
+a list with an AS-build-to-AS-build barrier between them. The same dependency
+also orders scratch reuse. No intermediate CPU wait is required; wait for
+completion when reading results or reclaiming storage.
 
 ### Confirm procedural intersections
 

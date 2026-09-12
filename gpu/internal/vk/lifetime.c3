@@ -30,7 +30,6 @@ fn void publish_pending_commands_locked(
     gpu::CompletionPoint point,
 ) {
     foreach (record : records) {
-        activate_pending_acceleration_structure_builds(record);
         record.submitted_completion = point;
         record.next_submitted = null;
         if (completion.submitted_tail == null) {
@@ -89,7 +88,6 @@ fn CommandRecord* release_pending_command_locked(
     pin_command_allocator_slot(slot);
     slot.mutex.lock()!!;
     record.state = gpu::internal::CommandState.INACTIVE;
-    complete_pending_acceleration_structure_builds(record);
     CommandScratch* scratch = record.scratch;
 
     recycle_generated_preprocess_indices_locked(
