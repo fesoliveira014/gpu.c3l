@@ -453,6 +453,8 @@ struct DeviceCaps {
     QueueRoles queues;
     // Optional non-solid triangle rasterization through PolygonMode.LINE.
     bool line_polygon_mode;
+    // Shaders may declare the ClipDistance capability.
+    bool clip_distance;
     TimestampCaps timestamps;
     AccelerationStructureCaps acceleration_structures;
     RayQueryCaps ray_queries;

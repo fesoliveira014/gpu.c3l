@@ -47,6 +47,8 @@ The backend already requires `VK_EXT_extended_dynamic_state3` for color blend
 and write mask. Dynamic polygon mode and rasterization samples are separate
 feature bits, not yet required. `LINE` is additionally gated on
 `fillModeNonSolid` and reported through `DeviceCaps.line_polygon_mode`.
+`shaderClipDistance` is enabled when supported and reported through
+`DeviceCaps.clip_distance`; a module declaring `ClipDistance` needs it.
 Lavapipe advertises all three bits; that is a CPU driver, not a target
 adapter.
 
