@@ -55,9 +55,9 @@ dynamic raster and color state used by `GraphicsState`. An adapter that
 lacks any of these fails `create_device` with `UNSUPPORTED_FEATURE`.
 
 Optional capabilities are reported in `DeviceCaps`: asynchronous compute,
-indirect-count draws, generated work, line polygon mode, sparse textures,
-anisotropy, timestamps, and workload limits. Ray queries and ray-tracing
-pipelines are requested in `DeviceDesc` and also need a nonzero
+indirect-count draws, generated work, line polygon mode, clip distance,
+sparse textures, anisotropy, timestamps, and workload limits. Ray queries and
+ray-tracing pipelines are requested in `DeviceDesc` and also need a nonzero
 `RuntimeDesc.acceleration_structure_heap_capacity`. Mesh shaders are
 requested with `DeviceDesc.enable_mesh_shaders` and reported in
 `DeviceCaps.mesh_shaders`. A request the adapter cannot satisfy fails

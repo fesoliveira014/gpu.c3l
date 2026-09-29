@@ -17,6 +17,39 @@ fn void range_helper() @test {
     assert(gpu::internal::range_fits(256, 255, 1), "last byte fits");
 }
 
+fn void spirv_capability_scan_reads_leading_capabilities() @test {
+    const uint CAPABILITY_SHADER = 1;
+    const uint CAPABILITY_WORD = 2 << 16 | 17;
+    const uint OP_MEMORY_MODEL = 3 << 16 | 14;
+    uint[5] header = { 0x07230203, 0x00010600, 0, 16, 0 };
+    assert(!gpu::internal::spirv_declares_capability(header[..], gpu::internal::SPIRV_CAPABILITY_CLIP_DISTANCE),
+        "header-only module declares no capability");
+
+    uint[9] declared = {
+        0x07230203, 0x00010600, 0, 16, 0,
+        CAPABILITY_WORD, CAPABILITY_SHADER,
+        CAPABILITY_WORD, gpu::internal::SPIRV_CAPABILITY_CLIP_DISTANCE,
+    };
+    assert(gpu::internal::spirv_declares_capability(declared[..], gpu::internal::SPIRV_CAPABILITY_CLIP_DISTANCE),
+        "a later leading capability is found");
+
+    uint[10] after_prefix = {
+        0x07230203, 0x00010600, 0, 16, 0,
+        CAPABILITY_WORD, CAPABILITY_SHADER,
+        OP_MEMORY_MODEL, 1, gpu::internal::SPIRV_CAPABILITY_CLIP_DISTANCE,
+    };
+    assert(!gpu::internal::spirv_declares_capability(after_prefix[..], gpu::internal::SPIRV_CAPABILITY_CLIP_DISTANCE),
+        "the scan stops at the first non-capability instruction");
+
+    uint[8] truncated = {
+        0x07230203, 0x00010600, 0, 16, 0,
+        CAPABILITY_WORD, CAPABILITY_SHADER,
+        CAPABILITY_WORD,
+    };
+    assert(!gpu::internal::spirv_declares_capability(truncated[..], gpu::internal::SPIRV_CAPABILITY_CLIP_DISTANCE),
+        "a truncated capability instruction declares nothing");
+}
+
 fn void completion_points_pack_queue_identity_and_sequence() @test {
     Device device = { .index = 3, .generation = 7 };
     Queue queue = {

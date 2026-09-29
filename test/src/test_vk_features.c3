@@ -805,6 +805,15 @@ fn void line_polygon_mode_feature_support() @test {
     assert(gpu::internal::vk::line_polygon_mode_supported(&supported), "fillModeNonSolid reports line polygon support");
 }
 
+fn void clip_distance_feature_support() @test {
+    vk::PhysicalDeviceFeatures unsupported;
+    assert(!gpu::internal::vk::clip_distance_supported(&unsupported), "unset shaderClipDistance reports no clip distance support");
+
+    vk::PhysicalDeviceFeatures supported;
+    supported.shader_clip_distance = vk::TRUE;
+    assert(gpu::internal::vk::clip_distance_supported(&supported), "shaderClipDistance reports clip distance support");
+}
+
 fn void polygon_mode_optional_gate() @test {
     assert(!@catch(gpu::internal::vk::check_polygon_mode_support(gpu::PolygonMode.FILL, false)),
         "FILL remains available without optional support");

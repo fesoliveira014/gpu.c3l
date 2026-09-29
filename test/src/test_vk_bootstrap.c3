@@ -79,6 +79,8 @@ fn void device_create_destroy() @test {
         "selected device supports depth-bias clamp");
     assert(gpu::get_device_caps(&device)!!.line_polygon_mode == (features.fill_mode_non_solid != 0),
         "line polygon cap matches the selected physical device");
+    assert(gpu::get_device_caps(&device)!!.clip_distance == (features.shader_clip_distance != 0),
+        "clip distance cap matches the selected physical device");
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(state.physical_device, &props);
     vk::PhysicalDeviceTimelineSemaphoreProperties timeline_props =

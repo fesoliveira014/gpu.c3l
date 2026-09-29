@@ -180,6 +180,7 @@ struct CapsInputs {
     bool                     presentation_enabled;
     bool                     async_compute;
     bool                     line_polygon_mode;
+    bool                     clip_distance;
     uint                     texture_capacity;
     uint                     sampler_capacity;
     GeneratedWorkSupport     generated_work;
@@ -969,6 +970,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         features:               &generated_work_features,
     );
     bool line_polygon_mode = line_polygon_mode_supported(&features2.features);
+    bool clip_distance = clip_distance_supported(&features2.features);
 
     if (features2.features.sampler_anisotropy != 0) {
         vk::PhysicalDeviceProperties anisotropy_props;
@@ -1015,6 +1017,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         state:               state,
         families:            &families,
         line_polygon_mode:   line_polygon_mode,
+        clip_distance:       clip_distance,
         sparse_texture_plan: &sparse_texture_plan,
         creation_ops:        creation_ops,
     )!;
@@ -1225,6 +1228,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         .presentation_enabled  = state.presentation.enabled,
         .async_compute         = state.compute_queue_distinct,
         .line_polygon_mode     = line_polygon_mode,
+        .clip_distance         = clip_distance,
         .texture_capacity      = state.shader_heap.texture_capacity,
         .sampler_capacity      = state.shader_heap.sampler_capacity,
         .generated_work        = state.generated_work,
@@ -1497,6 +1501,11 @@ fn bool line_polygon_mode_supported(vk::PhysicalDeviceFeatures* base) {
     return base.fill_mode_non_solid != 0;
 }
 
+<* Optional shader clip distance support. Pure. *>
+fn bool clip_distance_supported(vk::PhysicalDeviceFeatures* base) {
+    return base.shader_clip_distance != 0;
+}
+
 <* Features required by the heap-access shader helpers. Pure. *>
 fn bool heap_shared_features_supported(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12) {
     return base.shader_storage_image_read_without_format != 0
@@ -1742,6 +1751,7 @@ fn void? create_logical_device(
     VkDeviceState* state,
     QueueFamilies* families,
     bool line_polygon_mode,
+    bool clip_distance,
     SparseTextureFeaturePlan* sparse_texture_plan,
     DeviceCreationOps* creation_ops = null,
 ) @private {
@@ -1788,6 +1798,7 @@ fn void? create_logical_device(
             state:               state,
             queue_infos:         queue_infos,
             line_polygon_mode:   line_polygon_mode,
+            clip_distance:       clip_distance,
             sparse_texture_plan: sparse_texture_plan,
             creation_ops:        creation_ops,
         );
@@ -1798,6 +1809,7 @@ fn void? create_logical_device_with_queue_infos(
     VkDeviceState* state,
     vk::DeviceQueueCreateInfo[] queue_infos,
     bool line_polygon_mode,
+    bool clip_distance,
     SparseTextureFeaturePlan* sparse_texture_plan,
     DeviceCreationOps* creation_ops,
 ) @private {
@@ -1932,6 +1944,7 @@ fn void? create_logical_device_with_queue_infos(
     features2.features.sparse_residency_image3d =
         sparse_texture_plan.image_3d ? vk::TRUE : vk::FALSE;
     if (line_polygon_mode) features2.features.fill_mode_non_solid = vk::TRUE;
+    if (clip_distance) features2.features.shader_clip_distance = vk::TRUE;
     if (state.max_sampler_anisotropy > 0) features2.features.sampler_anisotropy = vk::TRUE;
     features2.features.multi_draw_indirect = vk::TRUE;
     features2.features.shader_storage_image_read_without_format  = vk::TRUE;
@@ -2060,6 +2073,7 @@ fn gpu::DeviceCaps build_caps(
         .generated_work             = inputs.generated_work.enabled,
         .async_compute              = inputs.async_compute,
         .line_polygon_mode          = inputs.line_polygon_mode,
+        .clip_distance              = inputs.clip_distance,
         .sparse_textures            = inputs.sparse_textures.enabled
             ? (gpu::SparseTextureCaps){
                 .image_2d           = inputs.sparse_textures.image_2d,

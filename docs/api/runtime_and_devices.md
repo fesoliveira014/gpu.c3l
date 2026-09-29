@@ -141,7 +141,8 @@ uint max_targets = caps.max_color_attachments;
 `DeviceCaps` reports:
 
 - selected queue roles, `async_compute`, and `presentation_enabled`;
-- `draw_indirect_count`, `generated_work`, `line_polygon_mode`;
+- `draw_indirect_count`, `generated_work`, `line_polygon_mode`,
+  `clip_distance`;
 - `texture_heap_capacity`, `sampler_heap_capacity`, `max_color_attachments`,
   `max_push_constant_size`, `max_compute_work_group_count`,
   `max_draw_indirect_count`, `max_generated_work_count`;

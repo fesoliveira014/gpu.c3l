@@ -31,7 +31,9 @@ gpu::ShaderDesc shader = {
 
 The bytes and strings are borrowed for the create call only. Creation
 reflects the entry point and validates the push block, heap bindings, and
-stage interface. Mismatches return `SHADER_INVALID`.
+stage interface. Mismatches return `SHADER_INVALID`. A module that declares
+the `ClipDistance` capability, for example by writing `gl_ClipDistance`, needs
+`caps.clip_distance`; otherwise pipeline creation returns `UNSUPPORTED_FEATURE`.
 
 ## Compute pipelines
 
@@ -184,7 +186,7 @@ vendor, device, and driver identifiers. A rejected blob is a cache miss.
 | Cause | Fault |
 |---|---|
 | bad SPIR-V, missing entry point, ABI mismatch | `SHADER_INVALID` |
-| unsupported format, sample count, polygon mode, or ray feature | `UNSUPPORTED_FEATURE` |
+| unsupported format, sample count, polygon mode, clip distance, or ray feature | `UNSUPPORTED_FEATURE` |
 | inconsistent descriptor | `INVALID_ARGUMENT` |
 | driver rejected the pipeline | `PIPELINE_CREATE_FAILED` |
 | pipeline table full | `SLOT_TABLE_FULL` |

@@ -19,6 +19,7 @@ const char[*] CACHE_TARGETS_FRAG_SPIRV =
     $embed("shaders/pipeline_targets.frag.spv");
 const char[*] CACHE_COMP_SPIRV     = $embed("shaders/root_pointer.comp.spv");
 const char[*] CACHE_ALT_COMP_SPIRV = $embed("shaders/heap_write.comp.spv");
+const char[*] CACHE_CLIP_VERT_SPIRV = $embed("shaders/clip_distance.vert.spv");
 
 const uint CACHE_RT_SIZE = 16;
 const usz CACHE_RT_BYTES = CACHE_RT_SIZE * CACHE_RT_SIZE * 4;
@@ -1659,6 +1660,43 @@ fn void line_polygon_mode_respects_optional_feature() @test {
     line_polygon.polygon_mode = gpu::PolygonMode.LINE;
     gpu::PipelineHandle line_pipeline = gpu::create_graphics_pipeline(&device, &line_polygon)!!;
     gpu::destroy_pipeline(&device, line_pipeline)!!;
+}
+
+fn void clip_distance_respects_optional_feature() @test {
+    VulkanValidationCapture validation;
+    gpu::RuntimeDesc desc = {
+        .enable_vulkan_validation = true,
+        .application_name         = "gpu_clip_distance_test",
+        .debug_callback           = &capture_vulkan_validation_error,
+        .debug_user_data          = &validation,
+    };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+    validation.errors = 0;
+    CacheShaders shaders = make_cache_shaders();
+    gpu::ShaderDesc clip_vert = {
+        .spirv       = CACHE_CLIP_VERT_SPIRV[..],
+        .entry_point = "main",
+    };
+    shaders.vert = clip_vert;
+    gpu::Format[1] pipeline_colors = {
+        gpu::Format.RGBA8_UNORM,
+    };
+    gpu::GraphicsPipelineDesc clip = base_graphics_desc(&shaders, pipeline_colors[..]);
+    vk::VkDeviceState* state = cache_test_state(&device);
+    bool supported = state.caps.clip_distance;
+
+    state.caps.clip_distance = false;
+    uint entries_before = cache_entry_count(&device);
+    assert(@catch(gpu::create_graphics_pipeline(&device, &clip)) == gpu::UNSUPPORTED_FEATURE,
+        "ClipDistance without the capability faults UNSUPPORTED_FEATURE");
+    assert(cache_entry_count(&device) == entries_before, "unsupported ClipDistance publishes no cache entry");
+    state.caps.clip_distance = supported;
+
+    if (!supported) return;
+    gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &clip)!!;
+    gpu::destroy_pipeline(&device, pipeline)!!;
+    assert(validation.errors == 0, "ClipDistance pipeline creation is validation-clean");
 }
 
 fn void compute_layout_exists_before_pipeline_creation() @test {

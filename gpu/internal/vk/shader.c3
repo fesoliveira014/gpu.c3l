@@ -904,6 +904,19 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
             invariant:      "SPIR-V storage must be retained and word-aligned",
         )~;
     }
+    if (!state.caps.clip_distance && gpu::internal::spirv_declares_capability(
+        code.spirv_words[:code.spirv.len / uint::size],
+        gpu::internal::SPIRV_CAPABILITY_CLIP_DISTANCE,
+    )) {
+        return report_shader_contract_failure(
+            state:          state,
+            operation:      operation,
+            public_fault:   gpu::UNSUPPORTED_FEATURE,
+            debug_name:     code.debug_name,
+            rejected_field: rejected_field,
+            invariant:      "ClipDistance requires DeviceCaps.clip_distance",
+        )~;
+    }
     vk::ShaderModuleCreateInfo info = vk::shader_module_create_info()
         .set_code_size(code.spirv.len)
         .set_code(code.spirv_words);
