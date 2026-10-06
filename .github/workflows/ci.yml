@@ -216,6 +216,9 @@ jobs:
       - name: Fetch VMA static libraries
         run: python scripts/fetch_vma_libs.py
 
+      - name: Fetch spvreflect Windows library
+        run: python scripts/fetch_spvreflect_lib.py
+
       - name: Cache toolchain
         uses: actions/cache@v4
         with:
