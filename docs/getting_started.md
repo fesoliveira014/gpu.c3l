@@ -42,19 +42,24 @@ and the `vk`, `vma` and `spvreflect` artifacts from their releases (the
 the `gpu_shaders` tool, unzip the `gpu` artifact into `lib/gpu.c3l/`.
 
 To work from git instead, add the library as a submodule pinned to a release
-tag, then download the VMA static libraries, which git does not carry:
+tag, then download the native libraries git does not carry: the VMA static
+libraries, and on Windows the spvreflect library:
 
 ```sh
 git submodule add https://github.com/fesoliveira014/gpu.c3l lib/gpu.c3l
-git -C lib/gpu.c3l checkout v0.6.1
+git -C lib/gpu.c3l checkout <tag>
 git submodule update --init --recursive lib/gpu.c3l
 git config -f .gitmodules submodule.lib/gpu.c3l.shallow true
 python3 lib/gpu.c3l/scripts/fetch_vma_libs.py
+python3 lib/gpu.c3l/scripts/fetch_spvreflect_lib.py   # Windows only
 ```
 
+In the git form the three binding packages sit at `lib/gpu.c3l/lib/`, so add
+`"lib/gpu.c3l/lib"` to `dependency-search-paths` beside `"lib"`.
+
 Both forms provide `gpu`, its three binding packages, and the `gpu_shaders`
-tool. `project.json` resolves all four packages, and `lib/` is the only search
-path:
+tool. `project.json` resolves all four packages; with release artifacts `lib/`
+is the only search path:
 
 ```json
 {
