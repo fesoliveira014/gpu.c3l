@@ -201,6 +201,54 @@ fn gpu::TextureHandle make_heap_view_texture(gpu::Device* device) {
     return gpu::create_texture(device, &desc)!!;
 }
 
+fn void memory_stats_count_texture_views_and_report_texture_capacity() @test {
+    gpu::RuntimeDesc desc = {
+        .enable_vulkan_validation = true,
+        .texture_capacity         = 32,
+        .application_name         = "gpu_memory_stats_texture_test",
+    };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+
+    gpu::MemoryStats baseline = gpu::get_memory_stats(&device)!!;
+    assert(baseline.texture_capacity == 32, "capacity is the requested table size");
+    assert(baseline.texture_view_count == 0, "no views are live at creation");
+
+    gpu::TextureHandle[3] textures;
+    foreach (&texture : textures) *texture = make_heap_texture(&device);
+    gpu::TextureView[5] views;
+    foreach (i, &view : views) {
+        *view = gpu::create_texture_view(&device, textures[i % textures.len], null)!!;
+    }
+    gpu::MemoryStats live = gpu::get_memory_stats(&device)!!;
+    assert(live.texture_count == baseline.texture_count + 3, "textures are counted");
+    assert(live.texture_view_count == 5, "every view holds a heap slot");
+    assert(live.texture_capacity == 32, "capacity does not change with use");
+
+    gpu::destroy_texture_view(&device, views[0])!!;
+    gpu::destroy_texture_view(&device, views[1])!!;
+    assert(gpu::get_memory_stats(&device)!!.texture_view_count == 3,
+        "destroyed views release their slots");
+
+    for (usz i = 2; i < views.len; i++) gpu::destroy_texture_view(&device, views[i])!!;
+    foreach (texture : textures) gpu::destroy_texture(&device, texture)!!;
+    gpu::MemoryStats released = gpu::get_memory_stats(&device)!!;
+    assert(released.texture_view_count == 0, "no views remain");
+    assert(released.texture_count == baseline.texture_count, "textures are released");
+}
+
+fn void memory_stats_report_default_texture_capacity() @test {
+    gpu::RuntimeDesc desc = {
+        .enable_vulkan_validation = true,
+        .application_name         = "gpu_memory_stats_default_capacity_test",
+    };
+    gpu::Device device = create_test_device(&desc)!!;
+    defer destroy_test_device(&device)!!;
+
+    assert(gpu::get_memory_stats(&device)!!.texture_capacity == gpu::DEFAULT_TEXTURE_CAPACITY,
+        "a zero desc resolves to the default capacity");
+}
+
 fn void pipeline_layouts_share_heap_set_zero() @test {
     gpu::Device device = make_heap_test_device(1, 1);
     defer destroy_test_device(&device)!!;
