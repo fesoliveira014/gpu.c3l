@@ -27,7 +27,8 @@ On a headless Linux machine set `VK_DRIVER_FILES` to the lavapipe ICD first.
 ## Build as a consumer
 
 `getting_started/project.release.json` is the `project.json` an application
-uses when the library sits at `lib/gpu.c3l` (submodule or extracted archive).
+uses when `gpu`, `vk`, `vma` and `spvreflect` sit in `lib/` (submodules,
+release artifacts, or the `gpu` artifact unzipped to `lib/gpu.c3l`).
 Copy `src/` and `shaders/` next to it, build the shader tool from
 `lib/gpu.c3l/tools/gpu_shaders`, run it with `--shader-dir shaders`, then
 `c3c run hello_gpu`. [Getting started](../docs/getting_started.md#install)

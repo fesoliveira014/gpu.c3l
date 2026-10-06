@@ -5,6 +5,7 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -23,12 +24,12 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set bundle version
+      - name: Set release version
         run: |
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            echo "BUNDLE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+            echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           else
-            echo "BUNDLE_VERSION=0.0.0-ci" >> "$GITHUB_ENV"
+            echo "RELEASE_VERSION=0.0.0-dev" >> "$GITHUB_ENV"
           fi
 
       - name: Verify consumer dependency boundary
@@ -55,23 +56,20 @@ jobs:
           fi
           echo "$HOME/tools/c3" >> "$GITHUB_PATH"
 
-      - name: Build Linux release bundle
+      - name: Pack gpu release artifact
         run: |
           python3 -B -m unittest scripts.test_package_release -v
           python3 scripts/package_release.py \
-            --version "$BUNDLE_VERSION" \
-            --target linux-x64 \
-            --output-dir dist
-          python3 scripts/package_release.py \
-            --version "$BUNDLE_VERSION" \
-            --target windows-x64 \
+            --version "$RELEASE_VERSION" \
             --output-dir dist
 
-      - name: Upload Linux release bundle
+      - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-linux-x64
-          path: dist/gpu.c3l-v*-linux-x64.tar.gz
+          name: release-gpu
+          path: |
+            dist/gpu-v*.c3l
+            dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 7
 
@@ -139,8 +137,13 @@ jobs:
       - name: Run release archive consumer
         run: |
           CONSUMER="$RUNNER_TEMP/archive-consumer"
-          mkdir -p "$CONSUMER/lib"
-          tar -xzf "dist/gpu.c3l-v${BUNDLE_VERSION}-linux-x64.tar.gz" -C "$CONSUMER/lib"
+          mkdir -p "$CONSUMER/lib/gpu.c3l"
+          python3 -m zipfile -e "dist/gpu-v${RELEASE_VERSION}.c3l" "$CONSUMER/lib/gpu.c3l"
+          for backend in vk vma spvreflect; do
+            mkdir -p "$CONSUMER/lib/$backend.c3l"
+            (cd "lib/$backend.c3l" && tar --exclude=./.git --exclude=./test -cf - .) \
+              | (cd "$CONSUMER/lib/$backend.c3l" && tar -xf -)
+          done
           cp -R examples/getting_started/src "$CONSUMER/src"
           cp -R examples/getting_started/shaders "$CONSUMER/shaders"
           rm -f "$CONSUMER"/shaders/*.spv
@@ -197,12 +200,12 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set bundle version
+      - name: Set release version
         run: |
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            echo "BUNDLE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+            echo "RELEASE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           else
-            echo "BUNDLE_VERSION=0.0.0-ci" >> "$GITHUB_ENV"
+            echo "RELEASE_VERSION=0.0.0-dev" >> "$GITHUB_ENV"
           fi
 
       - name: Verify consumer dependency boundary
@@ -212,6 +215,9 @@ jobs:
 
       - name: Fetch VMA static libraries
         run: python scripts/fetch_vma_libs.py
+
+      - name: Fetch spvreflect Windows library
+        run: python scripts/fetch_spvreflect_lib.py
 
       - name: Cache toolchain
         uses: actions/cache@v4
@@ -267,25 +273,12 @@ jobs:
           # GITHUB_PATH needs a Windows-form path — the OS loader reads it.
           cygpath -w "$(dirname "$DLL")" >> "$GITHUB_PATH"
 
-      - name: Build Windows release bundle
+      - name: Pack gpu release artifact
         run: |
           python -B -m unittest scripts.test_package_release -v
           python scripts/package_release.py \
-            --version "$BUNDLE_VERSION" \
-            --target windows-x64 \
+            --version "$RELEASE_VERSION" \
             --output-dir dist
-          python scripts/package_release.py \
-            --version "$BUNDLE_VERSION" \
-            --target linux-x64 \
-            --output-dir dist
-
-      - name: Upload Windows release bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-windows-x64
-          path: dist/gpu.c3l-v*-windows-x64.zip
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Stage vulkan-1 import library
         # vk.c3l links `vulkan-1` but is bindings-only; vma.c3l's linked-libs
@@ -359,8 +352,13 @@ jobs:
       - name: Run release archive consumer
         run: |
           CONSUMER="$RUNNER_TEMP/archive-consumer"
-          mkdir -p "$CONSUMER/lib"
-          python -m zipfile -e "dist/gpu.c3l-v${BUNDLE_VERSION}-windows-x64.zip" "$CONSUMER/lib"
+          mkdir -p "$CONSUMER/lib/gpu.c3l"
+          python -m zipfile -e "dist/gpu-v${RELEASE_VERSION}.c3l" "$CONSUMER/lib/gpu.c3l"
+          for backend in vk vma spvreflect; do
+            mkdir -p "$CONSUMER/lib/$backend.c3l"
+            (cd "lib/$backend.c3l" && tar --exclude=./.git --exclude=./test -cf - .) \
+              | (cd "$CONSUMER/lib/$backend.c3l" && tar -xf -)
+          done
           cp -R examples/getting_started/src "$CONSUMER/src"
           cp -R examples/getting_started/shaders "$CONSUMER/shaders"
           rm -f "$CONSUMER"/shaders/*.spv
@@ -385,30 +383,18 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Check out source release
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref_name }}
-          submodules: recursive
-
       - uses: actions/download-artifact@v4
         with:
-          pattern: release-*
+          name: release-gpu
           path: dist
-          merge-multiple: true
-
-      - name: Create checksums
-        run: |
-          cd dist
-          sha256sum gpu.c3l-v*-linux-x64.tar.gz gpu.c3l-v*-windows-x64.zip > SHA256SUMS
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          (cd dist && sha256sum -c SHA256SUMS)
           gh release create "$GITHUB_REF_NAME" \
-            dist/gpu.c3l-v*-linux-x64.tar.gz \
-            dist/gpu.c3l-v*-windows-x64.zip \
+            dist/gpu-v*.c3l \
             dist/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \

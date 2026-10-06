@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 
 import argparse
-import gzip
+import hashlib
 import json
 import posixpath
 import re
-import shutil
 import subprocess
-import tarfile
-import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
@@ -44,18 +41,6 @@ CONSUMER_DOCS = (
     "docs/shader_abi.md",
     "docs/cookbook.md",
 )
-
-NATIVE_FILES = {
-    "linux-x64": (
-        "lib/vma.c3l/linked-libs/linux-x64/libVulkanMemoryAllocator.a",
-        "lib/spvreflect.c3l/linux/libspvreflect.a",
-    ),
-    "windows-x64": (
-        "lib/vk.c3l/windows/vulkan-1.lib",
-        "lib/vma.c3l/linked-libs/windows-x64/VulkanMemoryAllocator.lib",
-        "lib/spvreflect.c3l/windows/spvreflect.lib",
-    ),
-}
 
 FORBIDDEN_RELEASE_PATH_PARTS = frozenset(
     {
@@ -97,6 +82,16 @@ def expected_component_commit(root: Path, component_path: str) -> str:
     return fields[2]
 
 
+def exact_tag(root: Path) -> str:
+    result = subprocess.run(
+        ["git", "describe", "--tags", "--exact-match"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
 def component_metadata(root: Path) -> list[dict[str, str]]:
     metadata = []
     for component in COMPONENTS:
@@ -113,13 +108,15 @@ def component_metadata(root: Path) -> list[dict[str, str]]:
         dirty = run_git(component_root, "status", "--porcelain", "--untracked-files=no")
         if dirty:
             raise RuntimeError(f"submodule has tracked changes: {component['path']}")
-        metadata.append(
-            {
-                "name": component["name"],
-                "repository": component["repository"],
-                "commit": expected,
-            }
-        )
+        entry = {
+            "name": component["name"],
+            "repository": component["repository"],
+            "commit": expected,
+        }
+        tag = exact_tag(component_root)
+        if tag:
+            entry["tag"] = tag
+        metadata.append(entry)
     return metadata
 
 
@@ -158,168 +155,97 @@ def add_file(files: dict[str, Path], root: Path, relative: str) -> None:
     source = root / relative
     if not source.is_file():
         raise RuntimeError(f"required release file is missing: {relative}")
-    files[f"gpu.c3l/{relative}"] = source
+    files[relative] = source
 
 
-def collect_release_files(root: Path, target: str) -> dict[str, Path]:
+def collect_release_files(root: Path) -> dict[str, Path]:
     files: dict[str, Path] = {}
     for relative in ("LICENSE", "README.md", "manifest.json", *CONSUMER_DOCS):
         add_file(files, root, relative)
 
     for source in sorted((root / "gpu").rglob("*")):
         if source.is_file():
-            relative = source.relative_to(root).as_posix()
-            files[f"gpu.c3l/{relative}"] = source
+            files[source.relative_to(root).as_posix()] = source
 
     for directory in ("docs/api", "docs/util", "include/shaders", "tools/gpu_shaders/src"):
         for source in sorted((root / directory).rglob("*")):
             if source.is_file() and source.name != ".gitkeep":
-                relative = source.relative_to(root).as_posix()
-                files[f"gpu.c3l/{relative}"] = source
+                files[source.relative_to(root).as_posix()] = source
     add_file(files, root, "tools/gpu_shaders/project.json")
-
-    for component in COMPONENTS:
-        component_root = root / component["path"]
-        for name in ("manifest.json", "LICENSE", "LICENSE.spirv-reflect.apache-2.0", "NOTICE"):
-            source = component_root / name
-            if source.is_file():
-                destination = f"gpu.c3l/{component['path']}/{name}"
-                files[destination] = source
-        for pattern in ("*.c3", "*.c3i"):
-            for source in sorted(component_root.glob(pattern)):
-                destination = f"gpu.c3l/{component['path']}/{source.name}"
-                files[destination] = source
-
-    for relative in NATIVE_FILES[target]:
-        add_file(files, root, relative)
     return files
 
 
-def write_bundle_metadata(
-    root: Path,
-    staging_root: Path,
-    version: str,
-    target: str,
-    components: list[dict[str, str]],
-) -> None:
+def bundle_metadata(root: Path, version: str, components: list[dict[str, str]]) -> bytes:
     bundle = {
-        "schema": 1,
+        "schema": 2,
         "name": "gpu.c3l",
         "version": version,
-        "target": target,
         "source": {
             "repository": REPOSITORY,
             "commit": run_git(root, "rev-parse", "HEAD"),
         },
         "components": components,
     }
-    destination = staging_root / "gpu.c3l/BUNDLE.json"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(bundle, indent=2) + "\n", encoding="utf-8")
+    return (json.dumps(bundle, indent=2) + "\n").encode("utf-8")
 
 
-def stage_files(files: dict[str, Path], staging_root: Path) -> None:
-    for destination_name, source in sorted(files.items()):
-        destination = staging_root / destination_name
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
-
-
-def normalized_tar_info(info: tarfile.TarInfo) -> tarfile.TarInfo:
-    info.uid = 0
-    info.gid = 0
-    info.uname = ""
-    info.gname = ""
-    info.mtime = 0
-    info.mode = 0o644
-    return info
-
-
-def write_tar_gz(staging_root: Path, archive_path: Path) -> None:
-    with archive_path.open("wb") as raw:
-        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
-            with tarfile.open(fileobj=compressed, mode="w", format=tarfile.PAX_FORMAT) as archive:
-                for source in sorted(path for path in staging_root.rglob("*") if path.is_file()):
-                    archive.add(
-                        source,
-                        arcname=source.relative_to(staging_root).as_posix(),
-                        recursive=False,
-                        filter=normalized_tar_info,
-                    )
-
-
-def write_zip(staging_root: Path, archive_path: Path) -> None:
+def write_packed_c3l(entries: dict[str, bytes], archive_path: Path) -> None:
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        for source in sorted(path for path in staging_root.rglob("*") if path.is_file()):
-            name = source.relative_to(staging_root).as_posix()
+        for name in sorted(entries):
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o100644 << 16
-            archive.writestr(info, source.read_bytes(), compresslevel=9)
+            archive.writestr(info, entries[name], compresslevel=9)
 
 
-def read_archive_member(archive_path: Path, member: str) -> str:
-    if archive_path.suffix == ".zip":
-        with zipfile.ZipFile(archive_path) as archive:
-            return archive.read(member).decode("utf-8")
-    with tarfile.open(archive_path, "r:gz") as archive:
-        extracted = archive.extractfile(member)
-        if extracted is None:
-            raise RuntimeError(f"archive member is not a file: {member}")
-        return extracted.read().decode("utf-8")
+def write_checksums(output_dir: Path, artifacts: list[Path]) -> Path:
+    lines = [
+        f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
+        for path in sorted(artifacts)
+    ]
+    checksums = output_dir / "SHA256SUMS"
+    checksums.write_text("".join(lines), encoding="utf-8", newline="\n")
+    return checksums
 
 
 def validate_consumer_doc_links(members: set[str], archive_path: Path) -> None:
-    for member in sorted(name for name in members if name.endswith(".md")):
-        content = read_archive_member(archive_path, member)
-        for match in LINK_PATTERN.finditer(content):
-            target = match.group(1).strip().split("#", 1)[0]
-            if not target or target.startswith(("http://", "https://", "mailto:")):
-                continue
-            resolved = posixpath.normpath(
-                str(PurePosixPath(member).parent / PurePosixPath(target))
-            )
-            if resolved not in members:
-                raise RuntimeError(f"broken consumer documentation link: {member} -> {target}")
+    with zipfile.ZipFile(archive_path) as archive:
+        for member in sorted(name for name in members if name.endswith(".md")):
+            content = archive.read(member).decode("utf-8")
+            for match in LINK_PATTERN.finditer(content):
+                target = match.group(1).strip().split("#", 1)[0]
+                if not target or target.startswith(("http://", "https://", "mailto:")):
+                    continue
+                resolved = posixpath.normpath(
+                    str(PurePosixPath(member).parent / PurePosixPath(target))
+                )
+                if resolved not in members:
+                    raise RuntimeError(f"broken consumer documentation link: {member} -> {target}")
 
 
-def create_release(root: Path, version: str, target: str, output_dir: Path) -> Path:
+def create_release(root: Path, version: str, output_dir: Path) -> Path:
     root = root.resolve()
     validate_version(version)
-    if target not in NATIVE_FILES:
-        raise ValueError(f"unsupported target: {target}")
 
     components = component_metadata(root)
     validate_root_dependency_graph(root)
     validate_vma_dependency_boundary(root)
-    files = collect_release_files(root, target)
+    files = collect_release_files(root)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    suffix = ".tar.gz" if target == "linux-x64" else ".zip"
-    archive_path = output_dir / f"gpu.c3l-v{version}-{target}{suffix}"
-    with tempfile.TemporaryDirectory(prefix="gpu-c3l-release-", dir=output_dir) as staging_dir:
-        staging_root = Path(staging_dir)
-        stage_files(files, staging_root)
-        write_bundle_metadata(root, staging_root, version, target, components)
-        if target == "linux-x64":
-            write_tar_gz(staging_root, archive_path)
-        else:
-            write_zip(staging_root, archive_path)
+    entries = {name: source.read_bytes() for name, source in files.items()}
+    entries["BUNDLE.json"] = bundle_metadata(root, version, components)
 
-    if target == "linux-x64":
-        with tarfile.open(archive_path, "r:gz") as archive:
-            members = {member.name for member in archive.getmembers() if member.isfile()}
-    else:
-        with zipfile.ZipFile(archive_path) as archive:
-            members = {name for name in archive.namelist() if not name.endswith("/")}
-    validate_consumer_doc_links(members, archive_path)
+    archive_path = output_dir / f"gpu-v{version}.c3l"
+    write_packed_c3l(entries, archive_path)
+    write_checksums(output_dir, [archive_path])
+    validate_consumer_doc_links(set(entries), archive_path)
     return archive_path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build a gpu.c3l release archive for one target")
+    parser = argparse.ArgumentParser(description="Build the packed gpu .c3l release artifact")
     parser.add_argument("--version", required=True)
-    parser.add_argument("--target", required=True, choices=sorted(NATIVE_FILES))
     parser.add_argument("--output-dir", type=Path, default=Path("dist"))
     return parser.parse_args()
 
@@ -327,7 +253,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     root = Path(__file__).resolve().parents[1]
-    archive = create_release(root, args.version, args.target, args.output_dir)
+    archive = create_release(root, args.version, args.output_dir)
     print(archive)
 
 
