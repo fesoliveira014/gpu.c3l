@@ -62,6 +62,7 @@ struct DescriptorHeapState {
     uint                    sampler_next_new;
     uint[]                  texture_free;
     uint                    texture_free_count;
+    uint                    texture_view_count;
     ulong                   acceleration_structure_view_owner;
     AccelerationStructureDescriptorCell[] acceleration_structure_cells;
     uint[]                  acceleration_structure_free;
@@ -998,6 +999,7 @@ fn void commit_texture_descriptor_slot(
     cell.used = true;
     cell.generation = next_handle_generation(cell.generation)!!;
     texture_slot.live_descriptor_views++;
+    heap.texture_view_count++;
     *out_view = {
         .owner      = heap.texture_view_owner,
         .index      = texture_index_from_slot(slot),
@@ -1189,6 +1191,7 @@ fn void? vk_destroy_texture_view(
     validate_texture_view_decrement(state, owner)!;
     cell.used = false;
     owner.live_descriptor_views--;
+    state.shader_heap.descriptors.texture_view_count--;
     recycle_texture_descriptor_slot(
         &state.shader_heap.descriptors,
         view,

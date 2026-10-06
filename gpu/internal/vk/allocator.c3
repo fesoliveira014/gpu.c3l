@@ -47,6 +47,8 @@ fn gpu::MemoryStats? vk_get_memory_stats(VkDeviceState* state) {
         };
         stats.live_allocation_count += (ulong)budgets[i].statistics.allocation_count;
     }
+    stats.texture_view_count = state.shader_heap.descriptors.texture_view_count;
+    stats.texture_capacity = (uint)state.textures.slots.len;
     if (state.textures.slots.ptr != null) {
         foreach (&cell : state.textures.slots[:state.textures.next_new]) {
             if (cell.used) stats.texture_count++;

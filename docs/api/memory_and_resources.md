@@ -107,7 +107,10 @@ defer report.free(mem);
 ```
 
 `MemoryStats` holds up to `MAX_MEMORY_HEAPS` `MemoryHeapBudget` records,
-the live allocation count, and the texture count. Numbers are advisory
+the live allocation count, the texture count, the number of live texture
+views holding a texture heap slot (`texture_view_count`), and the resolved
+texture table capacity (`texture_capacity`, `RuntimeDesc.texture_capacity`
+or `DEFAULT_TEXTURE_CAPACITY` when zero). Numbers are advisory
 under concurrent allocation.
 
 ## Textures
