@@ -2,28 +2,34 @@
 
 import argparse
 import hashlib
+import io
 import subprocess
 import urllib.request
+import zipfile
 from pathlib import Path
 
 
 VMA_PATH = "lib/vma.c3l"
 # The vma.c3l release built from the commit lib/vma.c3l pins. Update the tag,
 # commit, and checksums together whenever the submodule moves.
-VMA_RELEASE_TAG = "v0.1.0"
-VMA_RELEASE_COMMIT = "431f462a69c22cda5091e0d281a83853a94f40d7"
+VMA_RELEASE_TAG = "v0.2.0"
+VMA_RELEASE_COMMIT = "b9962af789efd95e3d87d139ccf4d25d53ecdf42"
 RELEASE_URL = f"https://github.com/fesoliveira014/vma.c3l/releases/download/{VMA_RELEASE_TAG}"
 
+# Per platform: the packed artifact, its checksum from the release SHA256SUMS,
+# and the checksum of the library inside it.
 LIBRARIES = {
     "linux-x64": {
-        "asset": "libVulkanMemoryAllocator-linux-x64.a",
+        "asset": f"vma-{VMA_RELEASE_TAG}-linux-x64.c3l",
+        "asset_sha256": "09d461cfa3b064a6f3a670fc69374864799e85a198c2241c5e722f73f04547db",
         "file": "libVulkanMemoryAllocator.a",
-        "sha256": "3d4f91af9ee7cdf212a0ac690da6b7428cc16ecda0393953f3ca2b309b549f5d",
+        "sha256": "0ef10119c7848c82605637fbf9d6a6d7bef471ff625bf601232662459afbb2f6",
     },
     "windows-x64": {
-        "asset": "VulkanMemoryAllocator-windows-x64.lib",
+        "asset": f"vma-{VMA_RELEASE_TAG}-windows-x64.c3l",
+        "asset_sha256": "3cd84f562ae3f9242be9e05f8c1f95a3d0d5b40657bf1f68df33af7299136af8",
         "file": "VulkanMemoryAllocator.lib",
-        "sha256": "9b4322deb148b0879be608cfc66aa0ed19ec2493f98ec79929fdc0e2b1a9133a",
+        "sha256": "69b867e1720816a3ac65aab9e8864ea0e5170f309561c71cb3c3ed9c3577ada0",
     },
 }
 
@@ -58,10 +64,16 @@ def install_library(root: Path, target: str) -> Path:
 
     url = f"{RELEASE_URL}/{library['asset']}"
     with urllib.request.urlopen(url) as response:
-        payload = response.read()
+        artifact = response.read()
+    digest = hashlib.sha256(artifact).hexdigest()
+    if digest != library["asset_sha256"]:
+        raise RuntimeError(f"checksum mismatch for {url}: expected {library['asset_sha256']}, found {digest}")
+
+    with zipfile.ZipFile(io.BytesIO(artifact)) as archive:
+        payload = archive.read(f"linked-libs/{target}/{library['file']}")
     digest = hashlib.sha256(payload).hexdigest()
     if digest != library["sha256"]:
-        raise RuntimeError(f"checksum mismatch for {url}: expected {library['sha256']}, found {digest}")
+        raise RuntimeError(f"checksum mismatch for {library['file']} in {url}: expected {library['sha256']}, found {digest}")
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     staged = destination.with_name(f"{destination.name}.partial")
