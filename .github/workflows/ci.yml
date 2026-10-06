@@ -141,8 +141,8 @@ jobs:
           python3 -m zipfile -e "dist/gpu-v${RELEASE_VERSION}.c3l" "$CONSUMER/lib/gpu.c3l"
           for backend in vk vma spvreflect; do
             mkdir -p "$CONSUMER/lib/$backend.c3l"
-            tar -C "lib/$backend.c3l" --exclude=./.git --exclude=./test -cf - . \
-              | tar -C "$CONSUMER/lib/$backend.c3l" -xf -
+            (cd "lib/$backend.c3l" && tar --exclude=./.git --exclude=./test -cf - .) \
+              | (cd "$CONSUMER/lib/$backend.c3l" && tar -xf -)
           done
           cp -R examples/getting_started/src "$CONSUMER/src"
           cp -R examples/getting_started/shaders "$CONSUMER/shaders"
@@ -353,8 +353,8 @@ jobs:
           python -m zipfile -e "dist/gpu-v${RELEASE_VERSION}.c3l" "$CONSUMER/lib/gpu.c3l"
           for backend in vk vma spvreflect; do
             mkdir -p "$CONSUMER/lib/$backend.c3l"
-            tar -C "lib/$backend.c3l" --exclude=./.git --exclude=./test -cf - . \
-              | tar -C "$CONSUMER/lib/$backend.c3l" -xf -
+            (cd "lib/$backend.c3l" && tar --exclude=./.git --exclude=./test -cf - .) \
+              | (cd "$CONSUMER/lib/$backend.c3l" && tar -xf -)
           done
           cp -R examples/getting_started/src "$CONSUMER/src"
           cp -R examples/getting_started/shaders "$CONSUMER/shaders"
