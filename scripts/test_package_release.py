@@ -1,6 +1,5 @@
 import hashlib
 import json
-import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -16,110 +15,70 @@ class PackageReleaseTests(unittest.TestCase):
     def test_root_dependency_graph_contains_only_runtime_bindings(self) -> None:
         package_release.validate_root_dependency_graph(ROOT)
 
-    def test_linux_bundle_is_runtime_only_and_deterministic(self) -> None:
+    def test_artifact_is_packed_neutral_and_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as first_dir, tempfile.TemporaryDirectory() as second_dir:
             first = package_release.create_release(
                 root=ROOT,
                 version="0.1.0",
-                target="linux-x64",
                 output_dir=Path(first_dir),
             )
             second = package_release.create_release(
                 root=ROOT,
                 version="0.1.0",
-                target="linux-x64",
                 output_dir=Path(second_dir),
             )
+            self.assertEqual("gpu-v0.1.0.c3l", first.name)
+            self.assertEqual(first.read_bytes(), second.read_bytes())
 
+            checksums = (first.parent / "SHA256SUMS").read_text(encoding="utf-8")
             self.assertEqual(
-                hashlib.sha256(first.read_bytes()).digest(),
-                hashlib.sha256(second.read_bytes()).digest(),
+                f"{hashlib.sha256(first.read_bytes()).hexdigest()}  {first.name}\n",
+                checksums,
             )
 
-            with tarfile.open(first, "r:gz") as archive:
-                members = {member.name for member in archive.getmembers() if member.isfile()}
-                bundle = json.load(archive.extractfile("gpu.c3l/BUNDLE.json"))
-                license_text = archive.extractfile("gpu.c3l/LICENSE").read().decode("utf-8")
+            with zipfile.ZipFile(first) as archive:
+                names = archive.namelist()
+                infos = archive.infolist()
+                manifest = archive.read("manifest.json").decode("utf-8")
+                bundle = json.loads(archive.read("BUNDLE.json"))
+                license_text = archive.read("LICENSE").decode("utf-8")
+            members = set(names)
             package_release.validate_consumer_doc_links(members, first)
 
+        self.assertEqual(sorted(names), names)
+        self.assertEqual({(1980, 1, 1, 0, 0, 0)}, {info.date_time for info in infos})
+        self.assertIn('"provides": "gpu"', manifest)
         self.assert_required_members(members)
-        self.assertIn(
-            "gpu.c3l/lib/vma.c3l/linked-libs/linux-x64/libVulkanMemoryAllocator.a",
-            members,
-        )
-        self.assertIn("gpu.c3l/lib/spvreflect.c3l/linux/libspvreflect.a", members)
-        self.assertNotIn("gpu.c3l/lib/vk.c3l/windows/vulkan-1.lib", members)
-        self.assert_bundle_metadata(bundle, "linux-x64")
+        self.assert_bundle_metadata(bundle)
         self.assertIn("MIT License", license_text)
         self.assertIn("Copyright (c) 2026 fesoliveira014", license_text)
 
-    def test_windows_bundle_contains_only_windows_native_files(self) -> None:
-        with tempfile.TemporaryDirectory() as output_dir:
-            archive_path = package_release.create_release(
-                root=ROOT,
-                version="0.1.0",
-                target="windows-x64",
-                output_dir=Path(output_dir),
-            )
-            with zipfile.ZipFile(archive_path) as archive:
-                members = {name for name in archive.namelist() if not name.endswith("/")}
-                bundle = json.loads(archive.read("gpu.c3l/BUNDLE.json"))
-                license_text = archive.read("gpu.c3l/LICENSE").decode("utf-8")
-            package_release.validate_consumer_doc_links(members, archive_path)
-
-        self.assert_required_members(members)
-        self.assertIn(
-            "gpu.c3l/lib/vma.c3l/linked-libs/windows-x64/VulkanMemoryAllocator.lib",
-            members,
-        )
-        self.assertIn("gpu.c3l/lib/spvreflect.c3l/windows/spvreflect.lib", members)
-        self.assertIn("gpu.c3l/lib/vk.c3l/windows/vulkan-1.lib", members)
-        self.assertNotIn("gpu.c3l/lib/spvreflect.c3l/linux/libspvreflect.a", members)
-        self.assert_bundle_metadata(bundle, "windows-x64")
-        self.assertIn("MIT License", license_text)
-
-    def test_rejects_invalid_versions_and_targets(self) -> None:
+    def test_rejects_invalid_versions(self) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
             with self.assertRaisesRegex(ValueError, "semantic version"):
                 package_release.create_release(
                     root=ROOT,
                     version="v0.1",
-                    target="linux-x64",
-                    output_dir=Path(output_dir),
-                )
-            with self.assertRaisesRegex(ValueError, "unsupported target"):
-                package_release.create_release(
-                    root=ROOT,
-                    version="0.1.0",
-                    target="macos-x64",
                     output_dir=Path(output_dir),
                 )
 
     def assert_required_members(self, members: set[str]) -> None:
         required = {
-            "gpu.c3l/BUNDLE.json",
-            "gpu.c3l/LICENSE",
-            "gpu.c3l/README.md",
-            "gpu.c3l/manifest.json",
-            "gpu.c3l/gpu/gpu.c3",
-            "gpu.c3l/gpu/gpu.c3i",
-            "gpu.c3l/gpu/util/device_context.c3",
-            "gpu.c3l/docs/concepts.md",
-            "gpu.c3l/docs/api/index.md",
-            "gpu.c3l/docs/util/index.md",
-            "gpu.c3l/docs/util/device_context.md",
-            "gpu.c3l/include/shaders/descriptor_heap.glsl",
-            "gpu.c3l/include/shaders/generated/shader_abi.glsl",
-            "gpu.c3l/tools/gpu_shaders/project.json",
-            "gpu.c3l/tools/gpu_shaders/src/cli.c3",
-            "gpu.c3l/lib/vk.c3l/LICENSE",
-            "gpu.c3l/lib/vk.c3l/manifest.json",
-            "gpu.c3l/lib/vma.c3l/LICENSE",
-            "gpu.c3l/lib/vma.c3l/manifest.json",
-            "gpu.c3l/lib/spvreflect.c3l/LICENSE",
-            "gpu.c3l/lib/spvreflect.c3l/LICENSE.spirv-reflect.apache-2.0",
-            "gpu.c3l/lib/spvreflect.c3l/NOTICE",
-            "gpu.c3l/lib/spvreflect.c3l/manifest.json",
+            "BUNDLE.json",
+            "LICENSE",
+            "README.md",
+            "manifest.json",
+            "gpu/gpu.c3",
+            "gpu/gpu.c3i",
+            "gpu/util/device_context.c3",
+            "docs/concepts.md",
+            "docs/api/index.md",
+            "docs/util/index.md",
+            "docs/util/device_context.md",
+            "include/shaders/descriptor_heap.glsl",
+            "include/shaders/generated/shader_abi.glsl",
+            "tools/gpu_shaders/project.json",
+            "tools/gpu_shaders/src/cli.c3",
         }
         self.assertTrue(required <= members, required - members)
 
@@ -137,12 +96,13 @@ class PackageReleaseTests(unittest.TestCase):
         }
         for member in members:
             self.assertTrue(forbidden_parts.isdisjoint(Path(member).parts), member)
+            self.assertFalse(member.endswith((".a", ".lib", ".so", ".dll")), member)
+        self.assertEqual([], [member for member in members if member.startswith(("lib/", "linked-libs/"))])
 
-    def assert_bundle_metadata(self, bundle: dict, target: str) -> None:
-        self.assertEqual(1, bundle["schema"])
+    def assert_bundle_metadata(self, bundle: dict) -> None:
+        self.assertEqual(2, bundle["schema"])
         self.assertEqual("gpu.c3l", bundle["name"])
         self.assertEqual("0.1.0", bundle["version"])
-        self.assertEqual(target, bundle["target"])
         self.assertEqual(
             ["vk.c3l", "vma.c3l", "spvreflect.c3l"],
             [component["name"] for component in bundle["components"]],

@@ -70,7 +70,7 @@ When the API changes:
 - preserve ownership, fault, concurrency, and call-order details; and
 - compile every new C3 snippet against the library, and run
   `python3 -B -m unittest scripts.test_package_release`, which rejects a
-  consumer page whose relative link points outside the release bundle.
+  consumer page whose relative link points outside the release artifact.
 
 ## Build and verification
 

@@ -1,7 +1,7 @@
 {
-  // C3 library providing module `gpu`. Backend bindings (vk, vma) are vendored
-  // under lib/ as git submodules; consumers resolve them via their own
-  // dependency-search-paths (see test/project.json).
+  // C3 library providing module `gpu`. Backend bindings (vk, vma, spvreflect)
+  // are separate libraries; consumers list them in their own dependencies
+  // and dependency-search-paths (see test/project.json).
   "provides": "gpu",
   // Native libs for this library's own targets live here.
   "linklib-dir": "linked-libs",

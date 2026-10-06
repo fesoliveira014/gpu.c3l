@@ -14,8 +14,8 @@ Targets: C3 0.8.3, `linux-x64` or `windows-x64`, Vulkan 1.3.
 - `c3c --version` reports 0.8.3.
 - A Vulkan 1.3 loader and driver. On a headless Linux box, lavapipe works.
 - `glslc` (Vulkan SDK or shaderc) to compile GLSL to SPIR-V.
-- Git with submodule support and Python 3, if cloning instead of using a
-  release.
+- Git with submodule support and Python 3, if cloning instead of using
+  release artifacts.
 
 ## Install
 
@@ -24,7 +24,10 @@ Lay the application out like this:
 ```text
 hello_gpu/
 ├── lib/
-│   └── gpu.c3l/          git submodule or extracted release archive
+│   ├── gpu.c3l/          git submodule, or gpu-v<version>.c3l (file or unzipped directory)
+│   ├── vk.c3l/           release artifact or submodule
+│   ├── vma.c3l/          release artifact or submodule
+│   └── spvreflect.c3l/   release artifact or submodule
 ├── shaders/
 │   └── doubler.comp.glsl
 ├── src/
@@ -32,8 +35,14 @@ hello_gpu/
 └── project.json
 ```
 
-Add the library as a submodule pinned to a release tag, then download the
-VMA static libraries, which git does not carry:
+Download `gpu-v<version>.c3l` from the
+[latest release](https://github.com/fesoliveira014/gpu.c3l/releases/latest)
+and the `vk`, `vma` and `spvreflect` artifacts from their releases (the
+`linux-x64` or `windows-x64` build of each), and put them in `lib/`. To use
+the `gpu_shaders` tool, unzip the `gpu` artifact into `lib/gpu.c3l/`.
+
+To work from git instead, add the library as a submodule pinned to a release
+tag, then download the VMA static libraries, which git does not carry:
 
 ```sh
 git submodule add https://github.com/fesoliveira014/gpu.c3l lib/gpu.c3l
@@ -43,16 +52,14 @@ git config -f .gitmodules submodule.lib/gpu.c3l.shallow true
 python3 lib/gpu.c3l/scripts/fetch_vma_libs.py
 ```
 
-Without git, extract the archive for your target from the
-[latest release](https://github.com/fesoliveira014/gpu.c3l/releases/latest)
-into `lib/`; it unpacks as `lib/gpu.c3l`. Both forms ship `gpu`, its three
-binding packages, and the `gpu_shaders` tool. `project.json` resolves all four
-packages:
+Both forms provide `gpu`, its three binding packages, and the `gpu_shaders`
+tool. `project.json` resolves all four packages, and `lib/` is the only search
+path:
 
 ```json
 {
   "langrev": "1",
-  "dependency-search-paths": [ "lib", "lib/gpu.c3l/lib" ],
+  "dependency-search-paths": [ "lib" ],
   "dependencies": [ "gpu", "vk", "vma", "spvreflect" ],
   "output": "build",
   "wincrt": "static",

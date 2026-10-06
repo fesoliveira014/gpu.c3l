@@ -58,10 +58,17 @@ it for a platform or workload.
 
 ## Install
 
-Add the repository as a submodule at `lib/gpu.c3l`, pinned to a release tag.
-The checkout brings its three binding packages (`vk`, `vma`, `spvreflect`).
-Git does not carry the VMA static libraries; `fetch_vma_libs.py` downloads
-the `linux-x64` and `windows-x64` builds that match the pinned `vma` binding:
+Download `gpu-v<version>.c3l` and the release artifacts of the three binding
+packages (`vk`, `vma`, `spvreflect`) from their releases into `lib/`, taking
+the `linux-x64` or `windows-x64` build of each binding that has natives. The
+`gpu` artifact is platform-neutral and holds no native library. `SHA256SUMS` in
+each release checksums its files.
+
+To build from a checkout instead, add the repository as a submodule at
+`lib/gpu.c3l`, pinned to a release tag. The checkout brings its three binding
+packages. Git does not carry the VMA static libraries; `fetch_vma_libs.py`
+downloads the `linux-x64` and `windows-x64` builds that match the pinned `vma`
+binding:
 
 ```sh
 git submodule add https://github.com/fesoliveira014/gpu.c3l lib/gpu.c3l
@@ -71,11 +78,8 @@ git config -f .gitmodules submodule.lib/gpu.c3l.shallow true
 python3 lib/gpu.c3l/scripts/fetch_vma_libs.py
 ```
 
-Without git, download the archive for your target from the
-[latest release](https://github.com/fesoliveira014/gpu.c3l/releases/latest)
-and extract it into `lib/`; it unpacks to the same `lib/gpu.c3l` layout with
-the library, bindings, native libraries for that target, the `gpu_shaders`
-tool, shader include files, licenses, and consumer documentation.
+The `gpu` artifact holds the library, the `gpu_shaders` tool, shader include
+files, licenses, and consumer documentation.
 
 [Getting started](docs/getting_started.md#install) shows the `project.json`
 that resolves the four packages and the shader build.

@@ -45,19 +45,22 @@ c3c build hello_gpu --path examples/getting_started
 ./examples/getting_started/build/hello_gpu
 ```
 
-Release archive shape, its runtime-only dependency boundary, and relative
-links in the bundled consumer docs (a link to a file outside the bundle, such
-as `examples/`, fails; use a GitHub URL instead):
+Release artifact shape (one packed, platform-neutral `gpu-v<version>.c3l`
+with `manifest.json` at the zip root and no nested backend or native library),
+and relative links in the packed consumer docs (a link to a file outside the
+artifact, such as `examples/`, fails; use a GitHub URL instead):
 
 ```sh
 python3 -B -m unittest scripts.test_package_release -v
-python3 scripts/package_release.py --version 0.0.0-ci --target linux-x64 --output-dir dist
+python3 scripts/package_release.py --version 0.0.0-dev --output-dir dist
 ```
 
-CI builds both target archives, extracts the one for its platform into a
-throwaway consumer as `lib/gpu.c3l`, builds `gpu_shaders` from the extracted
-tool, compiles the getting-started shader with it, and builds and runs the
-program from `project.release.json` without touching the repository checkout.
+CI packs the artifact, unzips it into a throwaway consumer as `lib/gpu.c3l`
+beside copies of the `vk`, `vma` and `spvreflect` submodules, builds
+`gpu_shaders` from the unzipped tool, compiles the getting-started shader with
+it, and builds and runs the program from `project.release.json` without
+touching the repository checkout. Pull requests and manual runs upload the
+artifact without publishing; a `v*` tag publishes it with `SHA256SUMS`.
 
 CPU targets under `test/cpu` compile the public module against a stub backend
 with no native libraries:
