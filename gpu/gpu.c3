@@ -1867,6 +1867,22 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
     return gpu::internal::vk::vk_cmd_copy_texture_to_buffer(record, desc);
 }
 
+<* Record a texture-to-texture copy; the effective layouts are TRANSFER_SRC
+   for the source and TRANSFER_DST for the destination, and surrounding
+   barriers remain caller-owned.
+   Always checked: token phase, required pointer, identities, equal formats
+   and sample counts, transfer usages, dimension/subresource/extent bounds
+   on both sides, block alignment, overlap within one texture, and safe
+   lowering.
+   @param commands : "Live recording token outside a render pass."
+   @param desc : "Borrowed source and destination region."
+   @return "Success, or a recoverable command, validation, ownership, bounds, alignment, support, or device fault." *>
+fn void? cmd_copy_texture(CommandList* commands, TextureCopyDesc* desc) {
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    if (desc == null) return INVALID_ARGUMENT~;
+    return gpu::internal::vk::vk_cmd_copy_texture(record, desc);
+}
+
 <* Record one full BLAS or TLAS build using caller-owned input and scratch
    spans. The command inserts no barrier.
    @param commands : "Live recording token outside a render pass."

@@ -69,6 +69,7 @@
         "../src/test_texture_transition.c3",
         "../src/test_render_pass.c3",
         "../src/test_texture_support.c3",
+        "../src/test_texture_copy.c3",
         "../src/test_device_fixture.c3",
         "../src/test_device_registry.c3",
         "../src/test_diagnostics.c3",

@@ -84,6 +84,15 @@ gpu::cmd_copy_buffer_to_texture(&commands, &upload)!;
 
 gpu::TextureBufferCopyDesc readback = { .texture = texture, .dst = readback_span };
 gpu::cmd_copy_texture_to_buffer(&commands, &readback)!;
+
+gpu::TextureCopyDesc level_copy = {
+    .src     = source_texture,
+    .src_mip = 1,
+    .dst     = destination_texture,
+    .dst_mip = 0,
+    // zero width/height/depth = rest of the source mip; zero layer_count = one
+};
+gpu::cmd_copy_texture(&commands, &level_copy)!;
 ```
 
 Applications supply valid usage, alignment, bounds, and queue access. Copies
@@ -98,6 +107,17 @@ blocks: `x`, `y`, and `row_length_texels` are block multiples; `width` and
 `ceil(row_texels / 4)` blocks and a slice `ceil(height / 4)` rows, so a 1x1
 tail mip still occupies one block. The span offset is a multiple of the
 texel or block byte size and of four.
+
+`cmd_copy_texture` copies one region between two textures of equal format and
+sample count. The source needs `transfer_src` usage and the destination
+`transfer_dst`; the effective layouts are `TRANSFER_SOURCE` and
+`TRANSFER_DESTINATION`. Source and destination mip, base layer and offset are
+independent; width, height, depth and layer count are shared. Both
+textures must be 3D or both not; a 3D copy uses layer zero. For
+block-compressed formats offsets are block multiples, and the extent is a
+block multiple or reaches the mip edge on each side, so a 1x1 tail mip copies
+whole. A region inside one texture must not overlap itself, and any
+violation returns `INVALID_ARGUMENT`.
 
 ## Compute
 

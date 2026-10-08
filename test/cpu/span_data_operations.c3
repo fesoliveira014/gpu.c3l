@@ -47,6 +47,15 @@ fn void check_span_data_operations(
         desc:     &texture_to_buffer,
     );
 
+    gpu::TextureCopyDesc texture_copy = {
+        .src = {},
+        .dst = {},
+    };
+    (void)gpu::cmd_copy_texture(
+        commands: commands,
+        desc:     &texture_copy,
+    );
+
     gpu::PipelineHandle pipeline = {};
     gpu::GpuAddress root = {};
     gpu::GraphicsState graphics = {};

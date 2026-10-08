@@ -1600,6 +1600,32 @@ struct TextureBufferCopyDesc {
     TextureAspect aspect;
 }
 
+<* Texture-to-texture copy of one mip region between textures of the same
+   format. Zero width/height selects the remaining source mip extent from
+   x/y; zero 3D depth selects the remainder from z; zero layer count is one.
+   Block-compressed regions are block-aligned, and a region reaching the
+   source or destination mip edge may end on a partial block. *>
+struct TextureCopyDesc {
+    TextureHandle src;
+    uint          src_mip;
+    uint          src_base_layer;
+    uint          src_x;
+    uint          src_y;
+    uint          src_z;
+    TextureHandle dst;
+    uint          dst_mip;
+    uint          dst_base_layer;
+    uint          dst_x;
+    uint          dst_y;
+    uint          dst_z;
+    uint          layer_count;
+    uint          width;
+    uint          height;
+    uint          depth;
+    // Required for combined depth-stencil formats.
+    TextureAspect aspect;
+}
+
 const uint DEFAULT_ATTACHMENT_VIEW_CAPACITY = 4096;
 
 <* What happens to an attachment's contents when a render pass begins. *>
