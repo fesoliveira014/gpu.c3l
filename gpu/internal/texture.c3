@@ -248,3 +248,126 @@ fn bool texture_desc_valid(TextureDesc* desc) @private {
 
     return true;
 }
+
+<* Shape of one texture as a texture-to-texture copy sees it. A positive
+   depth marks a three-dimensional texture; counts are normalized. *>
+struct TextureCopyShape {
+    Format       format;
+    TextureUsage usage;
+    SampleCount  sample_count;
+    uint         width;
+    uint         height;
+    uint         depth;
+    uint         mip_levels;
+    uint         array_layers;
+}
+
+<* Copy extents after zero-value defaults; two-dimensional copies have depth one. *>
+struct TextureCopyExtent {
+    uint width;
+    uint height;
+    uint depth;
+    uint layers;
+}
+
+fn bool texture_copy_axis_valid(
+    uint offset,
+    uint size,
+    uint block,
+    uint mip_size,
+) @private {
+    if (offset > mip_size || size > mip_size - offset) return false;
+    if (offset % block != 0) return false;
+    return size % block == 0 || offset + size == mip_size;
+}
+
+fn bool texture_copy_ranges_overlap(
+    uint first,
+    uint first_size,
+    uint second,
+    uint second_size,
+) @private {
+    return first < second + second_size && second < first + first_size;
+}
+
+<* Validate a texture-to-texture copy region against both texture shapes.
+   Regions inside one texture must not overlap. *>
+fn TextureCopyExtent? resolve_texture_copy(
+    TextureCopyShape* src,
+    TextureCopyShape* dst,
+    TextureCopyDesc* desc,
+    bool same_texture,
+) @private {
+    if (src.format != dst.format || src.sample_count != dst.sample_count) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (!src.usage.transfer_src || !dst.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
+    if (desc.src_mip >= src.mip_levels || desc.dst_mip >= dst.mip_levels) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+
+    TextureAspect aspect = desc.aspect;
+    if (!texture_aspect_valid(aspect)) return gpu::INVALID_ARGUMENT~;
+    if (aspect == TextureAspect.DEPTH && !format_has_depth(src.format)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    if (aspect == TextureAspect.STENCIL && !format_has_stencil(src.format)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    FormatBlock block = format_aspect_block(src.format, aspect);
+    if (block.bytes == 0) return gpu::INVALID_ARGUMENT~;
+
+    bool is_3d = src.depth > 0;
+    if (is_3d != (dst.depth > 0)) return gpu::INVALID_ARGUMENT~;
+
+    uint src_width = gpu::texture_mip_dimension(src.width, desc.src_mip);
+    uint src_height = gpu::texture_mip_dimension(src.height, desc.src_mip);
+    uint dst_width = gpu::texture_mip_dimension(dst.width, desc.dst_mip);
+    uint dst_height = gpu::texture_mip_dimension(dst.height, desc.dst_mip);
+    uint src_depth = is_3d ? gpu::texture_mip_dimension(src.depth, desc.src_mip) : 1;
+    uint dst_depth = is_3d ? gpu::texture_mip_dimension(dst.depth, desc.dst_mip) : 1;
+
+    if (desc.src_x > src_width || desc.src_y > src_height) return gpu::INVALID_ARGUMENT~;
+    uint width = desc.width == 0 ? src_width - desc.src_x : desc.width;
+    uint height = desc.height == 0 ? src_height - desc.src_y : desc.height;
+
+    uint layers = 1;
+    uint depth = 1;
+    if (is_3d) {
+        if (desc.src_base_layer != 0 || desc.dst_base_layer != 0 || desc.layer_count > 1) {
+            return gpu::INVALID_ARGUMENT~;
+        }
+        if (desc.src_z > src_depth) return gpu::INVALID_ARGUMENT~;
+        depth = desc.depth == 0 ? src_depth - desc.src_z : desc.depth;
+        if (depth == 0 || depth > src_depth - desc.src_z
+            || desc.dst_z > dst_depth || depth > dst_depth - desc.dst_z) {
+            return gpu::INVALID_ARGUMENT~;
+        }
+    } else {
+        if (desc.src_z != 0 || desc.dst_z != 0 || desc.depth > 1) return gpu::INVALID_ARGUMENT~;
+        layers = desc.layer_count == 0 ? 1 : desc.layer_count;
+        if (desc.src_base_layer > src.array_layers
+            || layers > src.array_layers - desc.src_base_layer
+            || desc.dst_base_layer > dst.array_layers
+            || layers > dst.array_layers - desc.dst_base_layer) {
+            return gpu::INVALID_ARGUMENT~;
+        }
+    }
+
+    if (width == 0 || height == 0) return gpu::INVALID_ARGUMENT~;
+    if (!texture_copy_axis_valid(desc.src_x, width, block.width, src_width)
+        || !texture_copy_axis_valid(desc.dst_x, width, block.width, dst_width)
+        || !texture_copy_axis_valid(desc.src_y, height, block.height, src_height)
+        || !texture_copy_axis_valid(desc.dst_y, height, block.height, dst_height)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+
+    if (same_texture && desc.src_mip == desc.dst_mip
+        && texture_copy_ranges_overlap(desc.src_x, width, desc.dst_x, width)
+        && texture_copy_ranges_overlap(desc.src_y, height, desc.dst_y, height)
+        && texture_copy_ranges_overlap(desc.src_z, depth, desc.dst_z, depth)
+        && texture_copy_ranges_overlap(desc.src_base_layer, layers, desc.dst_base_layer, layers)) {
+        return gpu::INVALID_ARGUMENT~;
+    }
+    return { .width = width, .height = height, .depth = depth, .layers = layers };
+}

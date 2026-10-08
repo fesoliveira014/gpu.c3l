@@ -1923,6 +1923,13 @@ fn void? vk_cmd_copy_texture_to_buffer(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
+fn void? vk_cmd_copy_texture(
+    CommandRecord* commands,
+    gpu::TextureCopyDesc* desc,
+) {
+    return gpu::UNSUPPORTED_FEATURE~;
+}
+
 fn void? vk_cmd_bind_pipeline(
     CommandRecord* commands,
     gpu::PipelineHandle pipeline,

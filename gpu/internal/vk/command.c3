@@ -1771,6 +1771,67 @@ fn void? vk_cmd_copy_texture_to_buffer(
     record_texture_to_buffer_copy(commands, &copy);
 }
 
+fn void? vk_cmd_copy_texture(
+    CommandRecord* commands,
+    gpu::TextureCopyDesc* desc,
+) {
+    if (commands.state != gpu::internal::CommandState.RECORDING) {
+        return gpu::COMMAND_RECORDING_ERROR~;
+    }
+    VkDeviceState* state = commands.device_state;
+    TextureSlot* src = state.textures.get(desc.src)!;
+    TextureSlot* dst = state.textures.get(desc.dst)!;
+    gpu::internal::TextureCopyShape src_shape = texture_copy_shape(src);
+    gpu::internal::TextureCopyShape dst_shape = texture_copy_shape(dst);
+    gpu::internal::TextureCopyExtent extent = gpu::internal::resolve_texture_copy(
+        src:          &src_shape,
+        dst:          &dst_shape,
+        desc:         desc,
+        same_texture: src == dst,
+    )!;
+    vk::ImageAspectFlags aspect_mask = resolve_aspect(src.format, desc.aspect)!;
+
+    vk::ImageCopy region = {
+        .src_subresource = {
+            .aspect_mask      = aspect_mask,
+            .mip_level        = desc.src_mip,
+            .base_array_layer = desc.src_base_layer,
+            .layer_count      = extent.layers,
+        },
+        .src_offset      = { .x = (int)desc.src_x, .y = (int)desc.src_y, .z = (int)desc.src_z },
+        .dst_subresource = {
+            .aspect_mask      = aspect_mask,
+            .mip_level        = desc.dst_mip,
+            .base_array_layer = desc.dst_base_layer,
+            .layer_count      = extent.layers,
+        },
+        .dst_offset      = { .x = (int)desc.dst_x, .y = (int)desc.dst_y, .z = (int)desc.dst_z },
+        .extent          = { .width = extent.width, .height = extent.height, .depth = extent.depth },
+    };
+    vk::cmd_copy_image(
+        command_buffer:   commands.command_buffer,
+        src_image:        src.image,
+        src_image_layout: texture_copy_layout(src, false, state.unified_layouts),
+        dst_image:        dst.image,
+        dst_image_layout: texture_copy_layout(dst, true, state.unified_layouts),
+        region_count:     1,
+        p_regions:        &region,
+    );
+}
+
+fn gpu::internal::TextureCopyShape texture_copy_shape(TextureSlot* slot) @private {
+    return {
+        .format       = slot.format,
+        .usage        = slot.usage,
+        .sample_count = slot.sample_count,
+        .width        = slot.width,
+        .height       = slot.height,
+        .depth        = slot.depth,
+        .mip_levels   = slot.mip_levels,
+        .array_layers = slot.array_layers,
+    };
+}
+
 fn ResolvedSpan? lower_indirect_span(
     VkDeviceState* state,
     gpu::GpuSpan* span,
