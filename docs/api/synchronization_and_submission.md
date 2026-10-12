@@ -105,6 +105,13 @@ library keeps no history and does not repair a wrong `before`. A
 `TextureBarrier` value can be built inline as well; the helper functions
 only check layouts.
 
+An `UNDEFINED` `before` honors its `stages` and ignores its `access`. The
+stages enter the transition's source scope, so a submit wait that gates them
+is ordered before the transition. With empty `stages` the source scope is
+empty. For an acquired swapchain image, set `prior_state.stages` to the stage
+the submit waits on the acquire readiness at (`SubmitDesc.readiness_before`);
+see [Acquire](presentation_and_diagnostics.md#acquire).
+
 On a ray-enabled device, shader stages also cover acceleration-structure
 reads, and `.ray_tracing` covers all ray stages.
 

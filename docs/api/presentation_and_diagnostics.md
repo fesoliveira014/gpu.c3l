@@ -86,7 +86,12 @@ if (catch err = acquired) {
 
 `timeout_ns` defaults to zero (nonblocking). `AcquiredImage` holds the
 `texture`, its `attachment_view`, the one-shot `readiness`, `prior_state`,
-and `suboptimal`. Transition from `prior_state`; never assume a layout. In
+and `suboptimal`. Transition from `prior_state`; never assume a layout.
+`prior_state.stages` is empty. Before building the first transition, set it
+to the stage the submit's `readiness_before` names, for example
+`acquired.prior_state.stages = { .color_output };`, so the transition's
+source scope includes the acquire wait. An `UNDEFINED` prior state honors
+those stages and ignores access; a `PRESENT` prior state ignores them. In
 unified mode `prior_state.layout` is `GENERAL` and no transition is needed
 before rendering or presenting.
 
