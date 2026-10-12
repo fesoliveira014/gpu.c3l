@@ -501,13 +501,20 @@ fn gpu::TextureUsage swapchain_image_usage(uint granted_vk_usage) {
 }
 
 <* Build an active runtime snapshot. Pure. *>
-fn gpu::SwapchainInfo make_swapchain_info(gpu::Format format, vk::Extent2D extent, uint image_count, vk::PresentModeKHR present_mode) {
+fn gpu::SwapchainInfo make_swapchain_info(
+    gpu::Format format,
+    vk::Extent2D extent,
+    uint image_count,
+    vk::PresentModeKHR present_mode,
+    gpu::TextureUsage usage,
+) {
     return {
         .format       = format,
         .width        = extent.width,
         .height       = extent.height,
         .image_count  = image_count,
         .present_mode = present_mode_from_vk(present_mode),
+        .usage        = usage,
     };
 }
 
@@ -677,6 +684,7 @@ fn void? build_swapchain(
         if (((uint)caps.supported_usage_flags & (uint)vk::ImageUsageFlagBits.TRANSFER_SRC_BIT) != 0) {
             usage |= (uint)vk::ImageUsageFlagBits.TRANSFER_SRC_BIT;
         }
+        gpu::TextureUsage image_usage = swapchain_image_usage(usage);
 
         uint[MAX_QUEUE_FAMILIES] queue_families;
         uint queue_family_count = swapchain_queue_families(state, queue_families[..]);
@@ -770,7 +778,7 @@ fn void? build_swapchain(
                 .image                 = images[i],
                 .default_view          = view,
                 .format                = format,
-                .usage                 = swapchain_image_usage(usage),
+                .usage                 = image_usage,
                 .access                = { .graphics },
                 .sample_count          = gpu::SampleCount.ONE,
                 .width                 = extent.width,
@@ -853,6 +861,7 @@ fn void? build_swapchain(
                 extent:       extent,
                 image_count:  slot.image_count,
                 present_mode: present_mode,
+                usage:        image_usage,
             ),
         );
     };
