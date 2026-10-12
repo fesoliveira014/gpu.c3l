@@ -836,10 +836,20 @@ fn void compositional_texture_states_map_exactly() @test {
     ulong depth_access =
         (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT
         | (ulong)vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    TextureStateMapping[8] cases = {
+    TextureStateMapping[9] cases = {
         {
             { .layout = gpu::TextureLayout.UNDEFINED },
             vk::PipelineStageFlagBits2.STAGE_2_NONE,
+            vk::AccessFlagBits2.ACCESS_2_NONE,
+            vk::ImageLayout.UNDEFINED,
+        },
+        {
+            {
+                .layout = gpu::TextureLayout.UNDEFINED,
+                .stages = { .color_output },
+                .access = { .read, .write },
+            },
+            vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             vk::AccessFlagBits2.ACCESS_2_NONE,
             vk::ImageLayout.UNDEFINED,
         },
@@ -961,6 +971,42 @@ fn void compositional_texture_states_map_exactly() @test {
         "present destination has no native access");
     assert(present_after.layout == vk::ImageLayout.PRESENT_SRC_KHR,
         "present destination retains the presentation layout");
+}
+
+fn void undefined_state_stages_apply_to_the_source_side_only() @test {
+    gpu::TextureState undefined = {
+        .layout = gpu::TextureLayout.UNDEFINED,
+        .stages = { .color_output },
+    };
+    bool[2] layout_modes = { false, true };
+    foreach (unified : layout_modes) {
+        gpu::internal::vk::TextureStateScope before =
+            gpu::internal::vk::texture_state_to_vk(
+                state:         undefined,
+                format:        gpu::Format.RGBA8_UNORM,
+                side:          gpu::internal::vk::TextureStateSide.BEFORE,
+                paired_stages: {},
+                unified:       unified,
+            );
+        assert(before.stages
+                == vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            "an undefined source honors its stages in every layout mode");
+        assert(before.access == vk::AccessFlagBits2.ACCESS_2_NONE,
+            "an undefined source has no native access");
+        assert(before.layout == vk::ImageLayout.UNDEFINED,
+            "an undefined source keeps the undefined layout");
+
+        gpu::internal::vk::TextureStateScope after =
+            gpu::internal::vk::texture_state_to_vk(
+                state:         undefined,
+                format:        gpu::Format.RGBA8_UNORM,
+                side:          gpu::internal::vk::TextureStateSide.AFTER,
+                paired_stages: {},
+                unified:       unified,
+            );
+        assert(after.stages == vk::PipelineStageFlagBits2.STAGE_2_NONE,
+            "an undefined destination has no native stage");
+    }
 }
 
 fn void sampled_depth_state_chooses_depth_read_only_layout() @test {
