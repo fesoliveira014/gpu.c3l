@@ -66,9 +66,12 @@ gpu::PresentModeSupport modes = gpu::get_present_mode_support(&device, swapchain
 ```
 
 The device must have been created with this exact surface. `SwapchainInfo`
-reports the actual format, extent, image count, mode, and `dormant`.
-Build pipelines against `info.format`. A dormant swapchain (zero-sized
-window) has `UNDEFINED` format and zero extent; skip frames until a resize.
+reports the actual format, extent, image count, mode, `usage`, and `dormant`.
+Build pipelines against `info.format`. `info.usage` is the usage of every
+swapchain image: `color_attach` always, and `transfer_src` when the surface
+granted it. Check `info.usage.transfer_src` before using an acquired image as a
+copy or readback source. A dormant swapchain (zero-sized window) has
+`UNDEFINED` format, zero extent, and empty usage; skip frames until a resize.
 
 `PresentMode`: `FIFO` (vsync, always available), `IMMEDIATE` (no vsync),
 `MAILBOX` (low-latency vsync).
