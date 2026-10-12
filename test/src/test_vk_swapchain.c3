@@ -2108,18 +2108,22 @@ fn void selected_present_mode_mapping() @test {
 }
 
 fn void swapchain_info_snapshots_are_coherent() @test {
+    uint color_and_transfer_src = (uint)vk::ImageUsageFlagBits.COLOR_ATTACHMENT_BIT | (uint)vk::ImageUsageFlagBits.TRANSFER_SRC_BIT;
     vk::Extent2D first_extent = { .width = 640, .height = 480 };
     gpu::SwapchainInfo first = gpu::internal::vk::make_swapchain_info(
         format:       gpu::Format.BGRA8_UNORM,
         extent:       first_extent,
         image_count:  3,
         present_mode: vk::PresentModeKHR.FIFO_KHR,
+        usage:        gpu::internal::vk::swapchain_image_usage(color_and_transfer_src),
     );
     assert(first.format == gpu::Format.BGRA8_UNORM, "snapshot reports selected format");
     assert(first.width == 640 && first.height == 480, "snapshot reports clamped extent");
     assert(first.image_count == 3, "snapshot reports driver-returned image count");
     assert(first.present_mode == gpu::PresentMode.FIFO && !first.dormant,
         "active snapshot reports selected mode and active state");
+    assert(first.usage.color_attach && first.usage.transfer_src,
+        "snapshot reports the granted transfer_src");
 
     gpu::internal::vk::SwapchainSlot slot = {
         .info               = first,
@@ -2133,6 +2137,7 @@ fn void swapchain_info_snapshots_are_coherent() @test {
         extent:       resized_extent,
         image_count:  4,
         present_mode: vk::PresentModeKHR.MAILBOX_KHR,
+        usage:        gpu::internal::vk::swapchain_image_usage((uint)vk::ImageUsageFlagBits.COLOR_ATTACHMENT_BIT),
     );
     gpu::internal::vk::publish_active_swapchain_info(&slot, resized);
     assert(slot.info.format == gpu::Format.RGBA8_SRGB, "replacement snapshot has only the new format");
@@ -2140,6 +2145,8 @@ fn void swapchain_info_snapshots_are_coherent() @test {
         "replacement snapshot has only the new extent and count");
     assert(slot.info.present_mode == gpu::PresentMode.MAILBOX && !slot.info.dormant,
         "replacement snapshot has only the new mode and state");
+    assert(slot.info.usage.color_attach && !slot.info.usage.transfer_src,
+        "replacement snapshot has only the new usage");
     assert(!slot.acquire_pending && !slot.readiness_consumed,
         "active publication resets the acquire lifecycle");
     assert(slot.acquisition == 9, "resize does not reuse acquisition identities");
@@ -2152,6 +2159,8 @@ fn void swapchain_info_snapshots_are_coherent() @test {
         "dormant publication clears the prior extent and image count");
     assert(slot.info.present_mode == gpu::PresentMode.FIFO && slot.info.dormant,
         "dormant publication uses the documented ignored mode sentinel");
+    assert(slot.info.usage == (gpu::TextureUsage){},
+        "dormant publication clears the prior usage");
     assert(!slot.acquire_pending && !slot.readiness_consumed,
         "dormant publication resets the acquire lifecycle");
     assert(slot.acquisition == 9, "dormancy does not reuse acquisition identities");

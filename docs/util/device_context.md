@@ -149,10 +149,11 @@ Use `context.device`, `context.queue`, and `context.swapchain` with the ordinary
 [acquire, submit, and present sequence](../api/presentation_and_diagnostics.md).
 Resize, event processing, and frame scheduling remain application-controlled.
 `context.swapchain_info` contains the selected format, extent, image count,
-presentation mode, and dormant state, as returned by `get_swapchain_info` during
-creation. It is not a copy of the requested description. After a successful
-resize, assign a fresh `get_swapchain_info` result to the field; direct GPU calls
-do not update the cached snapshot. Ignore this field when `swapchain` is invalid.
+presentation mode, image usage, and dormant state, as returned by
+`get_swapchain_info` during creation. It is not a copy of the requested
+description. After a successful resize, assign a fresh `get_swapchain_info`
+result to the field; direct GPU calls do not update the cached snapshot.
+Ignore this field when `swapchain` is invalid.
 
 The factory runs synchronously once, after successful adapter enumeration and
 before selection. It must return one fresh surface owned by the supplied runtime,

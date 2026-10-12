@@ -1894,15 +1894,18 @@ struct SwapchainDesc {
 }
 
 <* Actual swapchain configuration selected by the backend. Dormant snapshots
-   use UNDEFINED format, zero extent/count, and FIFO as an ignored mode
-   sentinel. *>
+   use UNDEFINED format, zero extent/count, empty usage, and FIFO as an ignored
+   mode sentinel. *>
 struct SwapchainInfo {
-    Format      format;
-    uint        width;
-    uint        height;
-    uint        image_count;
-    PresentMode present_mode;
-    bool        dormant;
+    Format       format;
+    uint         width;
+    uint         height;
+    uint         image_count;
+    PresentMode  present_mode;
+    // Usage of every swapchain image: color_attach always, transfer_src when
+    // the surface granted it.
+    TextureUsage usage;
+    bool         dormant;
 }
 
 <* One-shot acquisition readiness. Submission accepts it exactly once. *>
