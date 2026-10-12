@@ -592,6 +592,8 @@ the frame transitions it to `COLOR_ATTACHMENT` before drawing and to
 `PRESENT` after. Second, the image is not ready to draw into at acquire time;
 the engine hands over a `readiness` token that the first submit writing the
 image must wait on, and `present` needs the completion point of that submit.
+The submit names the stage it waits at (`readiness_before`); set the same
+stage on `prior_state` so the first transition is ordered after the wait.
 
 ```c3
 fn gpu::CompletionPoint? presentation(
@@ -604,6 +606,7 @@ fn gpu::CompletionPoint? presentation(
 
     gpu::CommandList commands = gpu::begin_commands(allocator)!;
     defer (void)gpu::discard_commands(&commands);
+    acquired.prior_state.stages = { .color_output };
     gpu::TextureBarrier to_attachment = gpu::texture_transition(
         texture: acquired.texture,
         before:  acquired.prior_state,

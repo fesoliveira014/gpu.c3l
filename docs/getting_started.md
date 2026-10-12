@@ -470,12 +470,15 @@ pump events. `SWAPCHAIN_OUT_OF_DATE` means the window changed.
 ### Frame: record
 
 Transition the image from whatever [state](concepts.md#barriers-and-texture-state)
-it was in to color attachment, render, then transition it to present:
+it was in to color attachment, render, then transition it to present. The
+submit below waits on the acquire at `color_output`; set that stage on
+`prior_state` so the first transition is ordered after the wait:
 
 ```c3
 gpu::CommandList commands = gpu::begin_commands(&allocator)!;
 defer (void)gpu::discard_commands(&commands);
 
+acquired.prior_state.stages = { .color_output };
 gpu::TextureBarrier to_attachment = gpu::texture_transition(
     texture: acquired.texture,
     before:  acquired.prior_state,

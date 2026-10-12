@@ -147,7 +147,10 @@ fn TextureStateScope texture_state_to_vk(
     switch (state.layout) {
         case gpu::TextureLayout.UNDEFINED:
             return {
-                .stages = vk::PipelineStageFlagBits2.STAGE_2_NONE,
+                // An acquired image's first transition must cover the stage its acquire wait gates.
+                .stages = side == TextureStateSide.BEFORE
+                    ? barrier_before_stages_to_vk(state.stages, false, task_shaders)
+                    : vk::PipelineStageFlagBits2.STAGE_2_NONE,
                 .access = vk::AccessFlagBits2.ACCESS_2_NONE,
                 .layout = layout,
             };
