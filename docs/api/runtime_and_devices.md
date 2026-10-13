@@ -142,7 +142,9 @@ uint max_targets = caps.max_color_attachments;
 
 - selected queue roles, `async_compute`, and `presentation_enabled`;
 - `draw_indirect_count`, `generated_work`, `line_polygon_mode`,
-  `clip_distance`;
+  `clip_distance`, `sample_rate_shading`;
+- `depth_resolve_modes` (`DepthResolveSupport`: `sample_zero` is always set;
+  `min` and `max` where the device resolves depth that way);
 - `texture_heap_capacity`, `sampler_heap_capacity`, `max_color_attachments`,
   `max_push_constant_size`, `max_compute_work_group_count`,
   `max_draw_indirect_count`, `max_generated_work_count`;

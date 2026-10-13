@@ -33,7 +33,9 @@ The bytes and strings are borrowed for the create call only. Creation
 reflects the entry point and validates the push block, heap bindings, and
 stage interface. Mismatches return `SHADER_INVALID`. A module that declares
 the `ClipDistance` capability, for example by writing `gl_ClipDistance`, needs
-`caps.clip_distance`; otherwise pipeline creation returns `UNSUPPORTED_FEATURE`.
+`caps.clip_distance`; one that declares `SampleRateShading`, for example by
+reading `gl_SampleID` or `gl_SamplePosition`, needs `caps.sample_rate_shading`.
+Otherwise pipeline creation returns `UNSUPPORTED_FEATURE`.
 
 ## Compute pipelines
 
@@ -48,19 +50,21 @@ defer (void)gpu::destroy_pipeline(&device, pipeline);
 ```c3
 gpu::Format[2] color_formats = { gpu::Format.RGBA16_FLOAT, gpu::Format.RGBA8_UNORM };
 gpu::GraphicsPipelineDesc desc = {
-    .vertex_shader   = { .spirv = VERT_SPIRV[..] },
-    .fragment_shader = { .spirv = FRAG_SPIRV[..] },
-    .color_formats   = color_formats[..],
-    .depth_format    = gpu::Format.D32_FLOAT,     // UNDEFINED for no depth
-    .sample_count    = gpu::SampleCount.ONE,
-    .polygon_mode    = gpu::PolygonMode.FILL,     // LINE needs caps.line_polygon_mode
-    .debug_name      = "scene",
+    .vertex_shader      = { .spirv = VERT_SPIRV[..] },
+    .fragment_shader    = { .spirv = FRAG_SPIRV[..] },
+    .color_formats      = color_formats[..],
+    .depth_format       = gpu::Format.D32_FLOAT,   // UNDEFINED for no depth
+    .sample_count       = gpu::SampleCount.ONE,
+    .min_sample_shading = 0.0f,                    // above 0 needs caps.sample_rate_shading
+    .polygon_mode       = gpu::PolygonMode.FILL,   // LINE needs caps.line_polygon_mode
+    .debug_name         = "scene",
 };
 gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &desc)!;
 ```
 
 Pipeline identity is: shaders, color formats, depth format, sample count,
-polygon mode. Everything else is command-time state in `GraphicsState`:
+minimum sample shading, polygon mode. Everything else is command-time state
+in `GraphicsState`:
 
 | `GraphicsState` field | Type | Contents |
 |---|---|---|
@@ -92,6 +96,18 @@ returns the `ColorState`. `COLOR_WRITE_ALL` is the default mask.
 
 `MAX_COLOR_ATTACHMENTS` is 8; use `DeviceCaps.max_color_attachments` for
 the selected device.
+
+`min_sample_shading` is the fraction of a pixel's samples that run the
+fragment shader in separate invocations. Zero shades a pixel once and
+broadcasts the result to its covered samples. A value in `(0, 1]` makes the
+rasterizer shade at least that fraction of the samples separately, and `1`
+shades every sample. A value outside `[0, 1]`, or NaN, returns
+`INVALID_ARGUMENT`; a value above zero without `caps.sample_rate_shading`
+returns `UNSUPPORTED_FEATURE`. A fragment shader that reads `gl_SampleID` or
+`gl_SamplePosition` shades every sample whatever the field says, because
+Vulkan then treats the pipeline as sample-rate shaded at `1`. Negative zero
+is the same pipeline as zero. The field has no effect on a single-sample
+pipeline.
 
 ## Mesh pipelines
 

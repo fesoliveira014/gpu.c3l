@@ -101,8 +101,13 @@ by CPU tests but has not run on hardware that reports the capability.
 - Textures are 2D or 3D. A cube view covers six layers of a
   cube-compatible 2D texture and is sampled only. No 1D, array, or
   cube-array views, and no format reinterpretation.
-- Multisample textures are 2D attachments with one mip. They are resolved,
-  not sampled or copied.
+- Multisample textures are 2D attachments with one mip. They may also be
+  sampled, one sample at a time, with `texelFetch` through the multisample
+  heap aliases; they are not storage images and are not copied. Colour
+  attachments resolve into single-sample targets, and depth attachments
+  resolve with `SAMPLE_ZERO`, plus `MIN` and `MAX` where
+  `DeviceCaps.depth_resolve_modes` reports them. Sampled support is per
+  adapter and narrower than attachment support: ask `supports_texture_desc`.
 - Depth-stencil formats are `D32_FLOAT`, `D24_UNORM_S8_UINT`,
   `D32_FLOAT_S8_UINT`, and `S8_UINT` where the device reports them. The two
   aspects of a combined texture share one layout and transition together;

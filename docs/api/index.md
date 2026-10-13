@@ -102,7 +102,8 @@ Types: `Vec2f`, `Vec4f`, `Vec4u`, `Device`, `Runtime`, `RuntimeDesc`,
 `AdapterMemoryInfo`, `AdapterQueueInfo`, `AdapterLimits`, `AdapterInfo`,
 `BackendVersion`, `AdapterDiagnostics`, `Surface`, `QueueKind`, `QueueRoles`,
 `Queue`, `QueueInfo`, `QueueRequest`, `DeviceDesc`, `DeviceSupport`,
-`DeviceCaps`, `TimestampCaps`, `SparseTextureCaps`, `MeshShaderCaps`,
+`DeviceCaps`, `DepthResolveSupport`, `TimestampCaps`, `SparseTextureCaps`,
+`MeshShaderCaps`,
 `AccelerationStructureCaps`, `RayQueryCaps`, `RayTracingPipelineCaps`.
 
 Constants: `DEVICE_INVALID`, `RUNTIME_INVALID`, `ADAPTER_INVALID`,
@@ -218,8 +219,8 @@ Types: `CommandAllocatorHandle`, `CommandAllocator`, `CommandAllocatorDesc`,
 `AccelerationStructureAabbBuildDesc`,
 `AccelerationStructureGeometryBuildDesc`, `AccelerationStructureBuildDesc`,
 `IndexType`, `AttachmentViewHandle`, `AttachmentViewDesc`, `LoadOp`,
-`StoreOp`, `ClearColor`, `ClearDepth`, `ColorTargetDesc`, `DepthTargetDesc`,
-`RenderPassDesc`.
+`StoreOp`, `ClearColor`, `ClearDepth`, `DepthResolveMode`, `ColorTargetDesc`,
+`DepthTargetDesc`, `RenderPassDesc`.
 
 Constants: `COMMAND_ALLOCATOR_HANDLE_INVALID`,
 `ATTACHMENT_VIEW_HANDLE_INVALID`, `DEFAULT_COMMAND_ALLOCATOR_CAPACITY`,
