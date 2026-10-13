@@ -7,6 +7,7 @@ import vk;
 import std::core::mem;
 import std::core::mem::allocators;
 import std::atomic;
+import std::io;
 import std::thread;
 
 // Headless (lavapipe): deterministic pipeline identity, singular rollback,
@@ -20,6 +21,7 @@ const char[*] CACHE_TARGETS_FRAG_SPIRV =
 const char[*] CACHE_COMP_SPIRV     = $embed("shaders/root_pointer.comp.spv");
 const char[*] CACHE_ALT_COMP_SPIRV = $embed("shaders/heap_write.comp.spv");
 const char[*] CACHE_CLIP_VERT_SPIRV = $embed("shaders/clip_distance.vert.spv");
+const char[*] CACHE_SAMPLE_ID_FRAG_SPIRV = $embed("shaders/sample_id.frag.spv");
 
 const uint CACHE_RT_SIZE = 16;
 const usz CACHE_RT_BYTES = CACHE_RT_SIZE * CACHE_RT_SIZE * 4;
@@ -1697,6 +1699,76 @@ fn void clip_distance_respects_optional_feature() @test {
     gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &clip)!!;
     gpu::destroy_pipeline(&device, pipeline)!!;
     assert(validation.errors == 0, "ClipDistance pipeline creation is validation-clean");
+}
+
+fn void sample_shading_respects_optional_feature() @test {
+    VulkanValidationCapture validation;
+    gpu::Device device = make_offscreen_test_device(&validation);
+    defer destroy_test_device(&device)!!;
+
+    validation.errors = 0;
+    CacheShaders shaders = make_cache_shaders();
+    gpu::Format[1] pipeline_colors = { gpu::Format.RGBA8_UNORM };
+    gpu::GraphicsPipelineDesc shaded = base_graphics_desc(&shaders, pipeline_colors[..]);
+    float[4] invalid_fractions = { -0.5f, 1.5f, float::nan, float::inf };
+    foreach (fraction : invalid_fractions) {
+        shaded.min_sample_shading = fraction;
+        assert(@catch(gpu::create_graphics_pipeline(&device, &shaded)) == gpu::INVALID_ARGUMENT,
+            "a fraction outside [0, 1] faults INVALID_ARGUMENT");
+    }
+
+    vk::VkDeviceState* state = cache_test_state(&device);
+    bool supported = state.caps.sample_rate_shading;
+    state.caps.sample_rate_shading = false;
+    shaded.min_sample_shading = 0.5f;
+    uint entries_before = cache_entry_count(&device);
+    assert(@catch(gpu::create_graphics_pipeline(&device, &shaded)) == gpu::UNSUPPORTED_FEATURE,
+        "sample shading without the capability faults UNSUPPORTED_FEATURE");
+
+    gpu::ShaderDesc sample_id_shader = {
+        .spirv       = CACHE_SAMPLE_ID_FRAG_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::GraphicsPipelineDesc sample_id = base_graphics_desc(&shaders, pipeline_colors[..]);
+    sample_id.fragment_shader = sample_id_shader;
+    assert(@catch(gpu::create_graphics_pipeline(&device, &sample_id)) == gpu::UNSUPPORTED_FEATURE,
+        "a SampleId shader without the capability faults UNSUPPORTED_FEATURE");
+    assert(cache_entry_count(&device) == entries_before, "unsupported sample shading publishes no cache entry");
+    state.caps.sample_rate_shading = supported;
+
+    gpu::GraphicsPipelineDesc once = base_graphics_desc(&shaders, pipeline_colors[..]);
+    gpu::GraphicsPipelineDesc per_sample = once;
+    per_sample.min_sample_shading = 1.0f;
+    gpu::GraphicsPipelineDesc negative_zero = once;
+    negative_zero.min_sample_shading = -0.0f;
+    vk::PipelineKey once_key = vk::build_graphics_key(&once, (vk::ShaderId)1, (vk::ShaderId)2);
+    vk::PipelineKey per_sample_key = vk::build_graphics_key(&per_sample, (vk::ShaderId)1, (vk::ShaderId)2);
+    vk::PipelineKey negative_zero_key = vk::build_graphics_key(&negative_zero, (vk::ShaderId)1, (vk::ShaderId)2);
+    assert(!vk::key_equals(&once_key, &per_sample_key), "the sample shading fraction is pipeline identity");
+    assert(vk::key_equals(&once_key, &negative_zero_key)
+            && vk::hash_key(&once_key) == vk::hash_key(&negative_zero_key),
+        "negative zero shares the key of zero");
+
+    if (!supported) {
+        io::eprintfn("sample shading is unsupported on this adapter; skipping the shading checks");
+        return;
+    }
+
+    gpu::PipelineHandle sample_id_pipeline = gpu::create_graphics_pipeline(&device, &sample_id)!!;
+    gpu::destroy_pipeline(&device, sample_id_pipeline)!!;
+    gpu::SampleCount sample_count = sampled_multisample_count(
+        &device,
+        gpu::Format.RGBA8_UNORM,
+        { .color_attach, .sampled },
+    );
+    if (sample_count == gpu::SampleCount.ONE) {
+        io::eprintfn("sampled multisample color targets are unsupported on this adapter; skipping the coverage checks");
+        return;
+    }
+
+    check_sample_coverage(&device, sample_count, 0.0f);
+    check_sample_coverage(&device, sample_count, 1.0f);
+    assert(validation.errors == 0, "sample shading pipelines are validation-clean");
 }
 
 fn void compute_layout_exists_before_pipeline_creation() @test {

@@ -1403,7 +1403,9 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
    distinct handles. Depth state is bound separately during command recording.
    At most MAX_COLOR_ATTACHMENTS color targets. Ownership:
    release with destroy_pipeline, once per create. The descriptor, shaders, and
-   color-format slice are borrowed only for the call.
+   color-format slice are borrowed only for the call. `min_sample_shading`
+   outside [0, 1] is invalid; above 0, or in a stage that declares sample-rate
+   shading, it needs DeviceCaps.sample_rate_shading.
    @param device : "Live device that will own the pipeline handle."
    @param desc : "Borrowed graphics pipeline description."
    @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, compilation, or device fault." *>

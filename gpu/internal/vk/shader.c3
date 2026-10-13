@@ -786,6 +786,29 @@ fn void? normalize_shader_input(
     }
 }
 
+<* Why a module declaring an optional-feature capability the device lacks is
+   rejected, or null when every declared capability is available. *>
+fn ZString unsupported_capability_reason(
+    VkDeviceState* state,
+    uint[] words,
+) @private {
+    if (!state.caps.clip_distance && gpu::internal::spirv_declares_capability(
+        words,
+        gpu::internal::SPIRV_CAPABILITY_CLIP_DISTANCE,
+    )) {
+        return "ClipDistance requires DeviceCaps.clip_distance";
+    }
+
+    if (!state.caps.sample_rate_shading && gpu::internal::spirv_declares_capability(
+        words,
+        gpu::internal::SPIRV_CAPABILITY_SAMPLE_RATE_SHADING,
+    )) {
+        return "SampleRateShading requires DeviceCaps.sample_rate_shading";
+    }
+
+    return null;
+}
+
 <* Reflect one normalized shader and create its temporary native module. *>
 fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
     VkDeviceState* state,
@@ -904,19 +927,22 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
             invariant:      "SPIR-V storage must be retained and word-aligned",
         )~;
     }
-    if (!state.caps.clip_distance && gpu::internal::spirv_declares_capability(
+
+    ZString missing_capability = unsupported_capability_reason(
+        state,
         code.spirv_words[:code.spirv.len / uint::size],
-        gpu::internal::SPIRV_CAPABILITY_CLIP_DISTANCE,
-    )) {
+    );
+    if (missing_capability != null) {
         return report_shader_contract_failure(
             state:          state,
             operation:      operation,
             public_fault:   gpu::UNSUPPORTED_FEATURE,
             debug_name:     code.debug_name,
             rejected_field: rejected_field,
-            invariant:      "ClipDistance requires DeviceCaps.clip_distance",
+            invariant:      missing_capability,
         )~;
     }
+
     vk::ShaderModuleCreateInfo info = vk::shader_module_create_info()
         .set_code_size(code.spirv.len)
         .set_code(code.spirv_words);

@@ -234,6 +234,11 @@ fn bool color_format_is_integer(gpu::Format format) @private {
         || format == gpu::Format.R32_UINT;
 }
 
+<* Whether the fraction lies in [0, 1]; NaN and infinities are not. *>
+fn bool min_sample_shading_valid(float fraction) @private {
+    return fraction >= 0.0f && fraction <= 1.0f;
+}
+
 fn void? check_polygon_mode_support(gpu::PolygonMode mode, bool line_supported) {
     if (mode == gpu::PolygonMode.LINE && !line_supported) return gpu::UNSUPPORTED_FEATURE~;
 }
@@ -246,9 +251,15 @@ fn void? validate_graphics_pipeline_desc(
         || desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS
         || (desc.color_formats.len > 0 && desc.color_formats.ptr == null)
         || !gpu::internal::sample_count_valid(desc.sample_count)
+        || !min_sample_shading_valid(desc.min_sample_shading)
         || !polygon_mode_valid(desc.polygon_mode)) {
         return gpu::INVALID_ARGUMENT~;
     }
+
+    if (desc.min_sample_shading > 0.0f && !state.caps.sample_rate_shading) {
+        return gpu::UNSUPPORTED_FEATURE~;
+    }
+
     if (desc.depth_format != gpu::Format.UNDEFINED
         && !gpu::internal::format_is_depth_stencil(desc.depth_format)) {
         return gpu::INVALID_ARGUMENT~;
@@ -388,6 +399,10 @@ fn vk::Pipeline? create_raster_pipeline_native(
         multisample.rasterization_samples = sample_count_to_vk(
             key.sample_count,
         );
+        if (key.min_sample_shading > 0.0f) {
+            multisample.sample_shading_enable = vk::TRUE;
+            multisample.min_sample_shading = key.min_sample_shading;
+        }
 
         vk::PipelineDepthStencilStateCreateInfo depth_stencil = vk::pipeline_depth_stencil_state_create_info();
 

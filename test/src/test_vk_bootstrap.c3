@@ -81,6 +81,8 @@ fn void device_create_destroy() @test {
         "line polygon cap matches the selected physical device");
     assert(gpu::get_device_caps(&device)!!.clip_distance == (features.shader_clip_distance != 0),
         "clip distance cap matches the selected physical device");
+    assert(gpu::get_device_caps(&device)!!.sample_rate_shading == (features.sample_rate_shading != 0),
+        "sample rate shading cap matches the selected physical device");
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(state.physical_device, &props);
     vk::PhysicalDeviceTimelineSemaphoreProperties timeline_props =

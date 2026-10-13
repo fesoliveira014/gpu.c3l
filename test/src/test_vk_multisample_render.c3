@@ -9,6 +9,9 @@ import std::io;
 const char[*] MULTISAMPLE_FETCH_SPIRV =
     $embed("shaders/multisample_fetch.comp.spv");
 
+const char[*] SAMPLE_COVERAGE_FRAG_SPIRV =
+    $embed("shaders/sample_coverage.frag.spv");
+
 const uint MS_FETCH_PACKED_COLOR = 0;
 const uint MS_FETCH_DEPTH_BITS = 1;
 const uint MS_FETCH_UNSIGNED = 2;
@@ -994,4 +997,136 @@ fn void depth_resolve_writes_the_selected_sample() @test {
     }
 
     assert(validation.errors == 0, "resolving multisample depth is validation-clean");
+}
+
+fn void check_sample_coverage(
+    gpu::Device* device,
+    gpu::SampleCount sample_count,
+    float min_sample_shading,
+) {
+    uint samples = sample_count_value(sample_count);
+    gpu::TextureHandle color = make_multisample_target(
+        device:       device,
+        format:       gpu::Format.RGBA8_UNORM,
+        usage:        { .color_attach, .sampled },
+        sample_count: sample_count,
+        debug_name:   "sample_coverage_color",
+        access:       { .graphics, .compute },
+    );
+    defer gpu::destroy_texture(device, color)!!;
+    gpu::TextureView color_sampled = gpu::create_texture_view(device, color, null)!!;
+    defer gpu::destroy_texture_view(device, color_sampled)!!;
+    gpu::AttachmentViewHandle color_view = create_test_attachment_view(device, color)!!;
+    defer destroy_test_attachment_view(device, &color_view)!!;
+
+    DepthCtx shaders = make_depth_ctx();
+    gpu::ShaderDesc coverage_shader = {
+        .spirv       = SAMPLE_COVERAGE_FRAG_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::Format[1] pipeline_color_formats = { gpu::Format.RGBA8_UNORM };
+    gpu::GraphicsPipelineDesc pipeline_desc = {
+        .vertex_shader      = shaders.vert,
+        .fragment_shader    = coverage_shader,
+        .color_formats      = pipeline_color_formats[..],
+        .sample_count       = sample_count,
+        .min_sample_shading = min_sample_shading,
+        .debug_name         = "sample_coverage",
+    };
+    gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(device, &pipeline_desc)!!;
+    defer gpu::destroy_pipeline(device, pipeline)!!;
+    gpu::ShaderDesc fetch_shader = {
+        .spirv       = MULTISAMPLE_FETCH_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ComputePipelineDesc fetch_desc = { .shader = fetch_shader };
+    gpu::PipelineHandle fetch = gpu::create_compute_pipeline(device, &fetch_desc)!!;
+    defer gpu::destroy_pipeline(device, fetch)!!;
+
+    OwnedSpan vertices = write_tri(device, NEAR_Z);
+    defer free_owned_span(device, &vertices)!!;
+    OwnedSpan unused_color = write_color(device, { 0.0f, 0.0f, 0.0f, 0.0f });
+    defer free_owned_span(device, &unused_color)!!;
+    SampleReadback values = make_sample_readback(
+        device,
+        color_sampled.index,
+        samples,
+        MS_FETCH_PACKED_COLOR,
+    );
+    defer free_sample_readback(device, &values);
+
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    record_color_to_attach(&commands, color);
+    gpu::ColorTargetDesc[1] colors = {{
+        .view     = color_view,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+    }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = DP_RT,
+        .height = DP_RT,
+    };
+    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::ColorTargetState[1] color_targets = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
+    graphics_state.color = { .targets = color_targets[..] };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
+    gpu::cmd_draw(
+        commands:       &commands,
+        vertex_root:    test_span_address(device, vertices.span),
+        fragment_root:  test_span_address(device, unused_color.span),
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+
+    record_to_sampled(&commands, color);
+    bind_test_compute_pipeline(&commands, fetch);
+    record_sample_fetch(device, &commands, &values);
+
+    gpu::Barrier host_read = { .before = { .compute }, .after = { .host } };
+    gpu::cmd_barrier(&commands, &host_read)!!;
+    submit_and_finish(device, &commands);
+
+    uint* invocation_coverage = mapped_sample_values(device, &values);
+    uint edge_texels;
+    for (uint y = 0; y < DP_RT; y++) {
+        for (uint x = 0; x < DP_RT; x++) {
+            uint covered;
+            for (uint sample_index = 0; sample_index < samples; sample_index++) {
+                if (invocation_coverage[(y * DP_RT + x) * samples + sample_index] != 0) covered++;
+            }
+
+            for (uint sample_index = 0; sample_index < samples; sample_index++) {
+                uint value = invocation_coverage[(y * DP_RT + x) * samples + sample_index];
+                if (value == 0) continue;
+
+                uint expected = min_sample_shading > 0.0f ? 1 : covered;
+                assert(value == (0xFF000000 | expected),
+                    "a shaded sample records the samples its invocation covered");
+            }
+
+            if (covered > 0 && covered < samples) edge_texels++;
+        }
+    }
+
+    uint center = DP_RT / 2;
+    uint center_covered = texel_sample_count(
+        invocation_coverage,
+        samples,
+        center,
+        center,
+        0xFF000000 | (min_sample_shading > 0.0f ? 1 : samples),
+    );
+    assert(center_covered == samples, "an interior texel is covered at every sample");
+    assert(texel_sample_count(invocation_coverage, samples, 0, 0, 0) == samples,
+        "an exterior texel is not shaded");
+    assert(edge_texels > 0, "a triangle edge covers some texels partly");
 }
