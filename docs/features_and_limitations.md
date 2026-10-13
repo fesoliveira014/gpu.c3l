@@ -107,7 +107,8 @@ by CPU tests but has not run on hardware that reports the capability.
   attachments resolve into single-sample targets, and depth attachments
   resolve with `SAMPLE_ZERO`, plus `MIN` and `MAX` where
   `DeviceCaps.depth_resolve_modes` reports them. Sampled support is per
-  adapter and narrower than attachment support: ask `supports_texture_desc`.
+  adapter and can be narrower than attachment support: ask
+  `supports_texture_desc`.
 - Depth-stencil formats are `D32_FLOAT`, `D24_UNORM_S8_UINT`,
   `D32_FLOAT_S8_UINT`, and `S8_UINT` where the device reports them. The two
   aspects of a combined texture share one layout and transition together;
