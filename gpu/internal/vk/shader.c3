@@ -786,27 +786,42 @@ fn void? normalize_shader_input(
     }
 }
 
-<* Why a module declaring an optional-feature capability the device lacks is
-   rejected, or null when every declared capability is available. *>
-fn ZString unsupported_capability_reason(
+<* Fault UNSUPPORTED_FEATURE when the module declares an optional-feature
+   capability the device lacks. *>
+fn void? check_optional_capabilities(
     VkDeviceState* state,
+    ZString operation,
+    ZString debug_name,
+    ZString rejected_field,
     uint[] words,
 ) @private {
     if (!state.caps.clip_distance && gpu::internal::spirv_declares_capability(
         words,
         gpu::internal::SPIRV_CAPABILITY_CLIP_DISTANCE,
     )) {
-        return "ClipDistance requires DeviceCaps.clip_distance";
+        return report_shader_contract_failure(
+            state:          state,
+            operation:      operation,
+            public_fault:   gpu::UNSUPPORTED_FEATURE,
+            debug_name:     debug_name,
+            rejected_field: rejected_field,
+            invariant:      "ClipDistance requires DeviceCaps.clip_distance",
+        )~;
     }
 
     if (!state.caps.sample_rate_shading && gpu::internal::spirv_declares_capability(
         words,
         gpu::internal::SPIRV_CAPABILITY_SAMPLE_RATE_SHADING,
     )) {
-        return "SampleRateShading requires DeviceCaps.sample_rate_shading";
+        return report_shader_contract_failure(
+            state:          state,
+            operation:      operation,
+            public_fault:   gpu::UNSUPPORTED_FEATURE,
+            debug_name:     debug_name,
+            rejected_field: rejected_field,
+            invariant:      "SampleRateShading requires DeviceCaps.sample_rate_shading",
+        )~;
     }
-
-    return null;
 }
 
 <* Reflect one normalized shader and create its temporary native module. *>
@@ -928,20 +943,13 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
         )~;
     }
 
-    ZString missing_capability = unsupported_capability_reason(
-        state,
-        code.spirv_words[:code.spirv.len / uint::size],
-    );
-    if (missing_capability != null) {
-        return report_shader_contract_failure(
-            state:          state,
-            operation:      operation,
-            public_fault:   gpu::UNSUPPORTED_FEATURE,
-            debug_name:     code.debug_name,
-            rejected_field: rejected_field,
-            invariant:      missing_capability,
-        )~;
-    }
+    check_optional_capabilities(
+        state:          state,
+        operation:      operation,
+        debug_name:     code.debug_name,
+        rejected_field: rejected_field,
+        words:          code.spirv_words[:code.spirv.len / uint::size],
+    )!;
 
     vk::ShaderModuleCreateInfo info = vk::shader_module_create_info()
         .set_code_size(code.spirv.len)
