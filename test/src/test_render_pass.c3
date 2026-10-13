@@ -94,7 +94,27 @@ fn void render_sample_count_is_shared_by_textures_and_pipelines() @test {
     assert(!gpu::internal::texture_desc_valid(&texture),
         "multisample textures cannot have mip chains");
     texture.mip_levels = 1;
+
+    texture.usage = { .color_attach, .sampled };
+    assert(gpu::internal::texture_desc_valid(&texture),
+        "multisample color attachments may be sampled");
+
+    gpu::TextureDesc depth = texture;
+    depth.format = gpu::Format.D32_FLOAT;
+    depth.usage = { .depth_attach, .sampled };
+    assert(gpu::internal::texture_desc_valid(&depth),
+        "multisample depth attachments may be sampled");
+
     texture.usage = { .sampled };
     assert(!gpu::internal::texture_desc_valid(&texture),
-        "multisample textures stay attachment-only in the device baseline");
+        "sampled multisample textures need an attachment usage");
+    texture.usage = { .color_attach, .sampled, .storage };
+    assert(!gpu::internal::texture_desc_valid(&texture),
+        "multisample textures reject storage");
+    texture.usage = { .color_attach, .sampled, .transfer_src };
+    assert(!gpu::internal::texture_desc_valid(&texture),
+        "multisample textures reject transfer sources");
+    texture.usage = { .color_attach, .sampled, .transfer_dst };
+    assert(!gpu::internal::texture_desc_valid(&texture),
+        "multisample textures reject transfer destinations");
 }

@@ -394,6 +394,13 @@ struct SparseTextureCaps {
     QueueRoles binding_queues;
 }
 
+<* Depth resolve modes the device implements. `sample_zero` is always set. *>
+bitstruct DepthResolveSupport : uint {
+    bool sample_zero : 0;
+    bool min         : 1;
+    bool max         : 2;
+}
+
 <* Shared acceleration-structure support and limits. `indirect_build` requires
    both the optional feature and command procedure. The zero value means the
    device did not enable acceleration structures. *>
@@ -455,6 +462,11 @@ struct DeviceCaps {
     bool line_polygon_mode;
     // Shaders may declare the ClipDistance capability.
     bool clip_distance;
+    // GraphicsPipelineDesc.min_sample_shading above 0, and shaders that read
+    // SampleId or SamplePosition.
+    bool sample_rate_shading;
+    // Depth resolve modes DepthTargetDesc.resolve_mode accepts.
+    DepthResolveSupport depth_resolve_modes;
     TimestampCaps timestamps;
     AccelerationStructureCaps acceleration_structures;
     RayQueryCaps ray_queries;
@@ -902,7 +914,9 @@ bitstruct TextureFormatFeatures : uint {
     bool linear_filter : 6;
 }
 
-<* Texture sample counts implemented end-to-end by the backend. *>
+<* Texture sample counts implemented end-to-end by the backend, measured with
+   an attachment-only usage. Adding `sampled` can lower the supported counts;
+   supports_texture_desc answers the exact descriptor. *>
 bitstruct TextureSampleCountSupport : uint {
     bool one        : 0;
     bool two        : 1;
@@ -998,7 +1012,10 @@ struct DedicatedTexture {
    depth selects 3D. `access` must be a non-empty subset of the device's
    selected queue roles. A cube-compatible texture is a single-sampled 2D
    array with equal width and height and a layer count that is a multiple of
-   six; each group of six layers holds the faces +X, -X, +Y, -Y, +Z, -Z. *>
+   six; each group of six layers holds the faces +X, -X, +Y, -Y, +Z, -Z.
+   A multisample texture has one mip level and a color or depth attachment
+   usage. It may add `sampled`, which publishes a 2D view that shaders read
+   per sample; storage and transfer usages are rejected. *>
 struct TextureDesc {
     uint             width;
     uint             height;
@@ -1259,13 +1276,19 @@ struct ComputePipelineDesc {
 }
 
 <* Inputs to create_graphics_pipeline, targeting dynamic rendering. The layout
-   is fixed: the global heap set plus a 16-byte vertex/fragment root push range. *>
+   is fixed: the global heap set plus a 16-byte vertex/fragment root push range.
+   `min_sample_shading` is pipeline identity, like `sample_count`. *>
 struct GraphicsPipelineDesc {
     ShaderDesc   vertex_shader;
     ShaderDesc   fragment_shader;
     Format[]     color_formats;
     Format       depth_format;
     SampleCount  sample_count;
+    // 0 shades a pixel once. A value in (0, 1] is the fraction of a pixel's
+    // samples shaded in separate invocations, and needs
+    // DeviceCaps.sample_rate_shading. A fragment shader that reads SampleId or
+    // SamplePosition shades every sample whatever this value is.
+    float        min_sample_shading;
     PolygonMode  polygon_mode;
     ZString      debug_name;
 }
@@ -1641,6 +1664,14 @@ enum StoreOp : int {
     DONT_CARE,
 }
 
+<* Depth value a multisample depth resolve writes for each pixel. `MIN` and
+   `MAX` need the matching DeviceCaps.depth_resolve_modes bit. *>
+enum DepthResolveMode : int {
+    SAMPLE_ZERO,
+    MIN,
+    MAX,
+}
+
 <* Color clear value. Use rgba for normalized/floating-point formats and
    uint_rgba for unsigned-integer formats. *>
 union ClearColor {
@@ -1674,7 +1705,10 @@ struct ColorTargetDesc {
 
 <* One depth-stencil attachment. The depth ops apply to the depth aspect and
    the stencil ops to the stencil aspect; each `clear` value applies only with
-   its LoadOp.CLEAR. Zero stencil ops are LOAD and STORE. *>
+   its LoadOp.CLEAR. Zero stencil ops are LOAD and STORE. A valid
+   `resolve_view` is a single-sample attachment view of the same depth-only
+   format as `view`; the pass writes the `resolve_mode` value of each pixel
+   into it when the pass ends. A format with a stencil aspect cannot resolve. *>
 struct DepthTargetDesc {
     AttachmentViewHandle view;
     LoadOp               load_op;
@@ -1682,6 +1716,8 @@ struct DepthTargetDesc {
     LoadOp               stencil_load_op;
     StoreOp              stencil_store_op;
     ClearDepth           clear;
+    AttachmentViewHandle resolve_view;
+    DepthResolveMode     resolve_mode;
 }
 
 <* A dynamic render pass. Every selected attachment must cover the render

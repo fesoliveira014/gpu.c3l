@@ -9,6 +9,7 @@ const uint SPIRV_OPCODE_MASK @private              = 0xFFFF;
 const uint SPIRV_WORD_COUNT_SHIFT @private         = 16;
 const uint SPIRV_OP_CAPABILITY @private            = 17;
 const uint SPIRV_CAPABILITY_CLIP_DISTANCE @private = 32;
+const uint SPIRV_CAPABILITY_SAMPLE_RATE_SHADING @private = 35;
 
 enum ShaderRole : int {
     COMPUTE,

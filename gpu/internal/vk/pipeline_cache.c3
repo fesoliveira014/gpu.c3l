@@ -58,10 +58,11 @@ struct PipelineKey {
     gpu::Format[gpu::MAX_COLOR_ATTACHMENTS] color_formats;
     gpu::Format                             depth_format;
     gpu::SampleCount                        sample_count;
+    float                                   min_sample_shading;
     gpu::PolygonMode                        polygon_mode;
     int                                     kind;
 }
-$assert PipelineKey::size == 64;
+$assert PipelineKey::size == 68;
 
 struct PipelineCacheEntry {
     ulong                          hash;
@@ -360,6 +361,11 @@ fn void? create_driver_pipeline_cache(VkDeviceState* state, char[] cache_data) @
     return create_driver_pipeline_cache_with_ops(state, cache_data, &ops);
 }
 
+<* Folds -0.0 into 0 so equal descriptors share one key. *>
+fn float canonical_min_sample_shading(float value) @private {
+    return value == 0.0f ? 0.0f : value;
+}
+
 fn PipelineKey build_graphics_key(
     gpu::GraphicsPipelineDesc* desc,
     ShaderId vertex_shader,
@@ -372,6 +378,7 @@ fn PipelineKey build_graphics_key(
         .color_target_count = (uint)desc.color_formats.len,
         .depth_format       = desc.depth_format,
         .sample_count       = desc.sample_count,
+        .min_sample_shading = canonical_min_sample_shading(desc.min_sample_shading),
         .polygon_mode       = desc.polygon_mode,
         .kind               = (int)PipelineKind.GRAPHICS,
     };

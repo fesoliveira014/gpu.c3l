@@ -10,10 +10,10 @@
 ## Current split
 
 Pipeline identity: shaders, color formats, depth format, `sample_count`,
-`polygon_mode`. Everything else is command-time state under `GraphicsState`
-(`DynamicRasterState`, `DepthState`, `ColorState`). The private cache
-(`PipelineKey` in `gpu/internal/vk/pipeline_cache.c3`) keys on identity minus
-`debug_name`; equal descriptors share one native pipeline.
+`min_sample_shading`, `polygon_mode`. Everything else is command-time state
+under `GraphicsState` (`DynamicRasterState`, `DepthState`, `ColorState`). The
+private cache (`PipelineKey` in `gpu/internal/vk/pipeline_cache.c3`) keys on
+identity minus `debug_name`; equal descriptors share one native pipeline.
 
 ## Evidence
 
@@ -49,6 +49,10 @@ feature bits, not yet required. `LINE` is additionally gated on
 `fillModeNonSolid` and reported through `DeviceCaps.line_polygon_mode`.
 `shaderClipDistance` is enabled when supported and reported through
 `DeviceCaps.clip_distance`; a module declaring `ClipDistance` needs it.
+`sampleRateShading` is enabled the same way and reported through
+`DeviceCaps.sample_rate_shading`; `min_sample_shading` above zero and a module
+declaring `SampleRateShading` need it. The fraction is static pipeline state
+like `sample_count`, and the key folds negative zero into zero.
 Lavapipe advertises all three bits; that is a CPU driver, not a target
 adapter.
 

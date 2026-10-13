@@ -758,7 +758,9 @@ fn usz? texture_mip_aspect_bytes(TextureDesc* desc, uint mip, TextureAspect aspe
 }
 
 <* Query library-creatable features for a format. Individual feature bits do
-   not guarantee that a combination is supported.
+   not guarantee that a combination is supported. Sample counts cover an
+   attachment-only usage; use supports_texture_desc for a sampled multisample
+   texture.
    @param device : "Live device to query."
    @param format : "Public texel format to inspect."
    @return "Format support flags, or a recoverable invalid-format or device fault." *>
@@ -1401,7 +1403,9 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
    distinct handles. Depth state is bound separately during command recording.
    At most MAX_COLOR_ATTACHMENTS color targets. Ownership:
    release with destroy_pipeline, once per create. The descriptor, shaders, and
-   color-format slice are borrowed only for the call.
+   color-format slice are borrowed only for the call. `min_sample_shading`
+   outside [0, 1] is invalid. `min_sample_shading` above 0, and a stage that
+   declares SampleRateShading, need DeviceCaps.sample_rate_shading.
    @param device : "Live device that will own the pipeline handle."
    @param desc : "Borrowed graphics pipeline description."
    @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, compilation, or device fault." *>

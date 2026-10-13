@@ -786,6 +786,44 @@ fn void? normalize_shader_input(
     }
 }
 
+<* Fault UNSUPPORTED_FEATURE when the module declares an optional-feature
+   capability the device lacks. *>
+fn void? check_optional_capabilities(
+    VkDeviceState* state,
+    ZString operation,
+    ZString debug_name,
+    ZString rejected_field,
+    uint[] words,
+) @private {
+    if (!state.caps.clip_distance && gpu::internal::spirv_declares_capability(
+        words,
+        gpu::internal::SPIRV_CAPABILITY_CLIP_DISTANCE,
+    )) {
+        return report_shader_contract_failure(
+            state:          state,
+            operation:      operation,
+            public_fault:   gpu::UNSUPPORTED_FEATURE,
+            debug_name:     debug_name,
+            rejected_field: rejected_field,
+            invariant:      "ClipDistance requires DeviceCaps.clip_distance",
+        )~;
+    }
+
+    if (!state.caps.sample_rate_shading && gpu::internal::spirv_declares_capability(
+        words,
+        gpu::internal::SPIRV_CAPABILITY_SAMPLE_RATE_SHADING,
+    )) {
+        return report_shader_contract_failure(
+            state:          state,
+            operation:      operation,
+            public_fault:   gpu::UNSUPPORTED_FEATURE,
+            debug_name:     debug_name,
+            rejected_field: rejected_field,
+            invariant:      "SampleRateShading requires DeviceCaps.sample_rate_shading",
+        )~;
+    }
+}
+
 <* Reflect one normalized shader and create its temporary native module. *>
 fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
     VkDeviceState* state,
@@ -904,19 +942,15 @@ fn PipelineShaderModule? create_pipeline_shader_module_with_ops(
             invariant:      "SPIR-V storage must be retained and word-aligned",
         )~;
     }
-    if (!state.caps.clip_distance && gpu::internal::spirv_declares_capability(
-        code.spirv_words[:code.spirv.len / uint::size],
-        gpu::internal::SPIRV_CAPABILITY_CLIP_DISTANCE,
-    )) {
-        return report_shader_contract_failure(
-            state:          state,
-            operation:      operation,
-            public_fault:   gpu::UNSUPPORTED_FEATURE,
-            debug_name:     code.debug_name,
-            rejected_field: rejected_field,
-            invariant:      "ClipDistance requires DeviceCaps.clip_distance",
-        )~;
-    }
+
+    check_optional_capabilities(
+        state:          state,
+        operation:      operation,
+        debug_name:     code.debug_name,
+        rejected_field: rejected_field,
+        words:          code.spirv_words[:code.spirv.len / uint::size],
+    )!;
+
     vk::ShaderModuleCreateInfo info = vk::shader_module_create_info()
         .set_code_size(code.spirv.len)
         .set_code(code.spirv_words);

@@ -200,7 +200,8 @@ are unaffected.
 ## Textures and samplers
 
 `include/shaders/descriptor_heap.glsl` declares the global heap and helper
-functions:
+functions. Multisample textures have their own include,
+[below](#multisample-textures):
 
 | Binding (set 0) | Contents |
 |---:|---|
@@ -258,6 +259,34 @@ root.sampler = gpu::intern_sampler(&device, &sampler_desc)!; // SamplerIndex
 The indices carry no ownership. Keep the `TextureView` alive while any
 shader can read its index; a destroyed view's slot is reused at once. A
 sampler index lives until the device is destroyed.
+
+### Multisample textures
+
+A sampled multisample texture (`TextureUsage` with `color_attach` or
+`depth_attach` and `sampled`) is published at binding 0 like any sampled
+view. Its image type in SPIR-V is multisampled, so shaders access it through
+`include/shaders/multisample_heap.glsl` instead of the 2D helpers. The file
+includes `descriptor_heap.glsl` and adds two aliases of binding 0 and two
+fetch helpers:
+
+```glsl
+#include "multisample_heap.glsl"
+
+// float, normalized and depth formats; depth returns its value in .x
+vec4 sample_color = gpu_fetch_ms(root.color_ms, ivec2(gl_FragCoord.xy), sample_index);
+
+// unsigned-integer color formats
+uint layer_mask = gpu_fetch_ms_uint(root.layers_ms, ivec2(gl_FragCoord.xy), sample_index);
+```
+
+`gpu_texture_ms_heap` and `gpu_utexture_ms_heap` are the arrays behind them.
+A multisample texture has no sampler, no filtering and one mip, so `texelFetch`
+by sample index is the only access. The aliases live in a separate include
+because declaring them adds an unused variable to every module that includes
+them; a stage that includes only `descriptor_heap.glsl` compiles to the same
+SPIR-V as before. The sample index must be below the texture's sample count.
+Texture state follows the usual rule: a sampled-only multisample texture is
+read in the sampled layout.
 
 ## Acceleration structures
 

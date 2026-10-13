@@ -1,0 +1,11 @@
+abi multisample;
+
+root MultisampleFetchRoot {
+    GpuAddress   out_gpu;
+    TextureIndex texture_index;
+    uint         width;
+    uint         height;
+    uint         samples;
+    uint         mode;
+    uint         _pad0;
+}

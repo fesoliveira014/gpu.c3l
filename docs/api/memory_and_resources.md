@@ -155,14 +155,38 @@ For placement, `get_texture_requirements` returns size, alignment, a
 allocation. It fails with `RESOURCE_IN_USE` while a view or attachment view
 is live.
 
-Limits: 2D and 3D only; multisample textures are single-mip attachments;
-depth-stencil formats are 2D, single-sampled or attachment-only, never
-storage or cube. `DeviceCaps.depth_stencil_format` names the first supported
-combined format. A sampled view of a combined format sets
-`TextureViewDesc.aspect` to `DEPTH` or `STENCIL`; copies of a combined format
-set the same field on the copy descriptor and size buffers with
-`texture_mip_aspect_bytes`. `TextureBarrier.view.aspect` stays `AUTO`: both
-aspects move together.
+Limits: 2D and 3D only; multisample textures are single-mip attachments
+that may add `sampled` (see below); depth-stencil formats are 2D,
+single-sampled or attachment-only, never storage or cube.
+`DeviceCaps.depth_stencil_format` names the first supported combined format.
+A sampled view of a combined format sets `TextureViewDesc.aspect` to `DEPTH`
+or `STENCIL`; copies of a combined format set the same field on the copy
+descriptor and size buffers with `texture_mip_aspect_bytes`.
+`TextureBarrier.view.aspect` stays `AUTO`: both aspects move together.
+
+A multisample texture (`sample_count` above `ONE`) has one mip and a
+`color_attach` or `depth_attach` usage. `sampled` may be added; `storage`,
+`transfer_src` and `transfer_dst` are rejected with `INVALID_ARGUMENT`. Its
+default view is a 2D view published at binding 0 like any sampled view, and
+shaders read it per sample with the aliases of
+[`multisample_heap.glsl`](../shader_abi.md#multisample-textures). The
+adapter limits for sampled images differ from those for attachments:
+`TextureFormatSupport.sample_counts` is measured with an attachment-only
+usage, so `supports_texture_desc` with the exact descriptor is the check for
+a sampled multisample texture. `create_texture` returns `UNSUPPORTED_FEATURE`
+for a count the adapter does not offer for that usage.
+
+```c3
+gpu::TextureDesc desc = {
+    .width        = 1920,
+    .height       = 1080,
+    .format       = gpu::Format.RGBA16_FLOAT,
+    .usage        = { .color_attach, .sampled },
+    .access       = { .graphics },
+    .sample_count = gpu::SampleCount.FOUR,
+};
+if (!gpu::supports_texture_desc(&device, &desc)!) return gpu::UNSUPPORTED_FEATURE~;
+```
 
 A cube map is a 2D texture with `cube_compatible` set: equal width and
 height, single-sampled, and a layer count that is a multiple of six. Layers

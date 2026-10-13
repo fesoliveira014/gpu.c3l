@@ -211,7 +211,6 @@ fn bool texture_desc_valid(TextureDesc* desc) @private {
     }
     if (desc.sample_count != SampleCount.ONE
         && (texture_mip_levels(desc) != 1
-            || desc.usage.sampled
             || desc.usage.storage
             || desc.usage.transfer_src
             || desc.usage.transfer_dst

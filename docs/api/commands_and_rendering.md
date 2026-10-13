@@ -178,6 +178,53 @@ transition anything. Attachments must already be in `COLOR_ATTACHMENT` or
 formats, depth format, and sample count. `ColorTargetDesc.resolve_view`
 names a single-sample target for a multisample attachment.
 
+### Resolving multisample attachments
+
+A colour resolve averages float and normalized formats and takes sample 0 of
+`R8_UINT`, `R16_UINT` and `R32_UINT`. A depth resolve writes one value per
+pixel, selected by `DepthTargetDesc.resolve_mode`:
+
+```c3
+gpu::DepthTargetDesc depth = {
+    .view         = multisample_depth_view,
+    .load_op      = gpu::LoadOp.CLEAR,
+    .store_op     = gpu::StoreOp.STORE,
+    .clear        = { .depth = 1.0f },
+    .resolve_view = depth_view,                          // single-sample, same format
+    .resolve_mode = gpu::DepthResolveMode.SAMPLE_ZERO,
+};
+```
+
+`SAMPLE_ZERO` is available on every device; `MIN` and `MAX` need the matching
+bit of `DeviceCaps.depth_resolve_modes`, otherwise `cmd_begin_render_pass`
+returns `UNSUPPORTED_FEATURE`. A depth resolve view on a format with a
+stencil aspect returns `INVALID_ARGUMENT`: stencil is not resolved. The
+resolve view must be single-sample, of the attachment's format and at least
+as large as the render area.
+
+The resolve runs at the end of the pass in the colour-attachment-output
+stage, reading the multisample source with colour-attachment read access and
+writing the target with colour-attachment write access, for depth as for
+colour. A depth image that takes part in a resolve, as source or as target,
+is therefore moved through a `DEPTH_ATTACHMENT` state whose stages name
+`color_output` as well as `depth_output`:
+
+```c3
+gpu::TextureState resolve_state = {
+    .layout = gpu::TextureLayout.DEPTH_ATTACHMENT,
+    .stages = { .depth_output, .color_output },
+    .access = { .read, .write },
+};
+```
+
+Use that state for every barrier into and out of the image around the passes
+that resolve, including the first transition from `UNDEFINED` and the barrier
+between a pass that resolved the source and a later pass that loads and
+writes it. The library adds the colour-attachment access flags to a
+`DEPTH_ATTACHMENT` state that names `color_output`. A state with `depth_output`
+alone does not cover the resolve and leaves a write-after-write hazard on the
+target under synchronization validation.
+
 `ClearColor` is a union: `rgba` for float and normalized formats,
 `uint_rgba` for integer formats.
 

@@ -181,6 +181,7 @@ struct CapsInputs {
     bool                     async_compute;
     bool                     line_polygon_mode;
     bool                     clip_distance;
+    bool                     sample_rate_shading;
     uint                     texture_capacity;
     uint                     sampler_capacity;
     GeneratedWorkSupport     generated_work;
@@ -971,6 +972,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     );
     bool line_polygon_mode = line_polygon_mode_supported(&features2.features);
     bool clip_distance = clip_distance_supported(&features2.features);
+    bool sample_rate_shading = sample_rate_shading_supported(&features2.features);
 
     if (features2.features.sampler_anisotropy != 0) {
         vk::PhysicalDeviceProperties anisotropy_props;
@@ -1018,6 +1020,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         families:            &families,
         line_polygon_mode:   line_polygon_mode,
         clip_distance:       clip_distance,
+        sample_rate_shading: sample_rate_shading,
         sparse_texture_plan: &sparse_texture_plan,
         creation_ops:        creation_ops,
     )!;
@@ -1229,6 +1232,7 @@ fn gpu::Device? create_vk_device_from_runtime(
         .async_compute         = state.compute_queue_distinct,
         .line_polygon_mode     = line_polygon_mode,
         .clip_distance         = clip_distance,
+        .sample_rate_shading   = sample_rate_shading,
         .texture_capacity      = state.shader_heap.texture_capacity,
         .sampler_capacity      = state.shader_heap.sampler_capacity,
         .generated_work        = state.generated_work,
@@ -1506,6 +1510,20 @@ fn bool clip_distance_supported(vk::PhysicalDeviceFeatures* base) {
     return base.shader_clip_distance != 0;
 }
 
+<* Optional per-sample fragment shading support. Pure. *>
+fn bool sample_rate_shading_supported(vk::PhysicalDeviceFeatures* base) {
+    return base.sample_rate_shading != 0;
+}
+
+<* Depth resolve modes behind a device's supportedDepthResolveModes. Pure. *>
+fn gpu::DepthResolveSupport depth_resolve_support(vk::ResolveModeFlags modes) {
+    return {
+        .sample_zero = true,
+        .min         = ((uint)modes & (uint)vk::ResolveModeFlagBits.MIN_BIT) != 0,
+        .max         = ((uint)modes & (uint)vk::ResolveModeFlagBits.MAX_BIT) != 0,
+    };
+}
+
 <* Features required by the heap-access shader helpers. Pure. *>
 fn bool heap_shared_features_supported(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12) {
     return base.shader_storage_image_read_without_format != 0
@@ -1752,6 +1770,7 @@ fn void? create_logical_device(
     QueueFamilies* families,
     bool line_polygon_mode,
     bool clip_distance,
+    bool sample_rate_shading,
     SparseTextureFeaturePlan* sparse_texture_plan,
     DeviceCreationOps* creation_ops = null,
 ) @private {
@@ -1799,6 +1818,7 @@ fn void? create_logical_device(
             queue_infos:         queue_infos,
             line_polygon_mode:   line_polygon_mode,
             clip_distance:       clip_distance,
+            sample_rate_shading: sample_rate_shading,
             sparse_texture_plan: sparse_texture_plan,
             creation_ops:        creation_ops,
         );
@@ -1810,6 +1830,7 @@ fn void? create_logical_device_with_queue_infos(
     vk::DeviceQueueCreateInfo[] queue_infos,
     bool line_polygon_mode,
     bool clip_distance,
+    bool sample_rate_shading,
     SparseTextureFeaturePlan* sparse_texture_plan,
     DeviceCreationOps* creation_ops,
 ) @private {
@@ -1945,6 +1966,7 @@ fn void? create_logical_device_with_queue_infos(
         sparse_texture_plan.image_3d ? vk::TRUE : vk::FALSE;
     if (line_polygon_mode) features2.features.fill_mode_non_solid = vk::TRUE;
     if (clip_distance) features2.features.shader_clip_distance = vk::TRUE;
+    if (sample_rate_shading) features2.features.sample_rate_shading = vk::TRUE;
     if (state.max_sampler_anisotropy > 0) features2.features.sampler_anisotropy = vk::TRUE;
     features2.features.multi_draw_indirect = vk::TRUE;
     features2.features.shader_storage_image_read_without_format  = vk::TRUE;
@@ -2058,8 +2080,11 @@ fn gpu::DeviceCaps build_caps(
     ulong* max_timeline_difference,
     usz* non_coherent_atom_size,
 ) @private {
+    vk::PhysicalDeviceDepthStencilResolveProperties resolve_props =
+        vk::physical_device_depth_stencil_resolve_properties();
     vk::PhysicalDeviceTimelineSemaphoreProperties timeline_props =
-        vk::physical_device_timeline_semaphore_properties();
+        vk::physical_device_timeline_semaphore_properties()
+            .set_next(&resolve_props);
     vk::PhysicalDeviceProperties2 props2 =
         vk::physical_device_properties2().set_next(&timeline_props);
     vk::get_physical_device_properties2(physical_device, &props2);
@@ -2074,6 +2099,10 @@ fn gpu::DeviceCaps build_caps(
         .async_compute              = inputs.async_compute,
         .line_polygon_mode          = inputs.line_polygon_mode,
         .clip_distance              = inputs.clip_distance,
+        .sample_rate_shading        = inputs.sample_rate_shading,
+        .depth_resolve_modes        = depth_resolve_support(
+            resolve_props.supported_depth_resolve_modes,
+        ),
         .sparse_textures            = inputs.sparse_textures.enabled
             ? (gpu::SparseTextureCaps){
                 .image_2d           = inputs.sparse_textures.image_2d,
