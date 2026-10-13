@@ -1506,6 +1506,15 @@ fn bool clip_distance_supported(vk::PhysicalDeviceFeatures* base) {
     return base.shader_clip_distance != 0;
 }
 
+<* Depth resolve modes behind a device's supportedDepthResolveModes. Pure. *>
+fn gpu::DepthResolveSupport depth_resolve_support(vk::ResolveModeFlags modes) {
+    return {
+        .sample_zero = true,
+        .min         = ((uint)modes & (uint)vk::ResolveModeFlagBits.MIN_BIT) != 0,
+        .max         = ((uint)modes & (uint)vk::ResolveModeFlagBits.MAX_BIT) != 0,
+    };
+}
+
 <* Features required by the heap-access shader helpers. Pure. *>
 fn bool heap_shared_features_supported(vk::PhysicalDeviceFeatures* base, vk::PhysicalDeviceVulkan12Features* v12) {
     return base.shader_storage_image_read_without_format != 0
@@ -2058,8 +2067,11 @@ fn gpu::DeviceCaps build_caps(
     ulong* max_timeline_difference,
     usz* non_coherent_atom_size,
 ) @private {
+    vk::PhysicalDeviceDepthStencilResolveProperties resolve_props =
+        vk::physical_device_depth_stencil_resolve_properties();
     vk::PhysicalDeviceTimelineSemaphoreProperties timeline_props =
-        vk::physical_device_timeline_semaphore_properties();
+        vk::physical_device_timeline_semaphore_properties()
+            .set_next(&resolve_props);
     vk::PhysicalDeviceProperties2 props2 =
         vk::physical_device_properties2().set_next(&timeline_props);
     vk::get_physical_device_properties2(physical_device, &props2);
@@ -2074,6 +2086,9 @@ fn gpu::DeviceCaps build_caps(
         .async_compute              = inputs.async_compute,
         .line_polygon_mode          = inputs.line_polygon_mode,
         .clip_distance              = inputs.clip_distance,
+        .depth_resolve_modes        = depth_resolve_support(
+            resolve_props.supported_depth_resolve_modes,
+        ),
         .sparse_textures            = inputs.sparse_textures.enabled
             ? (gpu::SparseTextureCaps){
                 .image_2d           = inputs.sparse_textures.image_2d,

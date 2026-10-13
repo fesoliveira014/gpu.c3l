@@ -137,6 +137,26 @@ fn vk::ResolveModeFlagBits color_resolve_mode(gpu::Format format) @private {
     }
 }
 
+fn vk::ResolveModeFlagBits? depth_resolve_mode_to_vk(
+    gpu::DepthResolveMode mode,
+    gpu::DepthResolveSupport support,
+) @private {
+    switch (mode) {
+        case gpu::DepthResolveMode.SAMPLE_ZERO:
+            return vk::ResolveModeFlagBits.SAMPLE_ZERO_BIT;
+        case gpu::DepthResolveMode.MIN:
+            if (!support.min) return gpu::UNSUPPORTED_FEATURE~;
+
+            return vk::ResolveModeFlagBits.MIN_BIT;
+        case gpu::DepthResolveMode.MAX:
+            if (!support.max) return gpu::UNSUPPORTED_FEATURE~;
+
+            return vk::ResolveModeFlagBits.MAX_BIT;
+        default:
+            return gpu::INVALID_ARGUMENT~;
+    }
+}
+
 fn vk::ClearColorValue clear_color_to_vk(
     gpu::Format format,
     gpu::ClearColor clear,
@@ -356,6 +376,22 @@ fn PreparedRenderPass? lower_render_pass(
             pass.stencil_attachment.load_op = load_op_to_vk(desc.depth.stencil_load_op);
             pass.stencil_attachment.store_op = store_op_to_vk(desc.depth.stencil_store_op);
             pass.stencil_attachment.clear_value.depth_stencil = clear;
+        }
+
+        if (desc.depth.resolve_view.is_valid()) {
+            if (pass.has_stencil_aspect) return gpu::INVALID_ARGUMENT~;
+
+            AttachmentViewSlot* resolve = state.attachment_views.get(
+                desc.depth.resolve_view,
+            )!;
+            if (resolve.native == null) return gpu::INVALID_RESOURCE_STATE~;
+
+            pass.depth_attachment.resolve_mode = depth_resolve_mode_to_vk(
+                desc.depth.resolve_mode,
+                state.caps.depth_resolve_modes,
+            )!;
+            pass.depth_attachment.resolve_image_view = resolve.native;
+            pass.depth_attachment.resolve_image_layout = layout;
         }
     }
     if (desc.width == 0 && desc.height == 0) {

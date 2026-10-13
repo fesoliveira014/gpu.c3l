@@ -640,3 +640,358 @@ fn void multisample_texture_reads_each_sample() @test {
 
     assert(validation.errors == 0, "sampling multisample targets is validation-clean");
 }
+
+struct DepthResolveTargets {
+    gpu::TextureHandle        source;
+    gpu::TextureView          source_sampled;
+    gpu::AttachmentViewHandle source_view;
+    gpu::TextureHandle        target;
+    gpu::TextureView          target_sampled;
+    gpu::AttachmentViewHandle target_view;
+}
+
+fn DepthResolveTargets make_depth_resolve_targets(
+    gpu::Device* device,
+    gpu::SampleCount sample_count,
+) {
+    DepthResolveTargets targets;
+    targets.source = make_multisample_target(
+        device:       device,
+        format:       gpu::Format.D32_FLOAT,
+        usage:        { .depth_attach, .sampled },
+        sample_count: sample_count,
+        debug_name:   "depth_resolve_source",
+        access:       { .graphics, .compute },
+    );
+    targets.source_sampled = gpu::create_texture_view(device, targets.source, null)!!;
+    targets.source_view = create_test_attachment_view(device, targets.source)!!;
+    targets.target = make_multisample_target(
+        device:       device,
+        format:       gpu::Format.D32_FLOAT,
+        usage:        { .depth_attach, .sampled },
+        sample_count: gpu::SampleCount.ONE,
+        debug_name:   "depth_resolve_target",
+        access:       { .graphics, .compute },
+    );
+    targets.target_sampled = gpu::create_texture_view(device, targets.target, null)!!;
+    targets.target_view = create_test_attachment_view(device, targets.target)!!;
+    return targets;
+}
+
+fn void destroy_depth_resolve_targets(
+    gpu::Device* device,
+    DepthResolveTargets* targets,
+) {
+    destroy_test_attachment_view(device, &targets.target_view)!!;
+    gpu::destroy_texture_view(device, targets.target_sampled)!!;
+    gpu::destroy_texture(device, targets.target)!!;
+    destroy_test_attachment_view(device, &targets.source_view)!!;
+    gpu::destroy_texture_view(device, targets.source_sampled)!!;
+    gpu::destroy_texture(device, targets.source)!!;
+}
+
+fn gpu::TextureState depth_resolve_state() {
+    return {
+        .layout = gpu::TextureLayout.DEPTH_ATTACHMENT,
+        .stages = { .depth_output, .color_output },
+        .access = { .read, .write },
+    };
+}
+
+fn void record_depth_resolve_attach(
+    gpu::CommandList* commands,
+    gpu::TextureHandle texture,
+) {
+    gpu::TextureBarrier to_attach = gpu::texture_transition(
+        texture: texture,
+        before:  { .layout = gpu::TextureLayout.UNDEFINED },
+        after:   depth_resolve_state(),
+    )!!;
+    gpu::cmd_texture_barrier(commands, &to_attach)!!;
+}
+
+fn void record_depth_resolve_order(
+    gpu::CommandList* commands,
+    gpu::TextureHandle texture,
+) {
+    gpu::TextureBarrier order = gpu::texture_transition(
+        texture: texture,
+        before:  depth_resolve_state(),
+        after:   depth_resolve_state(),
+    )!!;
+    gpu::cmd_texture_barrier(commands, &order)!!;
+}
+
+fn void record_depth_resolve_to_sampled(
+    gpu::CommandList* commands,
+    gpu::TextureHandle texture,
+) {
+    gpu::TextureBarrier to_sampled = gpu::texture_transition(
+        texture: texture,
+        before:  depth_resolve_state(),
+        after:   gpu::sampled_at({ .compute }),
+    )!!;
+    gpu::cmd_texture_barrier(commands, &to_sampled)!!;
+}
+
+fn void record_depth_resolve_pass(
+    gpu::CommandList* commands,
+    DepthResolveTargets* targets,
+    gpu::LoadOp load_op,
+    gpu::DepthResolveMode mode,
+) {
+    gpu::DepthTargetDesc depth_target = {
+        .view         = targets.source_view,
+        .load_op      = load_op,
+        .store_op     = gpu::StoreOp.STORE,
+        .clear        = { .depth = 1.0f },
+        .resolve_view = targets.target_view,
+        .resolve_mode = mode,
+    };
+    gpu::RenderPassDesc pass = {
+        .depth  = &depth_target,
+        .width  = DP_RT,
+        .height = DP_RT,
+    };
+    gpu::cmd_begin_render_pass(commands, &pass)!!;
+}
+
+fn float selected_depth(
+    gpu::DepthResolveMode mode,
+    float first,
+    float lowest,
+    float highest,
+) {
+    switch (mode) {
+        case gpu::DepthResolveMode.MIN: return lowest;
+        case gpu::DepthResolveMode.MAX: return highest;
+        default:                        return first;
+    }
+}
+
+fn void check_depth_resolve(
+    gpu::Device* device,
+    gpu::SampleCount sample_count,
+    gpu::DepthResolveMode mode,
+) {
+    uint samples = sample_count_value(sample_count);
+    DepthResolveTargets targets = make_depth_resolve_targets(device, sample_count);
+    defer destroy_depth_resolve_targets(device, &targets);
+
+    DepthCtx shaders = make_depth_ctx();
+    gpu::GraphicsPipelineDesc pipeline_desc = {
+        .vertex_shader   = shaders.vert,
+        .fragment_shader = shaders.frag,
+        .depth_format    = gpu::Format.D32_FLOAT,
+        .sample_count    = sample_count,
+        .debug_name      = "depth_resolve",
+    };
+    gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(device, &pipeline_desc)!!;
+    defer gpu::destroy_pipeline(device, pipeline)!!;
+    gpu::ShaderDesc fetch_shader = {
+        .spirv       = MULTISAMPLE_FETCH_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ComputePipelineDesc fetch_desc = { .shader = fetch_shader };
+    gpu::PipelineHandle fetch = gpu::create_compute_pipeline(device, &fetch_desc)!!;
+    defer gpu::destroy_pipeline(device, fetch)!!;
+
+    OwnedSpan far_vertices = write_tri(device, FAR_Z);
+    defer free_owned_span(device, &far_vertices)!!;
+    OwnedSpan near_vertices = write_tri(device, NEAR_Z);
+    defer free_owned_span(device, &near_vertices)!!;
+    OwnedSpan unused_color = write_color(device, { 0.0f, 0.0f, 0.0f, 0.0f });
+    defer free_owned_span(device, &unused_color)!!;
+    SampleReadback source_values = make_sample_readback(
+        device,
+        targets.source_sampled.index,
+        samples,
+        MS_FETCH_DEPTH_BITS,
+    );
+    defer free_sample_readback(device, &source_values);
+    SampleReadback target_values = make_sample_readback(
+        device,
+        targets.target_sampled.index,
+        1,
+        MS_FETCH_SINGLE_SAMPLE_DEPTH_BITS,
+    );
+    defer free_sample_readback(device, &target_values);
+
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    record_depth_resolve_attach(&commands, targets.source);
+    record_depth_resolve_attach(&commands, targets.target);
+
+    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    graphics_state.depth = {
+        .test_enable  = true,
+        .write_enable = true,
+        .compare      = gpu::CompareOp.LESS,
+    };
+    record_depth_resolve_pass(&commands, &targets, gpu::LoadOp.CLEAR, mode);
+    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
+    gpu::cmd_draw(
+        commands:       &commands,
+        vertex_root:    test_span_address(device, far_vertices.span),
+        fragment_root:  test_span_address(device, unused_color.span),
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+
+    record_depth_resolve_order(&commands, targets.source);
+    record_depth_resolve_order(&commands, targets.target);
+
+    record_depth_resolve_pass(&commands, &targets, gpu::LoadOp.LOAD, mode);
+    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
+    gpu::cmd_draw(
+        commands:       &commands,
+        vertex_root:    test_span_address(device, near_vertices.span),
+        fragment_root:  test_span_address(device, unused_color.span),
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+
+    record_depth_resolve_to_sampled(&commands, targets.source);
+    record_depth_resolve_to_sampled(&commands, targets.target);
+
+    bind_test_compute_pipeline(&commands, fetch);
+    record_sample_fetch(device, &commands, &source_values);
+    record_sample_fetch(device, &commands, &target_values);
+
+    gpu::Barrier host_read = { .before = { .compute }, .after = { .host } };
+    gpu::cmd_barrier(&commands, &host_read)!!;
+    submit_and_finish(device, &commands);
+
+    uint* source_bits = mapped_sample_values(device, &source_values);
+    uint* resolved_bits = mapped_sample_values(device, &target_values);
+    uint edge_texels;
+    for (uint texel = 0; texel < DP_RT * DP_RT; texel++) {
+        float first = bitcast(source_bits[texel * samples], float);
+        float lowest = first;
+        float highest = first;
+        for (uint sample_index = 1; sample_index < samples; sample_index++) {
+            float depth = bitcast(source_bits[texel * samples + sample_index], float);
+            if (depth < lowest) lowest = depth;
+            if (depth > highest) highest = depth;
+        }
+
+        assert(bitcast(resolved_bits[texel], float) == selected_depth(mode, first, lowest, highest),
+            "the resolve writes the selected sample value of every texel");
+        assert((lowest == NEAR_Z || lowest == 1.0f) && (highest == NEAR_Z || highest == 1.0f),
+            "every sample holds the drawn depth or the clear depth");
+        if (lowest != highest) edge_texels++;
+    }
+
+    float center = bitcast(resolved_bits[DP_RT / 2 * DP_RT + DP_RT / 2], float);
+    float corner = bitcast(resolved_bits[0], float);
+    assert(center == NEAR_Z && corner == 1.0f,
+        "interior texels resolve to the drawn depth and exterior texels to the clear depth");
+    assert(edge_texels > 0, "a triangle edge splits some texels between the two depths");
+}
+
+fn fault begin_depth_resolve_fault(
+    gpu::Device* device,
+    gpu::AttachmentViewHandle source_view,
+    gpu::AttachmentViewHandle resolve_view,
+    gpu::DepthResolveMode mode,
+) {
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    gpu::DepthTargetDesc depth_target = {
+        .view         = source_view,
+        .load_op      = gpu::LoadOp.CLEAR,
+        .store_op     = gpu::StoreOp.STORE,
+        .resolve_view = resolve_view,
+        .resolve_mode = mode,
+    };
+    gpu::RenderPassDesc pass = {
+        .depth  = &depth_target,
+        .width  = DP_RT,
+        .height = DP_RT,
+    };
+    return @catch(gpu::cmd_begin_render_pass(&commands, &pass));
+}
+
+fn void depth_resolve_writes_the_selected_sample() @test {
+    VulkanValidationCapture validation;
+    gpu::Device device = make_offscreen_test_device(&validation);
+    defer destroy_test_device(&device)!!;
+
+    validation.errors = 0;
+    gpu::SampleCount sample_count = sampled_multisample_count(
+        &device,
+        gpu::Format.D32_FLOAT,
+        { .depth_attach, .sampled },
+    );
+    if (sample_count == gpu::SampleCount.ONE) {
+        io::eprintfn("sampled multisample depth targets are unsupported on this adapter; skipping");
+        return;
+    }
+
+    gpu::DepthResolveSupport supported = gpu::get_device_caps(&device)!!.depth_resolve_modes;
+    assert(supported.sample_zero, "every device resolves depth with sample zero");
+    check_depth_resolve(&device, sample_count, gpu::DepthResolveMode.SAMPLE_ZERO);
+    if (supported.min) check_depth_resolve(&device, sample_count, gpu::DepthResolveMode.MIN);
+    if (supported.max) check_depth_resolve(&device, sample_count, gpu::DepthResolveMode.MAX);
+
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+    state.caps.depth_resolve_modes = { .sample_zero = true };
+    DepthResolveTargets targets = make_depth_resolve_targets(&device, sample_count);
+    defer destroy_depth_resolve_targets(&device, &targets);
+
+    assert(begin_depth_resolve_fault(&device, targets.source_view, targets.target_view, gpu::DepthResolveMode.MIN)
+            == gpu::UNSUPPORTED_FEATURE,
+        "an unreported MIN resolve faults UNSUPPORTED_FEATURE");
+    assert(begin_depth_resolve_fault(&device, targets.source_view, targets.target_view, gpu::DepthResolveMode.MAX)
+            == gpu::UNSUPPORTED_FEATURE,
+        "an unreported MAX resolve faults UNSUPPORTED_FEATURE");
+    state.caps.depth_resolve_modes = supported;
+
+    gpu::Format stencil_format = gpu::get_device_caps(&device)!!.depth_stencil_format;
+    if (stencil_format == gpu::Format.UNDEFINED) {
+        io::eprintfn("no combined depth-stencil format on this adapter; skipping the stencil resolve fault");
+    } else {
+        gpu::TextureHandle stencil_source = make_multisample_target(
+            device:       &device,
+            format:       stencil_format,
+            usage:        { .depth_attach },
+            sample_count: gpu::SampleCount.ONE,
+            debug_name:   "depth_resolve_stencil_source",
+        );
+        defer gpu::destroy_texture(&device, stencil_source)!!;
+        gpu::AttachmentViewHandle stencil_source_view = create_test_attachment_view(&device, stencil_source)!!;
+        defer destroy_test_attachment_view(&device, &stencil_source_view)!!;
+        gpu::TextureHandle stencil_target = make_multisample_target(
+            device:       &device,
+            format:       stencil_format,
+            usage:        { .depth_attach },
+            sample_count: gpu::SampleCount.ONE,
+            debug_name:   "depth_resolve_stencil_target",
+        );
+        defer gpu::destroy_texture(&device, stencil_target)!!;
+        gpu::AttachmentViewHandle stencil_target_view = create_test_attachment_view(&device, stencil_target)!!;
+        defer destroy_test_attachment_view(&device, &stencil_target_view)!!;
+
+        assert(begin_depth_resolve_fault(
+                &device,
+                stencil_source_view,
+                stencil_target_view,
+                gpu::DepthResolveMode.SAMPLE_ZERO,
+            ) == gpu::INVALID_ARGUMENT,
+            "a depth resolve view on a format with a stencil aspect faults INVALID_ARGUMENT");
+    }
+
+    assert(validation.errors == 0, "resolving multisample depth is validation-clean");
+}

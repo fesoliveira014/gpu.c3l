@@ -394,6 +394,13 @@ struct SparseTextureCaps {
     QueueRoles binding_queues;
 }
 
+<* Depth resolve modes the device implements. `sample_zero` is always set. *>
+bitstruct DepthResolveSupport : uint {
+    bool sample_zero : 0;
+    bool min         : 1;
+    bool max         : 2;
+}
+
 <* Shared acceleration-structure support and limits. `indirect_build` requires
    both the optional feature and command procedure. The zero value means the
    device did not enable acceleration structures. *>
@@ -455,6 +462,8 @@ struct DeviceCaps {
     bool line_polygon_mode;
     // Shaders may declare the ClipDistance capability.
     bool clip_distance;
+    // Depth resolve modes DepthTargetDesc.resolve_mode accepts.
+    DepthResolveSupport depth_resolve_modes;
     TimestampCaps timestamps;
     AccelerationStructureCaps acceleration_structures;
     RayQueryCaps ray_queries;
@@ -1646,6 +1655,14 @@ enum StoreOp : int {
     DONT_CARE,
 }
 
+<* Depth value a multisample depth resolve writes for each pixel. `MIN` and
+   `MAX` need the matching DeviceCaps.depth_resolve_modes bit. *>
+enum DepthResolveMode : int {
+    SAMPLE_ZERO,
+    MIN,
+    MAX,
+}
+
 <* Color clear value. Use rgba for normalized/floating-point formats and
    uint_rgba for unsigned-integer formats. *>
 union ClearColor {
@@ -1679,7 +1696,10 @@ struct ColorTargetDesc {
 
 <* One depth-stencil attachment. The depth ops apply to the depth aspect and
    the stencil ops to the stencil aspect; each `clear` value applies only with
-   its LoadOp.CLEAR. Zero stencil ops are LOAD and STORE. *>
+   its LoadOp.CLEAR. Zero stencil ops are LOAD and STORE. A valid
+   `resolve_view` is a single-sample attachment view of the same depth-only
+   format as `view`; the pass writes the `resolve_mode` value of each pixel
+   into it when the pass ends. A format with a stencil aspect cannot resolve. *>
 struct DepthTargetDesc {
     AttachmentViewHandle view;
     LoadOp               load_op;
@@ -1687,6 +1707,8 @@ struct DepthTargetDesc {
     LoadOp               stencil_load_op;
     StoreOp              stencil_store_op;
     ClearDepth           clear;
+    AttachmentViewHandle resolve_view;
+    DepthResolveMode     resolve_mode;
 }
 
 <* A dynamic render pass. Every selected attachment must cover the render

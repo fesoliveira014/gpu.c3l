@@ -89,6 +89,20 @@ fn vk::AccessFlags2 texture_access_to_vk(
     return (vk::AccessFlags2)mask;
 }
 
+<* A depth attachment state that names the color-output stage also covers the
+   render-pass resolve, which runs at that stage with color-attachment access. *>
+fn vk::AccessFlags2 depth_attachment_access_to_vk(gpu::TextureState state) {
+    ulong mask = (ulong)texture_access_to_vk(state.layout, state.access);
+    if (state.stages.color_output) {
+        mask |= (ulong)texture_access_to_vk(
+            gpu::TextureLayout.COLOR_ATTACHMENT,
+            state.access,
+        );
+    }
+
+    return (vk::AccessFlags2)mask;
+}
+
 <* Unified mode keeps every layout but UNDEFINED in GENERAL. *>
 fn vk::ImageLayout texture_layout_to_vk(
     gpu::TextureLayout layout,
@@ -187,7 +201,7 @@ fn TextureStateScope texture_state_to_vk(
         case gpu::TextureLayout.DEPTH_ATTACHMENT:
             return {
                 .stages = barrier_before_stages_to_vk(state.stages, false, task_shaders),
-                .access = texture_access_to_vk(state.layout, state.access),
+                .access = depth_attachment_access_to_vk(state),
                 .layout = layout,
             };
         case gpu::TextureLayout.GENERAL:
