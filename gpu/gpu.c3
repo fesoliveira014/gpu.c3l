@@ -758,7 +758,9 @@ fn usz? texture_mip_aspect_bytes(TextureDesc* desc, uint mip, TextureAspect aspe
 }
 
 <* Query library-creatable features for a format. Individual feature bits do
-   not guarantee that a combination is supported.
+   not guarantee that a combination is supported. Sample counts cover an
+   attachment-only usage; use supports_texture_desc for a sampled multisample
+   texture.
    @param device : "Live device to query."
    @param format : "Public texel format to inspect."
    @return "Format support flags, or a recoverable invalid-format or device fault." *>

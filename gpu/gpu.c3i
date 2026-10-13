@@ -902,7 +902,9 @@ bitstruct TextureFormatFeatures : uint {
     bool linear_filter : 6;
 }
 
-<* Texture sample counts implemented end-to-end by the backend. *>
+<* Texture sample counts implemented end-to-end by the backend, measured with
+   an attachment-only usage. Adding `sampled` can lower the supported counts;
+   supports_texture_desc answers the exact descriptor. *>
 bitstruct TextureSampleCountSupport : uint {
     bool one        : 0;
     bool two        : 1;
@@ -998,7 +1000,10 @@ struct DedicatedTexture {
    depth selects 3D. `access` must be a non-empty subset of the device's
    selected queue roles. A cube-compatible texture is a single-sampled 2D
    array with equal width and height and a layer count that is a multiple of
-   six; each group of six layers holds the faces +X, -X, +Y, -Y, +Z, -Z. *>
+   six; each group of six layers holds the faces +X, -X, +Y, -Y, +Z, -Z.
+   A multisample texture has one mip level and a color or depth attachment
+   usage. It may add `sampled`, which publishes a 2D view that shaders read
+   per sample; storage and transfer usages are rejected. *>
 struct TextureDesc {
     uint             width;
     uint             height;
