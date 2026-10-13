@@ -4,6 +4,19 @@ import gpu::internal @public;
 import gpu::internal::vk @public;
 import gpu @public;
 import vk;
+import std::io;
+
+const char[*] MULTISAMPLE_FETCH_SPIRV =
+    $embed("shaders/multisample_fetch.comp.spv");
+
+const uint MS_FETCH_PACKED_COLOR = 0;
+const uint MS_FETCH_DEPTH_BITS = 1;
+const uint MS_FETCH_UNSIGNED = 2;
+const uint MS_FETCH_SINGLE_SAMPLE_DEPTH_BITS = 3;
+const uint MS_FETCH_GROUP_SIZE = 8; // local_size of multisample_fetch.comp.glsl
+const uint MS_DRAW_PACKED = 0xFFC08040;
+const uint MS_CLEAR_PACKED = 0xFF201008;
+const uint MS_UNSIGNED_CLEAR = 0x13579BDF;
 
 fn gpu::SampleCount common_render_sample_count(
     gpu::TextureSampleCountSupport color,
@@ -30,9 +43,10 @@ fn gpu::TextureHandle make_multisample_target(
     gpu::TextureUsage usage,
     gpu::SampleCount sample_count,
     ZString debug_name,
+    gpu::QueueRoles access = { .graphics },
 ) {
     gpu::TextureDesc desc = {
-        .access       = { .graphics },
+        .access       = access,
         .width        = DP_RT,
         .height       = DP_RT,
         .format       = format,
@@ -293,4 +307,336 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         && pixels[2] == (char)32
         && pixels[3] == (char)255,
         "multisample resolve preserves the clear color outside the draw");
+}
+
+fn uint sample_count_value(gpu::SampleCount sample_count) {
+    return (uint)1 << (uint)sample_count.ordinal;
+}
+
+fn gpu::SampleCount sampled_multisample_count(
+    gpu::Device* device,
+    gpu::Format format,
+    gpu::TextureUsage usage,
+) {
+    gpu::SampleCount[3] candidates = {
+        gpu::SampleCount.FOUR,
+        gpu::SampleCount.TWO,
+        gpu::SampleCount.EIGHT,
+    };
+    foreach (candidate : candidates) {
+        gpu::TextureDesc desc = {
+            .access       = { .graphics, .compute },
+            .width        = DP_RT,
+            .height       = DP_RT,
+            .format       = format,
+            .usage        = usage,
+            .sample_count = candidate,
+        };
+        if (gpu::supports_texture_desc(device, &desc)!!) return candidate;
+    }
+
+    return gpu::SampleCount.ONE;
+}
+
+struct SampleReadback {
+    OwnedSpan root;
+    OwnedSpan values;
+    uint      samples;
+}
+
+fn SampleReadback make_sample_readback(
+    gpu::Device* device,
+    gpu::TextureIndex texture_index,
+    uint samples,
+    uint mode,
+) {
+    SampleReadback readback = {
+        .root    = allocate_owned_span(
+            device:       device,
+            size:         MultisampleFetchRoot::size,
+            memory_class: gpu::MemoryClass.CPU_WRITE,
+            access:       { .compute },
+            debug_name:   "multisample_fetch_root",
+        )!!,
+        .values  = make_readback(device, (usz)DP_RT * DP_RT * samples * 4),
+        .samples = samples,
+    };
+    MultisampleFetchRoot* root =
+        (MultisampleFetchRoot*)test_span_mapping(device, readback.root.span).ptr;
+    *root = {
+        .out_gpu       = test_span_address(device, readback.values.span),
+        .texture_index = texture_index,
+        .width         = DP_RT,
+        .height        = DP_RT,
+        .samples       = samples,
+        .mode          = mode,
+    };
+    gpu::flush_mapped_span(device, readback.root.span)!!;
+    return readback;
+}
+
+fn void free_sample_readback(gpu::Device* device, SampleReadback* readback) {
+    free_owned_span(device, &readback.values)!!;
+    free_owned_span(device, &readback.root)!!;
+}
+
+fn void record_sample_fetch(
+    gpu::Device* device,
+    gpu::CommandList* commands,
+    SampleReadback* readback,
+) {
+    gpu::cmd_dispatch(
+        commands: commands,
+        root:     test_span_address(device, readback.root.span),
+        groups:   {
+            DP_RT / MS_FETCH_GROUP_SIZE,
+            DP_RT / MS_FETCH_GROUP_SIZE,
+            1,
+        },
+    )!!;
+}
+
+fn uint* mapped_sample_values(gpu::Device* device, SampleReadback* readback) {
+    gpu::invalidate_mapped_span(device, readback.values.span)!!;
+    return (uint*)test_span_mapping(device, readback.values.span).ptr;
+}
+
+fn uint texel_sample_count(
+    uint* values,
+    uint samples,
+    uint x,
+    uint y,
+    uint expected,
+) {
+    uint matches;
+    for (uint sample_index = 0; sample_index < samples; sample_index++) {
+        if (values[(y * DP_RT + x) * samples + sample_index] == expected) {
+            matches++;
+        }
+    }
+
+    return matches;
+}
+
+fn void record_to_sampled(
+    gpu::CommandList* commands,
+    gpu::TextureHandle texture,
+) {
+    gpu::TextureBarrier to_sampled = gpu::texture_transition(
+        texture: texture,
+        before:  {
+            .layout = gpu::TextureLayout.COLOR_ATTACHMENT,
+            .stages = { .color_output },
+            .access = { .read, .write },
+        },
+        after:   gpu::sampled_at({ .compute }),
+    )!!;
+    gpu::cmd_texture_barrier(commands, &to_sampled)!!;
+}
+
+fn void multisample_texture_reads_each_sample() @test {
+    VulkanValidationCapture validation;
+    gpu::Device device = make_offscreen_test_device(&validation);
+    defer destroy_test_device(&device)!!;
+
+    validation.errors = 0;
+    gpu::SampleCount sample_count = sampled_multisample_count(
+        &device,
+        gpu::Format.RGBA8_UNORM,
+        { .color_attach, .sampled },
+    );
+    if (sample_count == gpu::SampleCount.ONE) {
+        io::eprintfn("sampled multisample color targets are unsupported on this adapter; skipping");
+        return;
+    }
+
+    uint samples = sample_count_value(sample_count);
+    gpu::SampleCount unsigned_count = sampled_multisample_count(
+        &device,
+        gpu::Format.R32_UINT,
+        { .color_attach, .sampled },
+    );
+    bool with_unsigned = unsigned_count == sample_count;
+    if (!with_unsigned) {
+        io::eprintfn("R32_UINT sampled multisample targets differ in count on this adapter; skipping them");
+    }
+
+    gpu::TextureHandle color = make_multisample_target(
+        device:       &device,
+        format:       gpu::Format.RGBA8_UNORM,
+        usage:        { .color_attach, .sampled },
+        sample_count: sample_count,
+        debug_name:   "multisample_sampled_color",
+        access:       { .graphics, .compute },
+    );
+    defer gpu::destroy_texture(&device, color)!!;
+    gpu::TextureView color_sampled = gpu::create_texture_view(&device, color, null)!!;
+    defer gpu::destroy_texture_view(&device, color_sampled)!!;
+    gpu::AttachmentViewHandle color_view = create_test_attachment_view(&device, color)!!;
+    defer destroy_test_attachment_view(&device, &color_view)!!;
+
+    gpu::TextureHandle unsigned_texture;
+    gpu::TextureView unsigned_sampled;
+    gpu::AttachmentViewHandle unsigned_view;
+    if (with_unsigned) {
+        unsigned_texture = make_multisample_target(
+            device:       &device,
+            format:       gpu::Format.R32_UINT,
+            usage:        { .color_attach, .sampled },
+            sample_count: sample_count,
+            debug_name:   "multisample_sampled_unsigned",
+            access:       { .graphics, .compute },
+        );
+        unsigned_sampled = gpu::create_texture_view(&device, unsigned_texture, null)!!;
+        unsigned_view = create_test_attachment_view(&device, unsigned_texture)!!;
+    }
+
+    defer {
+        if (with_unsigned) {
+            destroy_test_attachment_view(&device, &unsigned_view)!!;
+            gpu::destroy_texture_view(&device, unsigned_sampled)!!;
+            gpu::destroy_texture(&device, unsigned_texture)!!;
+        }
+    }
+
+    DepthCtx shaders = make_depth_ctx();
+    gpu::Format[1] pipeline_color_formats = { gpu::Format.RGBA8_UNORM };
+    gpu::GraphicsPipelineDesc pipeline_desc = {
+        .vertex_shader   = shaders.vert,
+        .fragment_shader = shaders.frag,
+        .color_formats   = pipeline_color_formats[..],
+        .sample_count    = sample_count,
+        .debug_name      = "multisample_sampled_color",
+    };
+    gpu::PipelineHandle pipeline = gpu::create_graphics_pipeline(&device, &pipeline_desc)!!;
+    defer gpu::destroy_pipeline(&device, pipeline)!!;
+    gpu::ShaderDesc fetch_shader = {
+        .spirv       = MULTISAMPLE_FETCH_SPIRV[..],
+        .entry_point = "main",
+    };
+    gpu::ComputePipelineDesc fetch_desc = { .shader = fetch_shader };
+    gpu::PipelineHandle fetch = gpu::create_compute_pipeline(&device, &fetch_desc)!!;
+    defer gpu::destroy_pipeline(&device, fetch)!!;
+
+    OwnedSpan vertices = write_tri(&device, NEAR_Z);
+    defer free_owned_span(&device, &vertices)!!;
+    OwnedSpan draw_color = write_color(
+        &device,
+        { 64.0f / 255.0f, 128.0f / 255.0f, 192.0f / 255.0f, 1.0f },
+    );
+    defer free_owned_span(&device, &draw_color)!!;
+    SampleReadback color_values = make_sample_readback(
+        &device,
+        color_sampled.index,
+        samples,
+        MS_FETCH_PACKED_COLOR,
+    );
+    defer free_sample_readback(&device, &color_values);
+    SampleReadback unsigned_values;
+    if (with_unsigned) {
+        unsigned_values = make_sample_readback(
+            &device,
+            unsigned_sampled.index,
+            samples,
+            MS_FETCH_UNSIGNED,
+        );
+    }
+
+    defer {
+        if (with_unsigned) free_sample_readback(&device, &unsigned_values);
+    }
+
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&commands)!!;
+
+    record_color_to_attach(&commands, color);
+    if (with_unsigned) record_color_to_attach(&commands, unsigned_texture);
+
+    gpu::ColorTargetDesc[1] colors = {{
+        .view     = color_view,
+        .load_op  = gpu::LoadOp.CLEAR,
+        .store_op = gpu::StoreOp.STORE,
+        .clear    = { .rgba = { 8.0f / 255.0f, 16.0f / 255.0f, 32.0f / 255.0f, 1.0f } },
+    }};
+    gpu::RenderPassDesc pass = {
+        .colors = colors[..],
+        .width  = DP_RT,
+        .height = DP_RT,
+    };
+    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::ColorTargetState[1] color_targets = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
+    graphics_state.color = { .targets = color_targets[..] };
+    gpu::cmd_begin_render_pass(&commands, &pass)!!;
+    gpu::cmd_bind_pipeline(&commands, pipeline)!!;
+    gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
+    gpu::cmd_draw(
+        commands:       &commands,
+        vertex_root:    test_span_address(&device, vertices.span),
+        fragment_root:  test_span_address(&device, draw_color.span),
+        vertex_count:   3,
+        instance_count: 1,
+    )!!;
+    gpu::cmd_end_render_pass(&commands)!!;
+
+    if (with_unsigned) {
+        gpu::ColorTargetDesc[1] unsigned_colors = {{
+            .view     = unsigned_view,
+            .load_op  = gpu::LoadOp.CLEAR,
+            .store_op = gpu::StoreOp.STORE,
+            .clear    = { .uint_rgba = { MS_UNSIGNED_CLEAR, 0, 0, 0 } },
+        }};
+        gpu::RenderPassDesc unsigned_pass = {
+            .colors = unsigned_colors[..],
+            .width  = DP_RT,
+            .height = DP_RT,
+        };
+        gpu::cmd_begin_render_pass(&commands, &unsigned_pass)!!;
+        gpu::cmd_end_render_pass(&commands)!!;
+    }
+
+    record_to_sampled(&commands, color);
+    if (with_unsigned) record_to_sampled(&commands, unsigned_texture);
+
+    bind_test_compute_pipeline(&commands, fetch);
+    record_sample_fetch(&device, &commands, &color_values);
+    if (with_unsigned) record_sample_fetch(&device, &commands, &unsigned_values);
+
+    gpu::Barrier host_read = { .before = { .compute }, .after = { .host } };
+    gpu::cmd_barrier(&commands, &host_read)!!;
+    submit_and_finish(&device, &commands);
+
+    uint* values = mapped_sample_values(&device, &color_values);
+    uint center = DP_RT / 2;
+    assert(texel_sample_count(values, samples, center, center, MS_DRAW_PACKED) == samples,
+        "an interior texel holds the draw color at every sample");
+    assert(texel_sample_count(values, samples, 0, 0, MS_CLEAR_PACKED) == samples,
+        "an exterior texel holds the clear color at every sample");
+
+    uint edge_texels;
+    for (uint y = 0; y < DP_RT; y++) {
+        for (uint x = 0; x < DP_RT; x++) {
+            uint draw = texel_sample_count(values, samples, x, y, MS_DRAW_PACKED);
+            uint clear = texel_sample_count(values, samples, x, y, MS_CLEAR_PACKED);
+            assert(draw + clear == samples,
+                "every sample holds the draw color or the clear color, never a blend");
+            if (draw > 0 && clear > 0) edge_texels++;
+        }
+    }
+
+    assert(edge_texels > 0, "a triangle edge splits some texels between the two colors");
+
+    if (with_unsigned) {
+        uint* unsigned_samples = mapped_sample_values(&device, &unsigned_values);
+        for (uint y = 0; y < DP_RT; y++) {
+            for (uint x = 0; x < DP_RT; x++) {
+                assert(texel_sample_count(unsigned_samples, samples, x, y, MS_UNSIGNED_CLEAR) == samples,
+                    "every sample of an unsigned target holds the clear value");
+            }
+        }
+    }
+
+    assert(validation.errors == 0, "sampling multisample targets is validation-clean");
 }
