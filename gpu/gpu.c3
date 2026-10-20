@@ -684,7 +684,7 @@ fn void? invalidate_mapped_span(Device* device, GpuSpan span) {
     return gpu::internal::vk::vk_invalidate_mapped_span(operation.state, span);
 }
 
-<* Snapshot per-heap memory usage and live allocation counts.
+<* Snapshot per-heap memory usage, live counts and table capacities.
    Values are advisory under concurrent mutation.
    @param device : "Live device to query."
    @return "A memory statistics snapshot, or a recoverable invalid-handle, busy, or device-loss fault." *>

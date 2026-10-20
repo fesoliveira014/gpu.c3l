@@ -108,10 +108,20 @@ defer report.free(mem);
 
 `MemoryStats` holds up to `MAX_MEMORY_HEAPS` `MemoryHeapBudget` records,
 the live allocation count, the texture count, the number of live texture
-views holding a texture heap slot (`texture_view_count`), and the resolved
-texture table capacity (`texture_capacity`, `RuntimeDesc.texture_capacity`
-or `DEFAULT_TEXTURE_CAPACITY` when zero). Numbers are advisory
-under concurrent allocation.
+views holding a texture heap slot (`texture_view_count`), and the capacities
+of three device tables:
+
+- `texture_capacity`: the resolved texture table size,
+  `RuntimeDesc.texture_capacity` or `DEFAULT_TEXTURE_CAPACITY` when zero.
+- `allocation_capacity`: the bound on live `GpuAllocation` tokens, which are
+  the results of `allocate_memory`, `allocate_mapped_memory` and
+  `create_dedicated_texture`. `live_allocation_count` counts backend
+  allocations, so the two are not comparable.
+- `acceleration_structure_capacity`: the bound on live acceleration
+  structures. It is 0 on a device created without ray queries or ray-tracing
+  pipelines.
+
+Numbers are advisory under concurrent allocation.
 
 ## Textures
 
