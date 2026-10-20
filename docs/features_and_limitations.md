@@ -131,6 +131,7 @@ by CPU tests but has not run on hardware that reports the capability.
 | sampler heap | 256 | 65,536 |
 | acceleration-structure heap | 0 (opt-in) | device descriptor limit |
 | live textures | 1,024 | 65,536 |
+| live allocations | — | 4,096 |
 | live acceleration structures | — | 4,096 |
 | live pipelines | 256 | configurable |
 | swapchains | — | 8 |
@@ -141,6 +142,8 @@ by CPU tests but has not run on hardware that reports the capability.
 
 Exhaustion returns `DESCRIPTOR_HEAP_FULL`, `SLOT_TABLE_FULL`, or
 `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED`. Nothing is silently clamped.
+`get_memory_stats` reports the texture, allocation and acceleration-structure
+capacities.
 
 ## Validation and callbacks
 
