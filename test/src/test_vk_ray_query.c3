@@ -70,6 +70,21 @@ fn void lavapipe_ray_query_device_path_is_actionable() @test {
         "the selected opted-in device publishes actionable ray-query caps");
 }
 
+fn void memory_stats_report_the_acceleration_structure_table_capacity() @test {
+    gpu::Runtime runtime;
+    gpu::Device device = create_ray_query_test_device(&runtime)!!;
+    defer {
+        destroy_test_device(&device)!!;
+        runtime = {};
+    }
+
+    gpu::MemoryStats stats = gpu::get_memory_stats(&device)!!;
+    assert(stats.acceleration_structure_capacity == (uint)vk::MAX_ACCELERATION_STRUCTURES,
+        "capacity is the acceleration structure table size");
+    assert(stats.allocation_capacity == vk::ALLOCATION_CAPACITY,
+        "ray features do not change the allocation table size");
+}
+
 fn void lavapipe_acceleration_structure_storage_models_are_explicit() @test {
     gpu::Runtime runtime;
     gpu::Device device = create_ray_query_test_device(&runtime)!!;

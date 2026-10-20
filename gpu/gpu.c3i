@@ -802,6 +802,9 @@ struct MemoryHeapBudget {
 // `texture_view_count` is the number of live texture views holding a slot in
 // the shader-visible texture heap; `texture_capacity` is the resolved
 // `RuntimeDesc.texture_capacity`, the bound on live textures.
+// `allocation_capacity` bounds live `GpuAllocation` tokens, a dedicated
+// texture's included; `acceleration_structure_capacity` bounds live
+// acceleration structures, 0 without ray queries or ray-tracing pipelines.
 struct MemoryStats {
     MemoryHeapBudget[MAX_MEMORY_HEAPS] heaps;
     uint  heap_count;
@@ -809,6 +812,8 @@ struct MemoryStats {
     ulong live_allocation_count;
     ulong texture_view_count;
     uint  texture_capacity;
+    uint  allocation_capacity;
+    uint  acceleration_structure_capacity;
 }
 
 <* Opaque device-owned compatibility value for texture placement. *>

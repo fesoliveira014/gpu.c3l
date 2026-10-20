@@ -1279,6 +1279,28 @@ fn void native_allocation_classes_map_and_release() @test {
         "immediate release returns VMA allocation statistics to baseline");
 }
 
+fn void memory_stats_report_the_allocation_table_capacity() @test {
+    gpu::Device device = create_allocation_test_device("gpu_memory_stats_allocation_capacity_test");
+    defer (void)destroy_test_device(&device);
+
+    gpu::MemoryStats stats = gpu::get_memory_stats(&device)!!;
+    assert(stats.allocation_capacity == vk::ALLOCATION_CAPACITY,
+        "capacity is the allocation table size");
+    assert(stats.acceleration_structure_capacity == 0,
+        "a device without ray features has no structure table");
+
+    gpu::AllocationDesc desc = native_allocation_desc(
+        gpu::MemoryClass.CPU_WRITE,
+        "memory_stats_capacity_allocation",
+    );
+    gpu::GpuAllocation allocation = gpu::allocate_memory(&device, &desc)!!;
+
+    assert(gpu::get_memory_stats(&device)!!.allocation_capacity == stats.allocation_capacity,
+        "capacity does not change with use");
+
+    gpu::free_allocation(&device, &allocation)!!;
+}
+
 fn void native_mapped_visibility_round_trip() @test {
     gpu::Device device = create_allocation_test_device(
         "gpu_mapped_visibility_test",
