@@ -720,13 +720,13 @@ fn AccelerationStructureSlot*? AccelerationStructureTable.get(
     &self,
     gpu::AccelerationStructureHandle handle,
 ) {
-    if (handle.owner != self.owner) return gpu::INVALID_HANDLE~;
+    if (handle.owner != self.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.ACCELERATION_STRUCTURE, gpu::internal::HandleCause.FOREIGN)~;
     uint index = handle.index;
     if (index >= self.slots.len || !self.slots[index].used) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.ACCELERATION_STRUCTURE, gpu::internal::HandleCause.STALE)~;
     }
     if (self.slots[index].generation != handle.generation) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.ACCELERATION_STRUCTURE, gpu::internal::HandleCause.STALE)~;
     }
     return &self.slots[index].value;
 }

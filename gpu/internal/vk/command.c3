@@ -214,11 +214,11 @@ fn CommandAllocatorSlot*? CommandAllocatorTable.get(
     gpu::CommandAllocatorHandle handle,
 ) {
     if (handle.owner != self.owner || handle.index >= self.next_new) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.FOREIGN)~;
     }
     CommandAllocatorCell* cell = &self.slots[handle.index];
     if (!cell.used || cell.generation != handle.generation) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.STALE)~;
     }
     return &cell.value;
 }
@@ -531,12 +531,12 @@ fn CommandAllocatorSlot*? resolve_command_allocator(
     gpu::CommandAllocator* allocator,
 ) {
     if (allocator == null || allocator.device != state.owner) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.FOREIGN)~;
     }
     CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!;
-    if (slot.queue != allocator.queue) return gpu::INVALID_HANDLE~;
+    if (slot.queue != allocator.queue) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.MISMATCHED)~;
     return slot;
 }
 
@@ -1296,7 +1296,7 @@ fn void? vk_end_commands_with_ops(
     if (commands.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    if (commands.device_state != state) return gpu::INVALID_HANDLE~;
+    if (commands.device_state != state) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_LIST, gpu::internal::HandleCause.INVARIANT)~;
     CommandAllocatorSlot* slot = lock_command_allocator_handle(
         state,
         record.allocator,
@@ -1360,7 +1360,7 @@ fn void? end_commands_with_injected_ops(
 ) @feat(TESTING) {
     if (record == null
         || record.device_state != state) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_LIST, gpu::internal::HandleCause.INVARIANT)~;
     }
     return vk_end_commands_with_ops(state, record, ops);
 }
@@ -1370,7 +1370,7 @@ fn void? vk_discard_commands(
     CommandRecord* command,
     bool executable,
 ) {
-    if (command.device_state != state) return gpu::INVALID_HANDLE~;
+    if (command.device_state != state) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_LIST, gpu::internal::HandleCause.INVARIANT)~;
     gpu::internal::CommandListHandle handle = command.identity;
     gpu::CommandAllocatorHandle allocator_handle;
     {

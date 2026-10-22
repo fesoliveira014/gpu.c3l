@@ -680,7 +680,7 @@ fn void sparse_backing_resolution_validates_unbind_and_allocation_contract() @te
         allocation:        stale,
         allocation_offset: 0,
         size:              4096,
-    )) == gpu::INVALID_HANDLE);
+    )) == gpu::internal::HANDLE_REJECTED);
     fixture.allocation_cells[0].value.memory_class =
         gpu::MemoryClass.GPU_PRIVATE;
     assert(@catch(vk::resolve_sparse_backing_locked(
@@ -1330,7 +1330,7 @@ fn void sparse_backing_resolution_checks_every_live_compatibility_rule() @test {
         allocation:        foreign,
         allocation_offset: 0,
         size:              4096,
-    )) == gpu::INVALID_HANDLE);
+    )) == gpu::internal::HANDLE_REJECTED);
     fixture.allocation_cells[0].value = original;
     fixture.allocation_cells[0].value.memory_class =
         gpu::MemoryClass.GPU_PRIVATE;
@@ -1426,7 +1426,7 @@ fn void sparse_bind_validation_precedes_host_allocation() @test {
         queue: fixture.queue,
         desc:  &desc,
         ops:   &ops,
-    )) == gpu::INVALID_HANDLE);
+    )) == gpu::internal::HANDLE_REJECTED);
     desc.texture = fixture.texture;
 
     tiles[0].offset.x = 1;
@@ -1444,7 +1444,7 @@ fn void sparse_bind_validation_precedes_host_allocation() @test {
         queue: fixture.queue,
         desc:  &desc,
         ops:   &ops,
-    )) == gpu::INVALID_HANDLE);
+    )) == gpu::internal::HANDLE_REJECTED);
     tiles[0].allocation = fixture.allocation;
 
     gpu::CompletionPoint[1] waits = {
@@ -1456,7 +1456,7 @@ fn void sparse_bind_validation_precedes_host_allocation() @test {
         queue: fixture.queue,
         desc:  &desc,
         ops:   &ops,
-    )) == gpu::INVALID_HANDLE);
+    )) == gpu::internal::HANDLE_REJECTED);
 
     assert(allocator.attempts == 0
             && allocator.acquires == 0
@@ -1569,7 +1569,7 @@ fn void sparse_bind_unpublished_wait_and_malformed_allocation_are_pre_native() @
         queue: fixture.queue,
         desc:  &desc,
         ops:   &ops,
-    )) == gpu::INVALID_HANDLE);
+    )) == gpu::internal::HANDLE_REJECTED);
     assert(sparse_bind_capture.calls == 0);
 
     desc.waits = {};
@@ -1579,7 +1579,7 @@ fn void sparse_bind_unpublished_wait_and_malformed_allocation_are_pre_native() @
         queue: fixture.queue,
         desc:  &desc,
         ops:   &ops,
-    )) == gpu::INVALID_HANDLE);
+    )) == gpu::internal::HANDLE_REJECTED);
     assert(sparse_bind_capture.calls == 0);
 }
 

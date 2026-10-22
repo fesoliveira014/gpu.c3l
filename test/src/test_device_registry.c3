@@ -31,8 +31,7 @@ struct CommandPinFixture {
 
 struct StaleCommandWorkerArgs {
     gpu::CommandList commands;
-    fault            result;
-    bool             failed;
+    bool             terminated;
 }
 
 struct DiscardCommandWorkerArgs {
@@ -68,9 +67,11 @@ fn int discard_command_worker(void* raw_args) {
 }
 
 fn gpu::CommandList? begin_command_pin(gpu::Device* device) {
-    if (device == null || !device.is_valid()) return gpu::INVALID_HANDLE~;
+    if (device == null || !device.is_valid()) {
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.DEVICE, gpu::internal::HandleCause.ZERO)~;
+    }
     gpu::internal::DeviceData* data = gpu::internal::resolve_pinned_device(device);
-    if (data == null) return gpu::INVALID_HANDLE~;
+    if (data == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.DEVICE, gpu::internal::HandleCause.STALE)~;
     gpu::CommandAllocator allocator = {
         .device = *device,
         .queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!,
@@ -109,15 +110,11 @@ fn int stale_command_worker(void* raw_args) {
         .before = { .compute = true },
         .after = { .compute = true },
     };
-    if (catch command_fault = gpu::cmd_barrier(
-        &args.commands,
-        &barrier,
-    )) {
-        args.result = command_fault;
-    } else {
-        args.failed = true;
-    }
-    return args.failed ? 1 : 0;
+    String message = @capture_panic() {
+        (void)gpu::cmd_barrier(&args.commands, &barrier);
+    };
+    args.terminated = message == "gpu::cmd_barrier: stale CommandList";
+    return 0;
 }
 
 fn int runtime_retain_worker(void* raw_args) {
@@ -234,9 +231,9 @@ fn void command_allocator_creation_rejects_before_publication() @test {
         .command_buffer_capacity = gpu::MAX_COMMAND_ALLOCATOR_CAPACITY + 1,
     };
 
-    assert(@catch(gpu::create_command_allocator(&first, foreign))
-        == gpu::INVALID_HANDLE,
-        "a foreign queue is rejected before backend creation");
+    @assert_panics("gpu::create_command_allocator: foreign Queue") {
+        (void)gpu::create_command_allocator(&first, foreign);
+    };
     gpu::Queue queue = gpu::get_queue(
         &first,
         gpu::QueueKind.GRAPHICS,
@@ -351,25 +348,25 @@ fn void null_and_stale_direct_command_tokens_are_rejected() @test {
     gpu::CommandList stale_generation = commands;
     stale_generation.generation++;
 
-    assert(@catch(gpu::cmd_barrier(&null_record, &barrier))
-        == gpu::INVALID_HANDLE,
-        "a null direct record is rejected");
-    assert(@catch(gpu::cmd_barrier(&zero_generation, &barrier))
-        == gpu::INVALID_HANDLE,
-        "a zero direct generation is rejected");
+    @assert_panics("gpu::cmd_barrier: malformed CommandList") {
+        (void)gpu::cmd_barrier(&null_record, &barrier);
+    };
+    @assert_panics("gpu::cmd_barrier: malformed CommandList") {
+        (void)gpu::cmd_barrier(&zero_generation, &barrier);
+    };
     assert(!zero_generation.is_valid(),
         "zero generation is part of the invalid token sentinel");
-    assert(@catch(gpu::cmd_barrier(&zero_device_identity, &barrier))
-        == gpu::INVALID_HANDLE,
-        "a zero device identity is rejected");
+    @assert_panics("gpu::cmd_barrier: malformed CommandList") {
+        (void)gpu::cmd_barrier(&zero_device_identity, &barrier);
+    };
     assert(!zero_device_identity.is_valid(),
         "zero device identity is part of the invalid token sentinel");
-    assert(@catch(gpu::cmd_barrier(&reserved_device_identity, &barrier))
-        == gpu::INVALID_HANDLE,
-        "reserved device identity bits are rejected");
-    assert(@catch(gpu::cmd_barrier(&stale_generation, &barrier))
-        == gpu::INVALID_HANDLE,
-        "a stale direct generation is rejected");
+    @assert_panics("gpu::cmd_barrier: malformed CommandList") {
+        (void)gpu::cmd_barrier(&reserved_device_identity, &barrier);
+    };
+    @assert_panics("gpu::cmd_barrier: stale CommandList") {
+        (void)gpu::cmd_barrier(&stale_generation, &barrier);
+    };
     assert(!fixture.state.command_entered.load(AtomicOrdering.ACQUIRE),
         "malformed selectors never reach the backend");
     gpu::discard_commands(&commands)!!;
@@ -390,9 +387,9 @@ fn void recording_alias_is_rejected_after_end_phase_transition() @test {
         .after  = { .compute = true },
     };
 
-    assert(@catch(gpu::cmd_barrier(&recording_alias, &barrier))
-        == gpu::COMMAND_RECORDING_ERROR,
-        "a recording alias is rejected after the record becomes executable");
+    @assert_panics("gpu::cmd_barrier: consumed CommandList") {
+        (void)gpu::cmd_barrier(&recording_alias, &barrier);
+    };
     gpu::discard_executable_commands(&executable)!!;
     gpu::destroy_device(&device)!!;
 }
@@ -542,7 +539,9 @@ fn void duplicate_backend_discard_cannot_underflow_command_accounting() @test {
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
 
     gpu::discard_commands(&commands)!!;
-    fault duplicate_fault = @catch(gpu::discard_commands(&duplicate));
+    @assert_panics("gpu::discard_commands: stale CommandList") {
+        (void)gpu::discard_commands(&duplicate);
+    };
     gpu::internal::DeviceSlotControl after_duplicate =
         (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
 
@@ -550,8 +549,6 @@ fn void duplicate_backend_discard_cannot_underflow_command_accounting() @test {
         "a duplicate backend discard cannot underflow retained pins");
     assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
         "a duplicate backend discard cannot underflow command children");
-    assert(duplicate_fault == gpu::INVALID_HANDLE,
-        "a consumed command alias is rejected before backend discard");
     gpu::destroy_device(&device)!!;
 }
 
@@ -690,10 +687,8 @@ fn void stale_commands_do_not_use_unrelated_lifetime_pins() @test {
         "a stale command does not reach backend pin observation");
     assert(!fixture.state.command_entered.load(AtomicOrdering.ACQUIRE),
         "a stale command alias is rejected before backend access");
-    assert(worker_result == 0 && !worker_args.failed,
-        "the stale command reports its root validation fault");
-    assert(worker_args.result == gpu::INVALID_HANDLE,
-        "the stale command remains invalid");
+    assert(worker_result == 0 && worker_args.terminated,
+        "the stale command terminates at root validation");
     assert(fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1,
         "a stale alias retains no device lifetime pin");
 }
@@ -721,18 +716,18 @@ fn void stale_command_faults_before_reused_device_callback() @test {
     };
     gpu::CommandList poisoned = stale;
     poisoned.record = (gpu::internal::vk::CommandRecord*)(uptr)1;
-    fault poisoned_fault = @catch(gpu::cmd_barrier(&poisoned, &barrier));
-    fault stale_fault = @catch(gpu::cmd_barrier(&stale, &barrier));
+    @assert_panics("gpu::cmd_barrier: stale CommandList") {
+        (void)gpu::cmd_barrier(&poisoned, &barrier);
+    };
+    @assert_panics("gpu::cmd_barrier: stale CommandList") {
+        (void)gpu::cmd_barrier(&stale, &barrier);
+    };
 
     assert(stale.is_valid(),
         "a copied valid-origin token remains distinct from the zero sentinel");
     assert(replacement.index == retired_identity.index
         && replacement.generation != retired_identity.generation,
         "the replacement device reuses the retired static slot generation");
-    assert(stale_fault == gpu::INVALID_HANDLE,
-        "the retired device identity invalidates the copied token");
-    assert(poisoned_fault == gpu::INVALID_HANDLE,
-        "the stale device identity faults before record pointer dereference");
     assert(!retired_fixture.state.command_entered.load(AtomicOrdering.ACQUIRE)
         && !replacement_fixture.state.command_entered.load(AtomicOrdering.ACQUIRE),
         "stale validation faults before either recording callback");
@@ -759,7 +754,9 @@ fn void stale_command_generation_does_not_use_reused_slot_pin() @test {
         .before = { .compute = true },
         .after = { .compute = true },
     };
-    fault stale_fault = @catch(gpu::cmd_barrier(&stale, &barrier));
+    @assert_panics("gpu::cmd_barrier: stale CommandList") {
+        (void)gpu::cmd_barrier(&stale, &barrier);
+    };
 
     assert(stale.record == live.record,
         "the command slot is reused");
@@ -767,8 +764,6 @@ fn void stale_command_generation_does_not_use_reused_slot_pin() @test {
         "the reused command slot advances its generation");
     assert(fixture.state.pins_during_command == 0,
         "stale-generation validation does not reach backend pin observation");
-    assert(stale_fault == gpu::INVALID_HANDLE,
-        "the stale generation remains invalid");
     gpu::discard_commands(&live)!!;
     gpu::destroy_device(&device)!!;
 }

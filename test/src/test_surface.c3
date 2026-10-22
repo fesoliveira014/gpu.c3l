@@ -476,10 +476,9 @@ fn void swapchain_wait_rejects_foreign_and_stale_handles_before_native_work() @t
 
     SwapchainHandle foreign = swapchain;
     foreign.owner++;
-    assert(
-        @catch(gpu::wait_swapchain_presentations(&device, foreign, 0))
-            == gpu::INVALID_HANDLE
-    );
+    @assert_panics("gpu::wait_swapchain_presentations: stale SwapchainHandle") {
+        (void)gpu::wait_swapchain_presentations(&device, foreign, 0);
+    };
     assert(
         gpu::internal::vk::stub_present_wait_call_count(state) == 0
             && gpu::internal::vk::stub_present_reset_call_count(state) == 0,
@@ -488,10 +487,9 @@ fn void swapchain_wait_rejects_foreign_and_stale_handles_before_native_work() @t
 
     SwapchainHandle stale = swapchain;
     stale.generation--;
-    assert(
-        @catch(gpu::wait_swapchain_presentations(&device, stale, 0))
-            == gpu::INVALID_HANDLE
-    );
+    @assert_panics("gpu::wait_swapchain_presentations: stale SwapchainHandle") {
+        (void)gpu::wait_swapchain_presentations(&device, stale, 0);
+    };
     assert(
         gpu::internal::vk::stub_present_wait_call_count(state) == 0
             && gpu::internal::vk::stub_present_reset_call_count(state) == 0,

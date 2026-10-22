@@ -221,9 +221,9 @@ fn void resources_reject_foreign_and_stale_identity() @test {
     gpu::GpuAllocation stale = owned.allocation;
     gpu::free_allocation(&first, &owned.allocation)!!;
     owned.span = {};
-    assert(@catch(gpu::get_allocation_info(&first, stale))
-        == gpu::INVALID_HANDLE,
-        "safe resolution rejects stale identities");
+    @assert_panics("gpu::get_allocation_info: stale GpuAllocation") {
+        (void)gpu::get_allocation_info(&first, stale);
+    };
 }
 
 fn uint diagnostic_live_device_count() {

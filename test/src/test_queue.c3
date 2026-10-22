@@ -88,7 +88,9 @@ fn void queue_queries_preserve_distinct_compute_identity() @test {
 
     gpu::Queue forged = compute;
     forged.roles.graphics = true;
-    assert(@catch(gpu::get_queue_info(&device, forged)) == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::get_queue_info: malformed Queue") {
+        (void)gpu::get_queue_info(&device, forged);
+    };
 
     gpu::destroy_device(&device)!!;
 }
@@ -106,8 +108,9 @@ fn void queue_queries_reject_unavailable_and_foreign_tokens() @test {
 
     assert(@catch(gpu::get_queue(&first, gpu::QueueKind.GRAPHICS))
         == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::get_queue_info(&second, compute))
-        == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::get_queue_info: foreign Queue") {
+        (void)gpu::get_queue_info(&second, compute);
+    };
 
     gpu::destroy_device(&first)!!;
     gpu::destroy_device(&second)!!;

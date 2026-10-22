@@ -242,7 +242,7 @@ fn gpu::Adapter? select_context_adapter(
             }
             return selected;
         }
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.ADAPTER, gpu::internal::HandleCause.FOREIGN)~;
     }
 
     gpu::Adapter best;

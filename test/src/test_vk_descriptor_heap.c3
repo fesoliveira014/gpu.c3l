@@ -101,8 +101,9 @@ fn void capture_descriptor_diagnostic(gpu::DebugMessage* message, void* user_dat
     capture.calls++;
     capture.matched = message.severity == gpu::DebugMessageSeverity.ERROR
         && message.category.public_contract
-        && message.has_fault
-        && message.public_fault == capture.expected_fault
+        && (capture.expected_fault == gpu::internal::HANDLE_REJECTED
+            ? !message.has_fault
+            : message.has_fault && message.public_fault == capture.expected_fault)
         && message.resource.kind == capture.expected_kind
         && message.resource.has_public_identity == capture.expected_identity
         && (!capture.expected_identity || (message.resource.index == capture.expected_index
@@ -294,7 +295,7 @@ fn void descriptor_sampler_failures_report_context() @test {
     gpu::destroy_texture_view(&device, descriptor)!!;
     expect_descriptor_diagnostic(
         capture:             &capture,
-        expected_fault:      gpu::INVALID_HANDLE,
+        expected_fault:      gpu::internal::HANDLE_REJECTED,
         expected_kind:       gpu::DebugResourceKind.TEXTURE_DESCRIPTOR,
         expected_identity:   false,
         expected_index:      0,
@@ -303,9 +304,11 @@ fn void descriptor_sampler_failures_report_context() @test {
         expected_field:      "view",
         expected_invariant:  "view must identify a live generation",
     );
-    fault stale = @catch(gpu::destroy_texture_view(&device, descriptor));
-    assert(stale == gpu::INVALID_HANDLE && capture.calls == 2 && capture.matched,
-        "stale descriptor fault has kind without unvalidated identity");
+    @assert_panics("gpu::destroy_texture_view: stale TextureView") {
+        (void)gpu::destroy_texture_view(&device, descriptor);
+    };
+    assert(capture.calls == 2 && capture.matched,
+        "the stale descriptor diagnostic has kind without unvalidated identity");
 
     expect_descriptor_diagnostic(
         capture:             &capture,
@@ -379,9 +382,9 @@ fn void texture_view_round_trip() @test {
     assert(live_descriptor_view_count(state, texture) == 0,
         "successful texture-view destruction decrements its owner once");
 
-    fault stale_fault = @catch(gpu::destroy_texture_view(&device, view));
-    assert(stale_fault == gpu::INVALID_HANDLE,
-        "destroying a stale view faults INVALID_HANDLE");
+    @assert_panics("gpu::destroy_texture_view: stale TextureView") {
+        (void)gpu::destroy_texture_view(&device, view);
+    };
     assert(live_descriptor_view_count(state, texture) == 0,
         "stale destruction leaves the owner count unchanged");
 }
@@ -546,8 +549,9 @@ fn void texture_view_reuses_destroyed_slot_immediately() @test {
         "destroyed descriptor slots are immediately reusable");
     assert(recycled.generation != first.generation,
         "immediate reuse advances the generation");
-    assert(@catch(gpu::destroy_texture_view(&device, first))
-        == gpu::INVALID_HANDLE, "the released index is stale");
+    @assert_panics("gpu::destroy_texture_view: stale TextureView") {
+        (void)gpu::destroy_texture_view(&device, first);
+    };
 
     gpu::destroy_texture_view(&device, recycled)!!;
 }
@@ -805,8 +809,9 @@ fn void texture_view_stale_texture_rejected() @test {
     gpu::TextureHandle texture = make_heap_texture(&device);
     gpu::destroy_texture(&device, texture)!!;
 
-    fault texture_fault = @catch(gpu::create_texture_view(&device, texture, null));
-    assert(texture_fault == gpu::INVALID_HANDLE, "registering a destroyed texture faults INVALID_HANDLE");
+    @assert_panics("gpu::create_texture_view: stale TextureHandle") {
+        (void)gpu::create_texture_view(&device, texture, null);
+    };
 }
 
 fn void texture_view_overflowing_view_range_rejected() @test {
@@ -895,7 +900,7 @@ fn void texture_destroy_ignores_descriptor_high_water() @test {
 
         gpu::destroy_texture(&device, texture)!!;
 
-        assert(@catch(state.textures.get(texture)) == gpu::INVALID_HANDLE,
+        assert(@catch(state.textures.get(texture)) == gpu::internal::HANDLE_REJECTED,
             "texture destruction succeeds at every descriptor high-water mark");
     }
 }
@@ -1051,8 +1056,9 @@ fn void texture_views_failed_batch_restores_full_view_capacity() @test {
             { .texture = stale_texture },
         };
         gpu::TextureView[2] indices;
-        fault batch_fault = @catch(gpu::create_texture_views(&device, descs[..], indices[..]));
-        assert(batch_fault == gpu::INVALID_HANDLE, "a later stale texture faults the batch");
+        @assert_panics("gpu::create_texture_views: stale TextureHandle") {
+            (void)gpu::create_texture_views(&device, descs[..], indices[..]);
+        };
         assert(cached_texture_view_count(state, texture) == 0,
             "a failed batch restores the empty view cache");
     }
@@ -1106,7 +1112,7 @@ fn void texture_views_failed_batch_restores_multiple_created_views() @test {
     gpu::TextureView[3] indices;
     expect_descriptor_diagnostic(
         capture:             &capture,
-        expected_fault:      gpu::INVALID_HANDLE,
+        expected_fault:      gpu::internal::HANDLE_REJECTED,
         expected_kind:       gpu::DebugResourceKind.TEXTURE,
         expected_identity:   false,
         expected_index:      0,
@@ -1115,8 +1121,10 @@ fn void texture_views_failed_batch_restores_multiple_created_views() @test {
         expected_field:      "descs[].texture",
         expected_invariant:  "texture must identify a live generation",
     );
-    fault batch_fault = @catch(gpu::create_texture_views(&device, descs[..], indices[..]));
-    assert(batch_fault == gpu::INVALID_HANDLE && capture.calls == 1 && capture.matched,
+    @assert_panics("gpu::create_texture_views: stale TextureHandle") {
+        (void)gpu::create_texture_views(&device, descs[..], indices[..]);
+    };
+    assert(capture.calls == 1 && capture.matched,
         "a later stale texture emits once after two new views");
     assert(cached_texture_view_count(state, texture) == 0,
         "rollback removes every view created by the failed transaction");
@@ -1157,8 +1165,9 @@ fn void texture_views_failed_batch_preserves_existing_and_duplicate_views() @tes
         { .texture = stale_texture },
     };
     gpu::TextureView[4] indices;
-    fault batch_fault = @catch(gpu::create_texture_views(&device, descs[..], indices[..]));
-    assert(batch_fault == gpu::INVALID_HANDLE, "a fault after a duplicate new view rejects the batch");
+    @assert_panics("gpu::create_texture_views: stale TextureHandle") {
+        (void)gpu::create_texture_views(&device, descs[..], indices[..]);
+    };
     assert(cached_texture_view_count(state, texture) == 1,
         "rollback removes the one transaction-created view and preserves the existing view");
     assert(slot.views[0].used && slot.views[0].view == existing_cache.view,
@@ -1215,8 +1224,9 @@ fn void texture_views_mid_batch_fault_preserves_descriptor_state() @test {
         { .owner = 202, .index.value = 7, .generation = 222 },
     };
     gpu::TextureView[2] outputs_before = indices;
-    fault batch_fault = @catch(gpu::create_texture_views(&device, descs[..], indices[..]));
-    assert(batch_fault == gpu::INVALID_HANDLE, "a mid-batch destroyed-texture reference faults INVALID_HANDLE");
+    @assert_panics("gpu::create_texture_views: stale TextureHandle") {
+        (void)gpu::create_texture_views(&device, descs[..], indices[..]);
+    };
 
     assert(heap.texture_free_count == free_count_before, "failure preserves free-list count");
     assert(heap.texture_next_new == next_new_before, "failure preserves the never-used slot cursor");
@@ -1913,7 +1923,7 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
     gpu::TextureView[1] stale_outputs = { { .owner = 17, .index.value = 19, .generation = 7 } };
     expect_descriptor_diagnostic(
         capture:             &capture,
-        expected_fault:      gpu::INVALID_HANDLE,
+        expected_fault:      gpu::internal::HANDLE_REJECTED,
         expected_kind:       gpu::DebugResourceKind.TEXTURE,
         expected_identity:   false,
         expected_index:      0,
@@ -1922,8 +1932,10 @@ fn void descriptor_batch_and_sampler_remaining_failures_report_context() @test {
         expected_field:      "descs[].texture",
         expected_invariant:  "texture must identify a live generation",
     );
-    fault stale = @catch(gpu::create_texture_views(&device, stale_descs[..], stale_outputs[..]));
-    assert(stale == gpu::INVALID_HANDLE && capture.calls == 2 && capture.matched,
+    @assert_panics("gpu::create_texture_views: stale TextureHandle") {
+        (void)gpu::create_texture_views(&device, stale_descs[..], stale_outputs[..]);
+    };
+    assert(capture.calls == 2 && capture.matched,
         "batch stale texture rejection omits unvalidated identity");
     assert(stale_outputs[0].owner == 17 && stale_outputs[0].index.value == 19
         && stale_outputs[0].generation == 7,
@@ -2148,9 +2160,9 @@ fn void texture_view_batch_rollback_survives_cache_growth() @test {
     descs[vk::INITIAL_CACHED_VIEW_CAPACITY + 1] = { .texture = stale_texture };
     gpu::TextureView[vk::INITIAL_CACHED_VIEW_CAPACITY + 2] views;
 
-    assert(@catch(gpu::create_texture_views(&device, descs[..], views[..]))
-        == gpu::INVALID_HANDLE,
-        "a stale final item rejects a batch after native-view cache growth");
+    @assert_panics("gpu::create_texture_views: stale TextureHandle") {
+        (void)gpu::create_texture_views(&device, descs[..], views[..]);
+    };
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     assert(cached_texture_view_count(state, texture) == 0,
         "batch rollback removes creations made before and after cache growth");

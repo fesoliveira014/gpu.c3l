@@ -670,21 +670,19 @@ fn gpu::Device? create_vk_device_with_probe(
 ) {
     gpu::DeviceDesc normalized =
         gpu::internal::normalize_device_desc(device_desc)!;
-    gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(adapter);
-    if (runtime_data == null) return gpu::INVALID_HANDLE~;
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::require_adapter(adapter)!;
     VkRuntimeState* runtime_state = runtime_data.state;
-    if (runtime_state == null) return gpu::INVALID_HANDLE~;
+    if (runtime_state == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.ADAPTER, gpu::internal::HandleCause.INVARIANT)~;
 
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
     gpu::Surface requested_surface = normalized.surface;
     vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null;
     if (requested_surface.is_valid()) {
         gpu::internal::SurfaceData* surface_data =
-            gpu::internal::resolve_surface(&requested_surface);
-        if (surface_data == null) return gpu::INVALID_HANDLE~;
+            gpu::internal::require_surface(&requested_surface)!;
         gpu::internal::RuntimeData* surface_runtime =
             gpu::internal::resolve_runtime(&surface_data.runtime);
-        if (surface_runtime != runtime_data) return gpu::INVALID_HANDLE~;
+        if (surface_runtime != runtime_data) return gpu::internal::reject_handle(gpu::internal::HandleKind.SURFACE, gpu::internal::HandleCause.MISMATCHED)~;
         presentation_surface = (vk::SurfaceKHR)surface_data.backend_surface;
         if (!runtime_state.instance_capabilities.surface_maintenance) {
             return gpu::UNSUPPORTED_FEATURE~;
@@ -718,8 +716,8 @@ fn void? validate_device_baseline_support(
     VkRuntimeState* runtime_state,
     uint adapter_index,
 ) {
-    if (runtime_state == null) return gpu::INVALID_HANDLE~;
-    if (adapter_index >= runtime_state.adapters.len) return gpu::INVALID_HANDLE~;
+    if (runtime_state == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.ADAPTER, gpu::internal::HandleCause.INVARIANT)~;
+    if (adapter_index >= runtime_state.adapters.len) return gpu::internal::reject_handle(gpu::internal::HandleKind.ADAPTER, gpu::internal::HandleCause.INVARIANT)~;
 
     VkShaderHeapState shader_heap =
         resolve_shader_heap_state(&runtime_state.config)!;

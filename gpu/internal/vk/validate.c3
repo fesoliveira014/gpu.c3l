@@ -14,9 +14,9 @@ struct ResolvedSpan {
 }
 
 fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
-    if (state == null || span == null) return gpu::INVALID_HANDLE~;
+    if (state == null || span == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.GPU_SPAN, gpu::internal::HandleCause.INVARIANT)~;
 
-    if (span.owner != state.allocations.owner) return gpu::INVALID_HANDLE~;
+    if (span.owner != state.allocations.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.GPU_SPAN, gpu::internal::HandleCause.FOREIGN)~;
     gpu::GpuAllocation allocation = {
         .owner      = span.owner,
         .index      = span.index,
@@ -89,7 +89,7 @@ fn ResolvedSpan? resolve_span_slot(
         if (operation == null) return span_fault~;
         bool allocation_owner = span != null
             && span.owner == state.allocations.owner;
-        bool has_identity = span_fault != gpu::INVALID_HANDLE;
+        bool has_identity = span_fault != gpu::internal::HANDLE_REJECTED;
         ZString debug_name;
         if (has_identity && allocation_owner) {
             gpu::GpuAllocation allocation = {
@@ -110,10 +110,10 @@ fn ResolvedSpan? resolve_span_slot(
             index:               has_identity ? span.index : 0,
             generation:          has_identity ? span.generation : 0,
             debug_name:          debug_name,
-            rejected_field:      span_fault == gpu::INVALID_HANDLE
+            rejected_field:      span_fault == gpu::internal::HANDLE_REJECTED
                 ? "GpuSpan.identity"
                 : rejected_field,
-            invariant:           span_fault == gpu::INVALID_HANDLE
+            invariant:           span_fault == gpu::internal::HANDLE_REJECTED
                 ? "must identify one live span owner"
                 : "span range must fit its live owner",
             backend_text:        null,

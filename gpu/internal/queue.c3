@@ -42,9 +42,8 @@ fn CompletionPoint? make_completion_point(
     Queue queue,
     ulong sequence,
 ) @private {
-    if (!queue.is_valid() || queue.id >= MAX_SELECTED_QUEUE_IDENTITIES) {
-        return gpu::INVALID_HANDLE~;
-    }
+    if (!queue.is_valid()) return reject_handle(HandleKind.QUEUE, HandleCause.ZERO)~;
+    if (queue.id >= MAX_SELECTED_QUEUE_IDENTITIES) return reject_handle(HandleKind.QUEUE, HandleCause.MALFORMED)~;
     if (sequence == 0 || sequence > MAX_COMPLETION_SEQUENCE) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -412,12 +411,12 @@ fn void? validate_queue(
     Device* device,
     Queue queue,
 ) @private {
-    if (operation == null || !operation.active || device == null || !queue.is_valid()) {
-        return gpu::INVALID_HANDLE~;
+    if (operation == null || !operation.active || device == null) {
+        return reject_handle(HandleKind.QUEUE, HandleCause.INVARIANT)~;
     }
-    if (queue.device != *device || !queue_id_is_selected(operation, queue)) {
-        return gpu::INVALID_HANDLE~;
-    }
+    if (!queue.is_valid()) return reject_handle(HandleKind.QUEUE, HandleCause.ZERO)~;
+    if (queue.device != *device) return reject_handle(HandleKind.QUEUE, HandleCause.FOREIGN)~;
+    if (!queue_id_is_selected(operation, queue)) return reject_handle(HandleKind.QUEUE, HandleCause.MALFORMED)~;
 }
 
 fn void? validate_completion_point(
@@ -425,15 +424,13 @@ fn void? validate_completion_point(
     Device* device,
     CompletionPoint point,
 ) @private {
-    if (operation == null
-        || !operation.active
-        || device == null
-        || !point.is_valid()
-        || point.device != *device) {
-        return gpu::INVALID_HANDLE~;
+    if (operation == null || !operation.active || device == null) {
+        return reject_handle(HandleKind.COMPLETION_POINT, HandleCause.INVARIANT)~;
     }
+    if (!point.is_valid()) return reject_handle(HandleKind.COMPLETION_POINT, HandleCause.ZERO)~;
+    if (point.device != *device) return reject_handle(HandleKind.COMPLETION_POINT, HandleCause.FOREIGN)~;
     if (completion_point_queue_id(point)
         >= selected_queues(operation).identity_count) {
-        return gpu::INVALID_HANDLE~;
+        return reject_handle(HandleKind.COMPLETION_POINT, HandleCause.MALFORMED)~;
     }
 }

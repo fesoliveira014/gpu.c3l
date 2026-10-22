@@ -282,8 +282,9 @@ fn void identical_descs_alias_one_entry() @test {
     gpu::destroy_pipeline(&device, first)!!;
     assert(cache_entry_count(&device) == 1, "entry survives while an alias lives");
 
-    assert(@catch(gpu::destroy_pipeline(&device, first)) == gpu::INVALID_HANDLE,
-        "double-destroy of the same handle faults INVALID_HANDLE");
+    @assert_panics("gpu::destroy_pipeline: stale PipelineHandle") {
+        (void)gpu::destroy_pipeline(&device, first);
+    };
     assert(cache_entry_count(&device) == 1, "double-destroy does not disturb the entry");
 
     gpu::destroy_pipeline(&device, second)!!;

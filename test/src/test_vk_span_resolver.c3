@@ -77,14 +77,14 @@ fn void span_resolver_rejects_wrong_owner_and_stale_generation() @test {
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
     fault wrong_owner_fault = @catch(vk::resolve_span(&fixture.state, &wrong_owner));
-    assert(wrong_owner_fault == gpu::INVALID_HANDLE,
-        "a span from another device faults INVALID_HANDLE");
+    assert(wrong_owner_fault == gpu::internal::HANDLE_REJECTED,
+        "a span from another device is rejected");
 
     gpu::GpuSpan stale = fixture_allocation_span(&fixture, 0, 16);
     stale.generation++;
     fault stale_fault = @catch(vk::resolve_span(&fixture.state, &stale));
-    assert(stale_fault == gpu::INVALID_HANDLE,
-        "a stale span generation faults INVALID_HANDLE");
+    assert(stale_fault == gpu::internal::HANDLE_REJECTED,
+        "a stale span generation is rejected");
 }
 
 fn void span_resolver_rejects_empty_and_escaping_ranges() @test {
@@ -200,7 +200,7 @@ fn void independent_allocation_span_rejects_invalid_identity_and_range() @test {
 
     gpu::GpuSpan stale = fixture_allocation_span(&fixture, 0, 16);
     stale.generation++;
-    assert(@catch(vk::resolve_span(&fixture.state, &stale)) == gpu::INVALID_HANDLE,
+    assert(@catch(vk::resolve_span(&fixture.state, &stale)) == gpu::internal::HANDLE_REJECTED,
         "stale independent span generations are rejected");
 
     gpu::GpuSpan escaping = fixture_allocation_span(&fixture, 56, 16);

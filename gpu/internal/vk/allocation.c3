@@ -118,13 +118,13 @@ fn gpu::GpuAllocation? AllocationTable.alloc(&self, AllocationSlot value) {
 }
 
 fn AllocationSlot*? AllocationTable.get(&self, gpu::GpuAllocation allocation) {
-    if (allocation.owner != self.owner) return gpu::INVALID_HANDLE~;
+    if (allocation.owner != self.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.ALLOCATION, gpu::internal::HandleCause.FOREIGN)~;
     uint index = allocation.index;
     if (index >= self.slots.len || !self.slots[index].used) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.ALLOCATION, gpu::internal::HandleCause.STALE)~;
     }
     if (self.slots[index].generation != allocation.generation) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.ALLOCATION, gpu::internal::HandleCause.STALE)~;
     }
     return &self.slots[index].value;
 }
@@ -652,8 +652,8 @@ fn AllocationSlot*? resolve_mapped_allocation_span(
     VkDeviceState* state,
     gpu::GpuSpan* span,
 ) {
-    if (state == null || span == null) return gpu::INVALID_HANDLE~;
-    if (span.owner != state.allocations.owner) return gpu::INVALID_HANDLE~;
+    if (state == null || span == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.GPU_SPAN, gpu::internal::HandleCause.INVARIANT)~;
+    if (span.owner != state.allocations.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.GPU_SPAN, gpu::internal::HandleCause.FOREIGN)~;
     gpu::GpuAllocation allocation = {
         .owner      = span.owner,
         .index      = span.index,
@@ -675,7 +675,7 @@ fn NonCoherentRange? mapped_allocation_range(
     gpu::GpuSpan* span,
 ) {
     if (state == null || slot == null || span == null) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.GPU_SPAN, gpu::internal::HandleCause.INVARIANT)~;
     }
     vk::DeviceSize native_size = slot.backing.allocation_info.size;
     usz allocation_size = (usz)native_size;

@@ -566,8 +566,9 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     gpu::destroy_pipeline(&device, stale_handle)!!;
     vk::DescriptorHeapCommandBinding heap_binding_before =
         record.descriptor_heap_binding;
-    fault stale_bind = @catch(gpu::cmd_bind_pipeline(&commands, stale_handle));
-    assert(stale_bind == gpu::INVALID_HANDLE, "binding a stale pipeline faults INVALID_HANDLE");
+    @assert_panics("gpu::cmd_bind_pipeline: stale PipelineHandle") {
+        (void)gpu::cmd_bind_pipeline(&commands, stale_handle);
+    };
     assert(record.descriptor_heap_binding.graphics_set_bound
             == heap_binding_before.graphics_set_bound
         && record.descriptor_heap_binding.compute_set_bound
@@ -1756,4 +1757,49 @@ fn void inline_root_length_is_validated() @test {
     )!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&executable)!!;
+}
+
+fn void consumed_command_list_copy_terminates() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    gpu::CommandList copy = commands;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    defer gpu::discard_executable_commands(&executable)!!;
+    gpu::Barrier barrier = { .before = { .compute }, .after = { .compute } };
+
+    @assert_panics("gpu::cmd_barrier: consumed CommandList") {
+        (void)gpu::cmd_barrier(&copy, &barrier);
+    };
+}
+
+fn void discarded_command_list_copy_terminates() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    gpu::CommandList copy = commands;
+    gpu::discard_commands(&commands)!!;
+    gpu::Barrier barrier = { .before = { .compute }, .after = { .compute } };
+
+    @assert_panics("gpu::cmd_barrier: stale CommandList") {
+        (void)gpu::cmd_barrier(&copy, &barrier);
+    };
+}
+
+fn void pipeline_destroyed_twice_through_copy_terminates() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    ValComputeCtx ctx = make_val_compute_ctx(&device);
+    gpu::PipelineHandle copy = ctx.pipeline;
+    gpu::destroy_pipeline(&device, ctx.pipeline)!!;
+
+    @assert_panics("gpu::destroy_pipeline: stale PipelineHandle") {
+        (void)gpu::destroy_pipeline(&device, copy);
+    };
 }

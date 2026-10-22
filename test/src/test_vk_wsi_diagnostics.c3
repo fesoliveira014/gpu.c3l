@@ -124,41 +124,39 @@ fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
     capture = {};
 
     gpu::SwapchainHandle bogus = { .index = 3, .generation = 7 };
-    fault query_fault = @catch(gpu::get_swapchain_info(&device, bogus));
+    @assert_panics("gpu::get_swapchain_info: stale SwapchainHandle") {
+        (void)gpu::get_swapchain_info(&device, bogus);
+    };
 
-    assert(query_fault == gpu::INVALID_HANDLE, "stale handle fault is unchanged");
-    assert(capture.calls == 1, "stale swapchain lookup emits exactly once");
-    assert(capture.last.public_fault == query_fault, "stale diagnostic preserves the fault");
+    assert(capture.calls == 1, "stale swapchain lookup emits exactly once before terminating");
+    assert(!capture.last.has_fault, "a rejected handle is not reported as a public fault");
     assert(capture.last.operation.str_view() == "get_swapchain_info", "stale lookup names the operation");
     assert(capture.last.rejected_field.str_view() == "SwapchainHandle", "stale lookup names the handle");
     assert(capture.last.resource.kind == gpu::DebugResourceKind.SWAPCHAIN, "stale lookup keeps resource kind");
     assert(!capture.last.resource.has_public_identity, "unverified handle bits are not identity");
 
     capture = {};
-    assert(
-        @catch(gpu::destroy_swapchain(&device, bogus)) == gpu::INVALID_HANDLE,
-        "destroy preserves stale-handle fault"
-    );
+    @assert_panics("gpu::destroy_swapchain: stale SwapchainHandle") {
+        (void)gpu::destroy_swapchain(&device, bogus);
+    };
     assert(
         capture.calls == 1 && capture.last.operation.str_view() == "destroy_swapchain",
         "destroy reports exactly once"
     );
 
     capture = {};
-    assert(
-        @catch(gpu::resize_swapchain(&device, bogus, 640, 480)) == gpu::INVALID_HANDLE,
-        "resize preserves stale-handle fault"
-    );
+    @assert_panics("gpu::resize_swapchain: stale SwapchainHandle") {
+        (void)gpu::resize_swapchain(&device, bogus, 640, 480);
+    };
     assert(
         capture.calls == 1 && capture.last.operation.str_view() == "resize_swapchain",
         "resize reports exactly once"
     );
 
     capture = {};
-    assert(
-        @catch(gpu::acquire_next_image(&device, bogus)) == gpu::INVALID_HANDLE,
-        "acquire preserves stale-handle fault"
-    );
+    @assert_panics("gpu::acquire_next_image: stale SwapchainHandle") {
+        (void)gpu::acquire_next_image(&device, bogus);
+    };
     assert(
         capture.calls == 1 && capture.last.operation.str_view() == "acquire_next_image",
         "acquire reports exactly once"
@@ -176,17 +174,15 @@ fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
         )!!,
     };
     capture = {};
-    assert(
-        @catch(gpu::present(&device, &acquired, completion)) == gpu::INVALID_HANDLE,
-        "present preserves stale-handle fault"
-    );
+    @assert_panics("gpu::present: foreign SwapchainHandle") {
+        (void)gpu::present(&device, &acquired, completion);
+    };
     assert(capture.calls == 1 && capture.last.operation.str_view() == "present", "present reports exactly once");
 
     capture = {};
-    assert(
-        @catch(gpu::get_present_mode_support(&device, bogus)) == gpu::INVALID_HANDLE,
-        "support query preserves stale-handle fault"
-    );
+    @assert_panics("gpu::get_present_mode_support: stale SwapchainHandle") {
+        (void)gpu::get_present_mode_support(&device, bogus);
+    };
     assert(
         capture.calls == 1 && capture.last.operation.str_view() == "get_present_mode_support",
         "support query reports exactly once"
@@ -334,8 +330,9 @@ fn void wrapped_image_failure_is_backend_with_swapchain_identity() @test {
 
     fault missing_fault = @catch(gpu::internal::vk::resolve_swapchain_texture_for_operation(&context, missing));
 
-    assert(missing_fault == gpu::INVALID_HANDLE, "wrapped-image invariant preserves internal lookup fault");
+    assert(missing_fault == gpu::internal::HANDLE_REJECTED, "wrapped-image invariant preserves internal lookup fault");
     assert(capture.calls == 1, "wrapped-image invariant emits exactly once");
+    assert(!capture.last.has_fault, "a rejected lookup is not reported as a public fault");
     assert(capture.last.category.backend && !capture.last.category.public_contract,
         "wrapped-image invariant is backend-only");
     assert(capture.last.resource.has_public_identity, "wrapped-image failure carries resolved swapchain identity");

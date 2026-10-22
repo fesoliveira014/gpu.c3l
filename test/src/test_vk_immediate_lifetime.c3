@@ -124,8 +124,9 @@ fn void unreferenced_destroy_is_immediate() @test {
     owned.span = {};
 
     assert(!owned.allocation.is_valid(), "successful release consumes the allocation token");
-    assert(@catch(gpu::get_allocation_info(&device, stale)) == gpu::INVALID_HANDLE,
-        "immediate release invalidates copied tokens without a lifecycle boundary");
+    @assert_panics("gpu::get_allocation_info: stale GpuAllocation") {
+        (void)gpu::get_allocation_info(&device, stale);
+    };
 }
 
 fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
@@ -290,9 +291,9 @@ fn void failed_texture_resolution_preserves_resource_teardown() @test {
         .after   = { .layout = gpu::TextureLayout.UNDEFINED },
     };
     barrier.texture.generation++;
-    assert(@catch(gpu::cmd_texture_barrier(&commands, &barrier))
-        == gpu::INVALID_HANDLE,
-        "a stale texture faults before native emission");
+    @assert_panics("gpu::cmd_texture_barrier: stale TextureHandle") {
+        (void)gpu::cmd_texture_barrier(&commands, &barrier);
+    };
     gpu::destroy_texture(&device, texture)!!;
     gpu::discard_commands(&commands)!!;
 }

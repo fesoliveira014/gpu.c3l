@@ -115,10 +115,10 @@ fn gpu::SwapchainHandle? SwapchainTable.alloc(&self, SwapchainSlot value) {
 }
 
 fn SwapchainSlot*? SwapchainTable.get(&self, gpu::SwapchainHandle h) {
-    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
+    if (h.owner != self.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.SWAPCHAIN, gpu::internal::HandleCause.FOREIGN)~;
     uint idx = h.index;
-    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
-    if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
+    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::internal::reject_handle(gpu::internal::HandleKind.SWAPCHAIN, gpu::internal::HandleCause.STALE)~;
+    if (self.slots[idx].generation != h.generation) return gpu::internal::reject_handle(gpu::internal::HandleKind.SWAPCHAIN, gpu::internal::HandleCause.STALE)~;
     return &self.slots[idx].value;
 }
 
@@ -209,7 +209,7 @@ fn gpu::SwapchainReadiness? make_swapchain_readiness(
         || swapchain.generation == 0
         || swapchain.generation > READINESS_SWAPCHAIN_GENERATION_MASK
         || acquisition == 0) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.SWAPCHAIN_READINESS, gpu::internal::HandleCause.INVARIANT)~;
     }
     return {
         .device = device,
@@ -242,7 +242,7 @@ fn gpu::SwapchainHandle? swapchain_handle_from_readiness(
     uint generation = swapchain_readiness_generation(readiness);
     uint acquisition = swapchain_readiness_acquisition(readiness);
     if (!readiness.is_valid() || generation == 0 || acquisition == 0) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.SWAPCHAIN_READINESS, gpu::internal::HandleCause.MALFORMED)~;
     }
     return {
         .owner = gpu::internal::resource_owner_tag(
@@ -1364,7 +1364,7 @@ fn void? vk_present_with(
 ) {
     if (!image.readiness.is_valid()
         || image.readiness.device != state.owner) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.ACQUIRED_IMAGE, gpu::internal::HandleCause.FOREIGN)~;
     }
     gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
         state,

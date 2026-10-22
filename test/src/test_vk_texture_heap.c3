@@ -1179,21 +1179,25 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
     )!!;
     assert(slot.index.value == range.base.value && slot.generation != stale.generation,
         "an update keeps the index and advances the generation");
-    assert(@catch(gpu::destroy_texture_view(&device, stale)) == gpu::INVALID_HANDLE,
-        "a token from before the update is stale");
-    assert(@catch(gpu::update_texture_view(
-        device:  &device,
-        view:    &stale,
-        texture: small,
-        desc:    null,
-    )) == gpu::INVALID_HANDLE
-        && @catch(gpu::update_texture_view(
-        device:  &device,
-        view:    null,
-        texture: small,
-        desc:    null,
-    )) == gpu::INVALID_HANDLE,
-        "stale and null tokens are rejected before heap mutation");
+    @assert_panics("gpu::destroy_texture_view: stale TextureView") {
+        (void)gpu::destroy_texture_view(&device, stale);
+    };
+    @assert_panics("gpu::update_texture_view: stale TextureView") {
+        (void)gpu::update_texture_view(
+            device:  &device,
+            view:    &stale,
+            texture: small,
+            desc:    null,
+        );
+    };
+    @assert_panics("gpu::update_texture_view: null TextureView") {
+        (void)gpu::update_texture_view(
+            device:  &device,
+            view:    null,
+            texture: small,
+            desc:    null,
+        );
+    };
     assert(state.textures.get(large)!!.live_descriptor_views == 1
         && state.textures.get(small)!!.live_descriptor_views == 2,
         "the live-view count moves to the new texture");

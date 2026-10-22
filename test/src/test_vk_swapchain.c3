@@ -1637,7 +1637,7 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
         .emit = &emit_simulated_swapchain_barrier,
     };
     gpu::internal::vk::vk_cmd_texture_barrier_with_ops(
-        gpu::internal::required_recording_command(&commands),
+        gpu::internal::required_recording_command(&commands, "test"),
         &to_present,
         &barrier_ops,
     )!!;
@@ -1653,8 +1653,8 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
         width:  8,
         height: 8,
     )!!;
-    assert(@catch(state.textures.get(old_texture)) == gpu::INVALID_HANDLE
-        && @catch(state.attachment_views.get(old_view)) == gpu::INVALID_HANDLE,
+    assert(@catch(state.textures.get(old_texture)) == gpu::internal::HANDLE_REJECTED
+        && @catch(state.attachment_views.get(old_view)) == gpu::internal::HANDLE_REJECTED,
         "successful resize invalidates both handles from the old acquisition");
     assert(borrowed_view_swapchain_creates == 2
         && borrowed_view_swapchain_destroys == 1,
@@ -1662,7 +1662,7 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
 
     gpu::internal::vk::vk_destroy_swapchain(state, swapchain)!!;
     assert(@catch(state.presentation.swapchains.get(swapchain))
-        == gpu::INVALID_HANDLE,
+        == gpu::internal::HANDLE_REJECTED,
         "destroy invalidates the rebuilt swapchain handle");
     assert(borrowed_view_swapchain_destroys == 2,
         "each fake native swapchain is destroyed exactly once");
@@ -2222,8 +2222,9 @@ fn void swapchain_info_query_rejects_invalid_handle() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::SwapchainHandle bogus = { .index = 3, .generation = 7 };
-    fault query_fault = @catch(gpu::get_swapchain_info(&device, bogus));
-    assert(query_fault == gpu::INVALID_HANDLE, "query on a bogus swapchain faults INVALID_HANDLE");
+    @assert_panics("gpu::get_swapchain_info: stale SwapchainHandle") {
+        (void)gpu::get_swapchain_info(&device, bogus);
+    };
 }
 
 fn vk::Result capture_unified_submit(
@@ -2296,7 +2297,7 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = 4, .height = 4 };
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_end_render_pass(&commands)!!;
-    unified_application_buffer = gpu::internal::required_recording_command(&commands).command_buffer;
+    unified_application_buffer = gpu::internal::required_recording_command(&commands, "test").command_buffer;
     gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)!! };
 
     gpu::SubmitDesc wrong = {
@@ -2346,7 +2347,7 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
     gpu::CommandList again = gpu::begin_commands(&allocator)!!;
     gpu::cmd_begin_render_pass(&again, &pass)!!;
     gpu::cmd_end_render_pass(&again)!!;
-    unified_application_buffer = gpu::internal::required_recording_command(&again).command_buffer;
+    unified_application_buffer = gpu::internal::required_recording_command(&again, "test").command_buffer;
     gpu::ExecutableCommandList[1] again_lists = { gpu::end_commands(&again)!! };
     gpu::SubmitDesc omitted = { .command_lists = again_lists[..], .readiness = second.readiness };
     gpu::CompletionPoint second_point = gpu::internal::vk::vk_submit_with_ops(

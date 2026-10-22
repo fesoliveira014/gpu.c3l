@@ -269,12 +269,18 @@ fn void context_custom_selector_rejects_foreign_stale_and_zero_adapters() @test 
     util::DeviceContextDesc desc = util::default_device_context_desc();
     desc.select_adapter = &context_adapter_selector;
     desc.adapter_user_data = &capture;
-    assert(@catch(util::create_device_context(&desc)) == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::create_device_context: foreign Adapter") {
+        (void)util::create_device_context(&desc);
+    };
     assert(gpu::enumerate_adapters(&foreign)!!.count == 1);
     gpu::destroy_runtime(&foreign)!!;
-    assert(@catch(util::create_device_context(&desc)) == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::create_device_context: foreign Adapter") {
+        (void)util::create_device_context(&desc);
+    };
     capture.selected = {};
-    assert(@catch(util::create_device_context(&desc)) == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::create_device_context: foreign Adapter") {
+        (void)util::create_device_context(&desc);
+    };
     assert(vk::stub_device_temporary_create_count() == 0);
 }
 

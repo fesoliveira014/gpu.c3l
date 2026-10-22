@@ -111,7 +111,9 @@ fn void allocation_ownership_queries_and_consumption() @test {
     first_state.allocation_block_free = false;
     gpu::free_allocation(&first, &allocation)!!;
     assert(!allocation.is_valid(), "successful free consumes the owning token");
-    assert(@catch(gpu::get_allocation_info(&first, stale)) == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::get_allocation_info: stale GpuAllocation") {
+        (void)gpu::get_allocation_info(&first, stale);
+    };
 
     gpu::destroy_device(&first)!!;
     gpu::destroy_device(&second)!!;
@@ -218,8 +220,9 @@ fn void mapped_span_visibility_validates_ownership_and_ranges() @test {
         "rejected ranges perform no visibility mutation");
 
     gpu::free_allocation(&first, &allocation)!!;
-    assert(@catch(gpu::flush_mapped_span(&first, range))
-        == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::flush_mapped_span: stale GpuSpan") {
+        (void)gpu::flush_mapped_span(&first, range);
+    };
     assert(first_state.allocation_flush_calls == 1,
         "stale ranges do not reach native visibility work");
 

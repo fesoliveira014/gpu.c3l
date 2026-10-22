@@ -1101,6 +1101,7 @@ fn void mapped_span_stale_owner_faults() @test {
     gpu::invalidate_mapped_span(&device, stale)!!;
     free_owned_span(&device, &owned)!!;
 
-    fault stale_fault = @catch(gpu::flush_mapped_span(&device, stale));
-    assert(stale_fault == gpu::INVALID_HANDLE, "flush on a freed allocation faults INVALID_HANDLE");
+    @assert_panics("gpu::flush_mapped_span: stale GpuAllocation") {
+        (void)gpu::flush_mapped_span(&device, stale);
+    };
 }

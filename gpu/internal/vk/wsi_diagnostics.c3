@@ -45,8 +45,8 @@ fn fault report_wsi_backend_failure(
         .severity             = gpu::DebugMessageSeverity.ERROR,
         .category             = { .backend },
         .operation            = context.operation,
-        .has_fault            = true,
-        .public_fault         = public_fault,
+        .has_fault            = public_fault != gpu::internal::HANDLE_REJECTED,
+        .public_fault         = public_fault != gpu::internal::HANDLE_REJECTED ? public_fault : {},
         .resource             = {
             .kind                = gpu::DebugResourceKind.SWAPCHAIN,
             .has_public_identity = context.has_public_identity,

@@ -73,11 +73,11 @@ fn AttachmentViewSlot*? AttachmentViewTable.get(
     gpu::AttachmentViewHandle handle,
 ) {
     if (handle.owner != self.owner || handle.index >= self.slots.len) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.ATTACHMENT_VIEW, gpu::internal::HandleCause.FOREIGN)~;
     }
     AttachmentViewCell* cell = &self.slots[handle.index];
     if (!cell.used || cell.generation != handle.generation) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.ATTACHMENT_VIEW, gpu::internal::HandleCause.STALE)~;
     }
     return &cell.value;
 }

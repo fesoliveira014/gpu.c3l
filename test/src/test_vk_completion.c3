@@ -156,16 +156,19 @@ fn void queue_completion_publication_rejects_gaps() @test {
     )!!;
 
     assert(@catch(vk::publish_queue_completion(state, second))
-        == gpu::INVALID_HANDLE,
+        == gpu::internal::HANDLE_REJECTED,
         "publication cannot skip an earlier reserved sequence");
-    assert(@catch(gpu::poll_completion(first)) == gpu::INVALID_HANDLE,
-        "the skipped sequence remains unpublished");
-    assert(@catch(gpu::poll_completion(second)) == gpu::INVALID_HANDLE,
-        "the later sequence remains unpublished after rejection");
+    @assert_panics("gpu::poll_completion: malformed CompletionPoint") {
+        (void)gpu::poll_completion(first);
+    };
+    @assert_panics("gpu::poll_completion: malformed CompletionPoint") {
+        (void)gpu::poll_completion(second);
+    };
 
     vk::publish_queue_completion(state, first)!!;
-    assert(@catch(gpu::poll_completion(second)) == gpu::INVALID_HANDLE,
-        "publishing an earlier point does not publish a later point");
+    @assert_panics("gpu::poll_completion: malformed CompletionPoint") {
+        (void)gpu::poll_completion(second);
+    };
     vk::publish_queue_completion(state, second)!!;
 
     vk::QueueCompletionState* completion =
@@ -242,8 +245,9 @@ fn void queue_completion_poll_wait_is_reusable() @test {
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, queue.id)!!;
 
-    assert(@catch(gpu::poll_completion(point)) == gpu::INVALID_HANDLE,
-        "an unpublished queue sequence is not a public completion point");
+    @assert_panics("gpu::poll_completion: malformed CompletionPoint") {
+        (void)gpu::poll_completion(point);
+    };
     vk::publish_queue_completion(state, point)!!;
     assert(!gpu::poll_completion(point)!!,
         "a published queue sequence remains incomplete until signaled");
@@ -254,8 +258,9 @@ fn void queue_completion_poll_wait_is_reusable() @test {
         state,
         queue,
     )!!;
-    assert(@catch(gpu::poll_completion(future)) == gpu::INVALID_HANDLE,
-        "a later unpublished sequence is rejected");
+    @assert_panics("gpu::poll_completion: malformed CompletionPoint") {
+        (void)gpu::poll_completion(future);
+    };
     completion.submission_mutex.lock()!!;
     vk::cancel_queue_completion_locked(state, future)!!;
     completion.submission_mutex.unlock();

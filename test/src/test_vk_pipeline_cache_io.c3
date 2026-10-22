@@ -278,8 +278,9 @@ fn void present_mode_query_requires_valid_swapchain() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::SwapchainHandle bogus = { .index = 3, .generation = 7 };
-    fault f = @catch(gpu::get_present_mode_support(&device, bogus));
-    assert(f == gpu::INVALID_HANDLE, "query on a bogus swapchain faults INVALID_HANDLE");
+    @assert_panics("gpu::get_present_mode_support: stale SwapchainHandle") {
+        (void)gpu::get_present_mode_support(&device, bogus);
+    };
 }
 
 fn void pipeline_cache_retry_seam_is_exact_and_silent_on_success() @test {

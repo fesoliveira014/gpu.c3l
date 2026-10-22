@@ -34,7 +34,7 @@ fn CommandPathNativeCopy? command_path_native_copy(
 ) {
     VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    if (state == null) return gpu::INVALID_HANDLE~;
+    if (state == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.DEVICE, gpu::internal::HandleCause.INVARIANT)~;
     ResolvedSpan resolved_src = resolve_span(state, &src)!;
     ResolvedSpan resolved_dst = resolve_span(state, &dst)!;
     if (resolved_src.size != resolved_dst.size) {

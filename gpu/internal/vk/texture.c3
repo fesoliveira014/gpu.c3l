@@ -196,10 +196,10 @@ fn gpu::TextureHandle? TextureTable.alloc(&self, TextureSlot value) {
 }
 
 fn TextureSlot*? TextureTable.get(&self, gpu::TextureHandle h) {
-    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
+    if (h.owner != self.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.TEXTURE, gpu::internal::HandleCause.FOREIGN)~;
     uint idx = h.index;
-    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
-    if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
+    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::internal::reject_handle(gpu::internal::HandleKind.TEXTURE, gpu::internal::HandleCause.STALE)~;
+    if (self.slots[idx].generation != h.generation) return gpu::internal::reject_handle(gpu::internal::HandleKind.TEXTURE, gpu::internal::HandleCause.STALE)~;
     return &self.slots[idx].value;
 }
 

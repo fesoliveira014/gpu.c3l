@@ -1324,7 +1324,7 @@ struct AccelerationStructureViewRaceArgs {
     gpu::AccelerationStructureHandle acceleration_structure;
     Atomic{bool}*                    start;
     gpu::AccelerationStructureView   view;
-    fault                            result;
+    bool                             terminated;
     bool                             succeeded;
 }
 
@@ -1332,17 +1332,16 @@ fn int acceleration_structure_view_race_worker(void* raw_args) {
     AccelerationStructureViewRaceArgs* args =
         (AccelerationStructureViewRaceArgs*)raw_args;
     while (!args.start.load(AtomicOrdering.ACQUIRE)) thread::yield();
-    gpu::AccelerationStructureView? view =
-        gpu::create_acceleration_structure_view(
+    bool panicked = @panicked() {
+        args.view = gpu::create_acceleration_structure_view(
             args.device,
             args.acceleration_structure,
-        );
-    if (catch create_fault = view) {
-        args.result = create_fault;
-        return 0;
-    }
-    args.view = view;
-    args.succeeded = true;
+        )!!;
+        args.succeeded = true;
+    };
+    args.terminated = panicked
+        && last_panic_message()
+            == "gpu::create_acceleration_structure_view: stale AccelerationStructureHandle";
     return 0;
 }
 
@@ -1383,8 +1382,8 @@ fn void tlas_view_creation_serializes_with_destruction() @test {
         gpu::destroy_acceleration_structure_view(&device, args.view)!!;
         gpu::destroy_acceleration_structure(&device, tlas)!!;
     } else {
-        assert(destroyed && args.result == gpu::INVALID_HANDLE,
-            "TLAS destruction wins atomically before view publication");
+        assert(destroyed && args.terminated,
+            "TLAS destruction wins atomically; the late view creation terminates");
     }
 }
 

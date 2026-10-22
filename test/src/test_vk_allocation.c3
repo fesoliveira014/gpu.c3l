@@ -342,7 +342,7 @@ fn void mapped_visibility_rejects_invalid_spans_before_native_work() @test {
         &fixture.state,
         stale,
         &ops,
-    )) == gpu::INVALID_HANDLE);
+    )) == gpu::internal::HANDLE_REJECTED);
 
     gpu::GpuSpan foreign = span;
     foreign.owner = gpu::internal::resource_owner_tag(
@@ -353,7 +353,7 @@ fn void mapped_visibility_rejects_invalid_spans_before_native_work() @test {
         &fixture.state,
         foreign,
         &ops,
-    )) == gpu::INVALID_HANDLE);
+    )) == gpu::internal::HANDLE_REJECTED);
 
     fixture.cells[0].value.backing.cpu_base = null;
     assert(@catch(vk::flush_mapped_span_for_state_with_ops(
@@ -380,12 +380,12 @@ fn void allocation_table_checks_identity_reuse_and_capacity() @test {
         "a full allocation table faults SLOT_TABLE_FULL");
 
     table.free(first)!!;
-    assert(@catch(table.get(first)) == gpu::INVALID_HANDLE,
+    assert(@catch(table.get(first)) == gpu::internal::HANDLE_REJECTED,
         "free invalidates the old allocation identity");
     gpu::GpuAllocation reused = table.alloc(allocation_slot())!!;
     assert(reused.index == first.index && reused.generation > first.generation,
         "a reusable slot receives a fresh generation");
-    assert(@catch(table.get(first)) == gpu::INVALID_HANDLE,
+    assert(@catch(table.get(first)) == gpu::internal::HANDLE_REJECTED,
         "the original token remains stale after slot reuse");
 }
 
@@ -765,7 +765,7 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
         &fixture.state,
         allocation,
         &ops,
-    )) == gpu::INVALID_HANDLE
+    )) == gpu::internal::HANDLE_REJECTED
         && fixture.probe.destroy_count == 1,
         "repeated release cannot destroy the native allocation twice");
 }
@@ -1021,22 +1021,22 @@ fn void allocation_table_rejects_invalid_identities() @test {
         ALLOCATION_TEST_OWNER + 1,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
-    assert(@catch(table.get(wrong_owner)) == gpu::INVALID_HANDLE,
+    assert(@catch(table.get(wrong_owner)) == gpu::internal::HANDLE_REJECTED,
         "wrong-owner allocation identities are rejected");
 
     gpu::GpuAllocation stale = live;
     stale.generation++;
-    assert(@catch(table.get(stale)) == gpu::INVALID_HANDLE,
+    assert(@catch(table.get(stale)) == gpu::internal::HANDLE_REJECTED,
         "stale allocation generations are rejected");
 
     gpu::GpuAllocation unused = live;
     unused.index = 1;
-    assert(@catch(table.get(unused)) == gpu::INVALID_HANDLE,
+    assert(@catch(table.get(unused)) == gpu::internal::HANDLE_REJECTED,
         "unused allocation cells are rejected");
 
     gpu::GpuAllocation out_of_range = live;
     out_of_range.index = 2;
-    assert(@catch(table.get(out_of_range)) == gpu::INVALID_HANDLE,
+    assert(@catch(table.get(out_of_range)) == gpu::internal::HANDLE_REJECTED,
         "out-of-range allocation indices are rejected");
 }
 
@@ -1099,7 +1099,7 @@ fn void allocation_queries_and_immediate_release() @test {
     )!!;
     assert(fixture.probe.destroy_count == 1,
         "successful release destroys the paired buffer and VMA allocation");
-    assert(@catch(fixture.state.allocations.get(allocation)) == gpu::INVALID_HANDLE,
+    assert(@catch(fixture.state.allocations.get(allocation)) == gpu::internal::HANDLE_REJECTED,
         "successful release retires the public identity immediately");
 }
 
@@ -1258,14 +1258,14 @@ fn void native_allocation_classes_map_and_release() @test {
         "allocation stats retain a valid heap budget snapshot");
 
     gpu::free_allocation(&device, &write)!!;
-    assert(!write.is_valid()
-        && @catch(gpu::get_allocation_info(&device, stale_write))
-            == gpu::INVALID_HANDLE,
-        "free consumes the token and invalidates copied identities");
+    assert(!write.is_valid(), "free consumes the token");
+    @assert_panics("gpu::get_allocation_info: stale GpuAllocation") {
+        (void)gpu::get_allocation_info(&device, stale_write);
+    };
     gpu::GpuAllocation double_free = stale_write;
-    assert(@catch(gpu::free_allocation(&device, &double_free))
-        == gpu::INVALID_HANDLE,
-        "double free faults deterministically");
+    @assert_panics("gpu::free_allocation: stale GpuAllocation") {
+        (void)gpu::free_allocation(&device, &double_free);
+    };
     assert(double_free == stale_write,
         "failed double free preserves the caller token");
     assert(gpu::get_allocation_info(&device, private)!!.size == 256,
@@ -1510,16 +1510,16 @@ fn void allocation_span_commands_reject_stale_and_foreign_owners_before_mutation
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer (void)discard_test_commands(&commands);
-    assert(@catch(gpu::cmd_fill_buffer(&commands, stale, 0))
-        == gpu::INVALID_HANDLE,
-        "fill rejects a stale allocation span");
+    @assert_panics("gpu::cmd_fill_buffer: stale GpuAllocation") {
+        (void)gpu::cmd_fill_buffer(&commands, stale, 0);
+    };
     gpu::BufferCopyDesc copy = {
         .src = local_span,
         .dst = foreign_span,
     };
-    assert(@catch(gpu::cmd_copy_buffer(&commands, &copy))
-        == gpu::INVALID_HANDLE,
-        "copy rejects a cross-device allocation span");
+    @assert_panics("gpu::cmd_copy_buffer: foreign GpuSpan") {
+        (void)gpu::cmd_copy_buffer(&commands, &copy);
+    };
 
     gpu::cmd_fill_buffer(&commands, local_span, 0)!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;

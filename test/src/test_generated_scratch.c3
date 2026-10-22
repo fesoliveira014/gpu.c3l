@@ -259,12 +259,13 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     assert(stale_pipeline.index == recycled_pipeline.index
             && stale_pipeline.generation != recycled_pipeline.generation,
         "pipeline slots recycle with a new generation");
-    assert(@catch(gpu::release_generated_work(
-        &reserved_allocator,
-        stale_pipeline,
-        gpu::GeneratedWorkKind.DISPATCH,
-    )) == gpu::INVALID_HANDLE,
-        "release rejects a stale recycled pipeline before reservation lookup");
+    @assert_panics("gpu::release_generated_work: stale PipelineHandle") {
+        (void)gpu::release_generated_work(
+            &reserved_allocator,
+            stale_pipeline,
+            gpu::GeneratedWorkKind.DISPATCH,
+        );
+    };
     gpu::reserve_generated_work(&reserved_allocator, &reservation)!!;
     vk::CommandAllocatorSlot* reserved_slot = state.command_allocators.get(
         reserved_allocator.handle,

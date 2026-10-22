@@ -134,13 +134,13 @@ fn TimestampPoolSlot*? TimestampPoolTable.get(
     &self,
     gpu::TimestampPoolHandle handle,
 ) {
-    if (handle.owner != self.owner) return gpu::INVALID_HANDLE~;
+    if (handle.owner != self.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.TIMESTAMP_POOL, gpu::internal::HandleCause.FOREIGN)~;
     uint index = handle.index;
     if (index >= self.slots.len || !self.slots[index].used) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.TIMESTAMP_POOL, gpu::internal::HandleCause.STALE)~;
     }
     if (self.slots[index].generation != handle.generation) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.TIMESTAMP_POOL, gpu::internal::HandleCause.STALE)~;
     }
     return &self.slots[index].value;
 }

@@ -442,7 +442,7 @@ fn void? destroy_device(Device* device) {
 }
 
 <* Return a device-owned queue identity for a semantic role. Aliased roles
-   return the same token. A dead device faults INVALID_HANDLE; an unavailable
+   return the same token. A dead device terminates; an unavailable
    role faults INVALID_ARGUMENT. The token remains valid while the device is live.
    @param device : "Live device whose selected queue is queried."
    @param kind : "Semantic queue role."
@@ -460,7 +460,7 @@ fn Queue? get_queue(Device* device, QueueKind kind) {
 }
 
 <* Return a live queue's device-local identity and supported roles.
-   INVALID_HANDLE if the token is stale, foreign, or malformed.
+   A stale, foreign, or malformed token terminates.
    @param device : "Live device expected to own the queue."
    @param queue : "Selected queue token to inspect."
    @return "Stable queue information, or a recoverable ownership, invalid-handle, or device fault." *>
@@ -1069,7 +1069,7 @@ fn TextureView? create_texture_view_at(Device* device, TextureIndex slot, Textur
    @return "Success, or a recoverable invalid-handle, ownership, capacity, allocation, or device fault." *>
 fn void? update_texture_view(Device* device, TextureView* view, TextureHandle texture, TextureViewDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
-    if (view == null) return INVALID_HANDLE~;
+    if (view == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.TEXTURE_VIEW, gpu::internal::HandleCause.NULL_POINTER)~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, view.owner, gpu::internal::ResourceOwnerKind.TEXTURE_VIEW)!;
@@ -1739,7 +1739,7 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
    @return "Success, or a recoverable validation, ownership, capacity, allocation, busy, or device fault." *>
 fn void? reserve_generated_work(CommandAllocator* allocator, GeneratedWorkReservationDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
-    if (allocator == null) return INVALID_HANDLE~;
+    if (allocator == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.NULL_POINTER)~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_command_allocator(&operation, allocator)!;
@@ -1772,7 +1772,7 @@ fn void? reserve_generated_work(CommandAllocator* allocator, GeneratedWorkReserv
    @return "Success, or a recoverable validation, ownership, invalid-handle, busy, or device fault." *>
 fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipeline, GeneratedWorkKind kind) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
-    if (allocator == null) return INVALID_HANDLE~;
+    if (allocator == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.NULL_POINTER)~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_command_allocator(&operation, allocator)!;
@@ -1802,7 +1802,7 @@ fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipe
    @return "A recording token, or a recoverable invalid-handle, ownership, capacity, busy, or device fault." *>
 fn CommandList? begin_commands(CommandAllocator* allocator) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
-    if (allocator == null) return INVALID_HANDLE~;
+    if (allocator == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.NULL_POINTER)~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_command_allocator(&operation, allocator)!;
@@ -1895,7 +1895,7 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
    Requires a live unconsumed token and readable non-null label text for this call.
    Invalid token/phase or null label aborts in every build mode. *>
 fn void cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::required_recording_command(commands);
+    gpu::internal::vk::CommandRecord* record = gpu::internal::required_recording_command(commands, $$FUNC);
     if (label == null) abort("Label is required");
     gpu::internal::vk::vk_cmd_begin_label(record, label, color);
 }
@@ -1904,7 +1904,7 @@ fn void cmd_begin_label(CommandList* commands, ZString label, float[4] color = {
    Requires a live unconsumed recording token.
    Invalid token or phase aborts in every build mode. *>
 fn void cmd_end_label(CommandList* commands) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::required_recording_command(commands);
+    gpu::internal::vk::CommandRecord* record = gpu::internal::required_recording_command(commands, $$FUNC);
     gpu::internal::vk::vk_cmd_end_label(record);
 }
 
@@ -2394,7 +2394,7 @@ fn void? cmd_end_render_pass(CommandList* commands) {
    Requires a live unconsumed token and readable viewport: finite, within device bounds, nonzero height.
    Invalid token/phase or null viewport aborts in every build mode; state is copied for this call. *>
 fn void cmd_set_viewport(CommandList* commands, Viewport* viewport) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::required_recording_command(commands);
+    gpu::internal::vk::CommandRecord* record = gpu::internal::required_recording_command(commands, $$FUNC);
     if (viewport == null) abort("Viewport is required");
     gpu::internal::vk::vk_cmd_set_viewport(record, viewport);
 }
@@ -2403,7 +2403,7 @@ fn void cmd_set_viewport(CommandList* commands, Viewport* viewport) {
    Requires a live unconsumed token and readable scissor: nonnegative, signed-representable origin/extent.
    Invalid token/phase or null scissor aborts in every build mode; overscan is valid and state is copied. *>
 fn void cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::required_recording_command(commands);
+    gpu::internal::vk::CommandRecord* record = gpu::internal::required_recording_command(commands, $$FUNC);
     if (scissor == null) abort("Scissor is required");
     gpu::internal::vk::vk_cmd_set_scissor(record, scissor);
 }
@@ -3002,10 +3002,8 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
         }
     }
     if (desc.readiness != SWAPCHAIN_READINESS_INVALID) {
-        if (!desc.readiness.is_valid()
-            || desc.readiness.device != device) {
-            return INVALID_HANDLE~;
-        }
+        if (!desc.readiness.is_valid()) return gpu::internal::reject_handle(gpu::internal::HandleKind.SWAPCHAIN_READINESS, gpu::internal::HandleCause.MALFORMED)~;
+        if (desc.readiness.device != device) return gpu::internal::reject_handle(gpu::internal::HandleKind.SWAPCHAIN_READINESS, gpu::internal::HandleCause.FOREIGN)~;
         if (!queue.roles.graphics) return INVALID_ARGUMENT~;
         if (!operation.data.caps.unified_layouts
             && (!gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)

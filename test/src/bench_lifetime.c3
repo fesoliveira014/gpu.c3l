@@ -40,9 +40,8 @@ fn gpu::Device? create_bench_device(
 
 fn void? discard_bench_executable(gpu::ExecutableCommandList* commands) {
     if (commands == null || !commands.is_valid()) return;
-    if (catch err = gpu::discard_executable_commands(commands)) {
-        if (err != gpu::INVALID_HANDLE) return err~;
-    }
+    if (@catch(gpu::internal::executable_command(commands))) return;
+    return gpu::discard_executable_commands(commands);
 }
 
 fn gpu::CompletionPoint? submit_bench_queue(

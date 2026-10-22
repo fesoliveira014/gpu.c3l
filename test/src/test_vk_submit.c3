@@ -682,7 +682,7 @@ fn void prove_submission_publication_gap(
             queue_id: queue.id,
             sequence: gpu::internal::completion_point_sequence(predicted),
             query_fn: &query_completion_counter,
-        )) == gpu::INVALID_HANDLE,
+        )) == gpu::internal::HANDLE_REJECTED,
             "the reserved point remains private before token publication");
         assert(completion_counter_query_calls == 0,
             "an unpublished point reaches no native completion query");
@@ -1747,8 +1747,9 @@ fn void invalid_readiness_handle_precedes_invalid_stage_mask() @test {
         vk::queue_completion_state(state, queue.id)!!;
     ulong next_sequence_before = completion.next_sequence;
 
-    assert(@catch(gpu::submit(queue, &desc)) == gpu::INVALID_HANDLE,
-        "invalid readiness identity precedes invalid stage shape");
+    @assert_panics("gpu::submit: malformed SwapchainReadiness") {
+        (void)gpu::submit(queue, &desc);
+    };
     assert(completion.next_sequence == next_sequence_before,
         "invalid readiness reserves no queue completion");
 }
@@ -1816,8 +1817,9 @@ fn void foreign_completion_wait_rejects_before_native_submit() @test {
         )!!;
     ulong next_sequence_before = consumer_completion.next_sequence;
 
-    assert(@catch(submit_test_queue(&consumer, gpu::QueueKind.GRAPHICS, &desc)) == gpu::INVALID_HANDLE,
-        "a completion point from another device is rejected");
+    @assert_panics("gpu::submit: foreign CompletionPoint") {
+        (void)submit_test_queue(&consumer, gpu::QueueKind.GRAPHICS, &desc);
+    };
     assert(consumer_completion.next_sequence == next_sequence_before,
         "foreign completion rejection reserves no queue completion");
     assert(lists[0].is_valid(),
@@ -1858,8 +1860,9 @@ fn void unpublished_same_queue_wait_preserves_token() @test {
         .completion_waits = waits[..],
     };
 
-    assert(@catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc)) == gpu::INVALID_HANDLE,
-        "an unpublished same-queue wait is rejected");
+    @assert_panics("gpu::submit: malformed CompletionPoint") {
+        (void)submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc);
+    };
     assert(lists[0].is_valid(),
         "invalid completion wait preserves the executable token");
 

@@ -655,7 +655,7 @@ fn void ray_tracing_creation_lowers_groups_and_aliases_exact_cache_key() @test {
         group:        0,
         group_shader: gpu::RayTracingGroupShader.GENERAL,
         ops:          &stack_ops,
-    )) == gpu::INVALID_HANDLE);
+    )) == gpu::internal::HANDLE_REJECTED);
     gpu::PipelineHandle stale = first;
     stale.generation++;
     assert(@catch(vk::vk_get_ray_tracing_shader_group_stack_size_with_ops(
@@ -664,7 +664,7 @@ fn void ray_tracing_creation_lowers_groups_and_aliases_exact_cache_key() @test {
         group:        0,
         group_shader: gpu::RayTracingGroupShader.GENERAL,
         ops:          &stack_ops,
-    )) == gpu::INVALID_HANDLE);
+    )) == gpu::internal::HANDLE_REJECTED);
     assert(stack_capture.calls == 7);
 
     gpu::ShaderDesc compute_shader =

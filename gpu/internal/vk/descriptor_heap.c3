@@ -447,12 +447,12 @@ acceleration_structure_descriptor_cell_get(
 ) @private {
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
     if (view.owner != heap.acceleration_structure_view_owner
-        || !view.index.is_valid()) return gpu::INVALID_HANDLE~;
+        || !view.index.is_valid()) return gpu::internal::reject_handle(gpu::internal::HandleKind.ACCELERATION_STRUCTURE_VIEW, gpu::internal::HandleCause.FOREIGN)~;
     uint slot = acceleration_structure_index_slot(view.index);
     if (slot >= heap.acceleration_structure_cells.len
         || !heap.acceleration_structure_cells[slot].used
         || heap.acceleration_structure_cells[slot].generation
-            != view.generation) return gpu::INVALID_HANDLE~;
+            != view.generation) return gpu::internal::reject_handle(gpu::internal::HandleKind.ACCELERATION_STRUCTURE_VIEW, gpu::internal::HandleCause.STALE)~;
     return &heap.acceleration_structure_cells[slot];
 }
 
@@ -592,13 +592,13 @@ fn TextureDescriptorCell*? texture_cell_get(
     gpu::TextureView view,
 ) @private {
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
-    if (!view.index.is_valid()) return gpu::INVALID_HANDLE~;
+    if (!view.index.is_valid()) return gpu::internal::reject_handle(gpu::internal::HandleKind.TEXTURE_VIEW, gpu::internal::HandleCause.MALFORMED)~;
     uint slot = texture_index_slot(view.index);
     if (slot >= heap.texture_cells.len || !heap.texture_cells[slot].used) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.TEXTURE_VIEW, gpu::internal::HandleCause.STALE)~;
     }
     if (heap.texture_cells[slot].generation != view.generation) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.TEXTURE_VIEW, gpu::internal::HandleCause.STALE)~;
     }
     return &heap.texture_cells[slot];
 }

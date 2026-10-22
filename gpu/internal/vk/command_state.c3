@@ -113,10 +113,10 @@ fn CommandRecord*? CommandTable.get(
     &self,
     gpu::internal::CommandListHandle handle,
 ) {
-    if (handle.owner != self.owner) return gpu::INVALID_HANDLE~;
+    if (handle.owner != self.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_LIST, gpu::internal::HandleCause.FOREIGN)~;
     uint idx = handle.index;
-    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
-    if (self.slots[idx].generation != handle.generation) return gpu::INVALID_HANDLE~;
+    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_LIST, gpu::internal::HandleCause.STALE)~;
+    if (self.slots[idx].generation != handle.generation) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_LIST, gpu::internal::HandleCause.STALE)~;
     return &self.slots[idx].record;
 }
 

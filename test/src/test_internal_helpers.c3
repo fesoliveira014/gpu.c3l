@@ -85,7 +85,7 @@ fn void completion_points_reject_reserved_values() @test {
     assert(@catch(gpu::internal::make_completion_point(queue, 0)) == INVALID_ARGUMENT,
         "sequence zero remains reserved");
     queue.id = gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES;
-    assert(@catch(gpu::internal::make_completion_point(queue, 1)) == INVALID_HANDLE,
+    assert(@catch(gpu::internal::make_completion_point(queue, 1)) == gpu::internal::HANDLE_REJECTED,
         "an unencodable queue identity is rejected");
 }
 
@@ -169,7 +169,7 @@ fn void completion_points_reject_stale_and_foreign_ownership() @test {
     gpu::internal::DeviceOperation second_operation = gpu::internal::begin_device_operation(&second)!!;
     assert(
         @catch(gpu::internal::validate_completion_point(&second_operation, &second, point))
-            == INVALID_HANDLE,
+            == gpu::internal::HANDLE_REJECTED,
         "a point cannot be used with another device"
     );
     gpu::internal::end_device_operation(&second_operation);
@@ -179,8 +179,9 @@ fn void completion_points_reject_stale_and_foreign_ownership() @test {
         .id     = 1,
         .roles  = { .graphics },
     }, 1)!!;
-    assert(@catch(poll_completion(malformed)) == INVALID_HANDLE,
-        "an unselected queue identity faults before backend work");
+    gpu_test::@assert_panics("gpu::poll_completion: malformed CompletionPoint") {
+        (void)poll_completion(malformed);
+    };
     assert(first_fixture.state.completion_poll_calls == 0,
         "malformed points do not reach the backend");
 

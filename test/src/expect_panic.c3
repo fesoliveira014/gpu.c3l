@@ -23,9 +23,11 @@ fn void capture_expected_panic(String message, String file, String function, int
     libc::longjmp(&expected_panic.buf, 1);
 }
 
-<* Run a body that must panic and return a temporary copy of its message. The previous
-   panic handler is restored; a body that returns normally fails the test. *>
-macro String @expect_panic(; @body) {
+<* Run a body that must panic and return its message, which stays valid only
+   until the next panic on this thread. The previous panic handler is restored;
+   a body that returns normally fails the test. Allocation-free, so it also
+   works on threads without a temp allocator. *>
+macro String @capture_panic(; @body) {
     builtin::PanicFn previous = builtin::panic;
     builtin::panic = &capture_expected_panic;
     if (libc::setjmp(&expected_panic.buf) == 0) {
@@ -34,12 +36,39 @@ macro String @expect_panic(; @body) {
         abort("expected a panic");
     }
     builtin::panic = previous;
-    return ((String)expected_panic.message[:expected_panic.message_len]).tcopy();
+    return (String)expected_panic.message[:expected_panic.message_len];
+}
+
+<* Run a body that may panic and report whether it did; the message is then
+   available from `last_panic_message`. Allocation-free. *>
+macro bool @panicked(; @body) {
+    builtin::PanicFn previous = builtin::panic;
+    builtin::panic = &capture_expected_panic;
+    if (libc::setjmp(&expected_panic.buf) == 0) {
+        @body();
+        builtin::panic = previous;
+        return false;
+    }
+    builtin::panic = previous;
+    return true;
+}
+
+<* The most recent captured panic message on this thread. *>
+fn String last_panic_message() {
+    return (String)expected_panic.message[:expected_panic.message_len];
+}
+
+<* Run a body that must panic and return a temporary copy of its message. *>
+macro String @expect_panic(; @body) {
+    String message = @capture_panic() {
+        @body();
+    };
+    return message.tcopy();
 }
 
 <* Run a body that must panic with exactly `expected`. *>
 macro void @assert_panics(String expected; @body) {
-    String message = @expect_panic() {
+    String message = @capture_panic() {
         @body();
     };
     assert(message == expected, "unexpected panic message: %s", message);

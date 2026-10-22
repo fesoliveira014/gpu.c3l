@@ -611,8 +611,9 @@ fn void texture_stale_handle_rejected() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     gpu::destroy_texture(&device, texture)!!;
 
-    fault stale_fault = @catch(gpu::destroy_texture(&device, texture));
-    assert(stale_fault == gpu::INVALID_HANDLE, "double destroy faults INVALID_HANDLE");
+    @assert_panics("gpu::destroy_texture: stale TextureHandle") {
+        (void)gpu::destroy_texture(&device, texture);
+    };
 }
 
 fn void texture_barrier_records_texture_states() @test {
@@ -1094,7 +1095,7 @@ fn void texture_barrier_stale_handle_rejected() @test {
         &barrier,
         &ops,
     ));
-    assert(barrier_fault == gpu::INVALID_HANDLE, "barrier on a destroyed texture faults INVALID_HANDLE");
+    assert(barrier_fault == gpu::internal::HANDLE_REJECTED, "barrier on a destroyed texture is rejected");
     assert(emission.calls == 0,
         "stale texture reaches no native emission");
 
@@ -1135,9 +1136,9 @@ fn void attachment_views_own_exact_subresources_and_retain_textures() @test {
         "a live attachment view retains its texture");
 
     gpu::destroy_attachment_view(&device, view)!!;
-    assert(@catch(gpu::destroy_attachment_view(&device, view))
-        == gpu::INVALID_HANDLE,
-        "destroyed attachment handles are stale");
+    @assert_panics("gpu::destroy_attachment_view: stale AttachmentViewHandle") {
+        (void)gpu::destroy_attachment_view(&device, view);
+    };
     gpu::destroy_texture(&device, texture)!!;
 }
 
@@ -1638,13 +1639,14 @@ fn void placed_texture_requirements_validate_and_release_storage() @test {
     gpu::destroy_texture(&device, second)!!;
     gpu::GpuAllocation stale = allocation;
     gpu::free_allocation(&device, &allocation)!!;
-    assert(@catch(gpu::create_placed_texture(
-        device:     &device,
-        desc:       &texture_desc,
-        allocation: stale,
-        offset:     0,
-    )) == gpu::INVALID_HANDLE,
-        "released placement storage is stale");
+    @assert_panics("gpu::create_placed_texture: stale GpuAllocation") {
+        (void)gpu::create_placed_texture(
+            device:     &device,
+            desc:       &texture_desc,
+            allocation: stale,
+            offset:     0,
+        );
+    };
 
     gpu::AllocationDesc generic_desc = {
         .size         = requirements.size,
@@ -1784,7 +1786,7 @@ fn void placed_texture_validation_precedes_native_mutation() @test {
         offset:       0,
         requirements: requirements,
         ops:          &ops,
-    )) == gpu::INVALID_HANDLE);
+    )) == gpu::internal::HANDLE_REJECTED);
 
     fixture.state.textures.next_new = 1;
     fixture.allocations[0].value.live_placements = uint::max;
@@ -1960,4 +1962,44 @@ fn void placed_transfer_only_publication_rolls_back_without_view() @test {
         && fixture.probe.destroy_image_calls == 1
         && fixture.allocations[0].value.live_placements == 0,
         "placed transfer-only rollback releases only image ownership");
+}
+
+fn void stale_texture_view_source_terminates() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .access = { .graphics, .compute },
+        .width  = 16,
+        .height = 16,
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .sampled },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    gpu::TextureHandle copy = texture;
+    gpu::destroy_texture(&device, texture)!!;
+
+    @assert_panics("gpu::create_texture_view: stale TextureHandle") {
+        (void)gpu::create_texture_view(&device, copy, null);
+    };
+}
+
+fn void destroy_texture_stale_recovers_resource_lock() @test {
+    gpu::Device device = make_texture_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::TextureDesc desc = {
+        .access = { .graphics, .compute },
+        .width  = 16,
+        .height = 16,
+        .format = gpu::Format.RGBA8_UNORM,
+        .usage  = { .sampled },
+    };
+    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
+    gpu::TextureHandle copy = texture;
+    gpu::destroy_texture(&device, texture)!!;
+
+    @assert_panics("gpu::destroy_texture: stale TextureHandle") {
+        (void)gpu::destroy_texture(&device, copy);
+    };
+    gpu::TextureHandle next = gpu::create_texture(&device, &desc)!!;
+    gpu::destroy_texture(&device, next)!!;
 }

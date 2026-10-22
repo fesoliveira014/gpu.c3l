@@ -302,7 +302,7 @@ fn void? enumerate_vk_adapters(VkRuntimeState* state) {
 }
 
 fn gpu::AdapterInfo? vk_get_adapter_info(VkRuntimeState* state, uint index) {
-    if (state == null || index >= state.adapters.len) return gpu::INVALID_HANDLE~;
+    if (state == null || index >= state.adapters.len) return gpu::internal::reject_handle(gpu::internal::HandleKind.ADAPTER, gpu::internal::HandleCause.INVARIANT)~;
     return state.adapters[index].info;
 }
 
@@ -310,6 +310,6 @@ fn gpu::AdapterDiagnostics? vk_get_adapter_diagnostics(
     VkRuntimeState* state,
     uint index,
 ) {
-    if (state == null || index >= state.adapters.len) return gpu::INVALID_HANDLE~;
+    if (state == null || index >= state.adapters.len) return gpu::internal::reject_handle(gpu::internal::HandleKind.ADAPTER, gpu::internal::HandleCause.INVARIANT)~;
     return state.adapters[index].diagnostics;
 }

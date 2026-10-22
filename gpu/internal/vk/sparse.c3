@@ -283,7 +283,7 @@ fn ResolvedSparseBacking? resolve_sparse_backing_locked(
         if (allocation_offset != 0) return gpu::INVALID_ARGUMENT~;
         return {};
     }
-    if (!allocation.is_valid()) return gpu::INVALID_HANDLE~;
+    if (!allocation.is_valid()) return gpu::internal::reject_handle(gpu::internal::HandleKind.ALLOCATION, gpu::internal::HandleCause.MALFORMED)~;
     AllocationSlot* slot = state.allocations.get(allocation)!;
     gpu::TextureRequirements requirements =
         texture.sparse_requirements.page_allocation;
@@ -448,7 +448,7 @@ fn void? validate_sparse_wait_publications(
 ) {
     foreach (point : waits) {
         if (point.device != state.owner || !point.is_valid()) {
-            return gpu::INVALID_HANDLE~;
+            return gpu::internal::reject_handle(gpu::internal::HandleKind.COMPLETION_POINT, gpu::internal::HandleCause.FOREIGN)~;
         }
         (void)published_queue_completion_state(
             state,
@@ -799,7 +799,7 @@ fn bool? vk_adapter_supports_sparse_textures(
     uint adapter_index,
 ) {
     if (state == null || adapter_index >= state.adapters.len) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.ADAPTER, gpu::internal::HandleCause.INVARIANT)~;
     }
     vk::PhysicalDeviceFeatures2 features2 =
         vk::physical_device_features2();
@@ -943,10 +943,10 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
         return gpu::INVALID_ARGUMENT~;
     }
 
-    if (queue.device != state.owner) return gpu::INVALID_HANDLE~;
+    if (queue.device != state.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.QUEUE, gpu::internal::HandleCause.FOREIGN)~;
     QueueCompletionState* target = queue_completion_state(state, queue.id)!;
     if ((uint)target.roles != (uint)queue.roles) {
-        return gpu::INVALID_HANDLE~;
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.QUEUE, gpu::internal::HandleCause.MISMATCHED)~;
     }
     if (((uint)target.roles
         & (uint)state.caps.sparse_textures.binding_queues) == 0) {
@@ -1128,7 +1128,7 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     ulong maximum_same_queue_wait;
     foreach (i, point : desc.waits) {
         if (point.device != state.owner || !point.is_valid()) {
-            return gpu::INVALID_HANDLE~;
+            return gpu::internal::reject_handle(gpu::internal::HandleKind.COMPLETION_POINT, gpu::internal::HandleCause.FOREIGN)~;
         }
         ulong sequence = gpu::internal::completion_point_sequence(point);
         QueueCompletionState* source = published_queue_completion_state(
