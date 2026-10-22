@@ -663,8 +663,8 @@ fn void discarded_command_buffer_is_reused_by_recording_owner() @test {
     defer discard_test_executable(&executable)!!;
     gpu::discard_executable_commands(&executable)!!;
 
-    fault stale = @catch(gpu::discard_executable_commands(&executable));
-    assert(stale == gpu::INVALID_HANDLE, "discard invalidates the executable token");
+    assert(!executable.is_valid(), "discard zeroes the executable token");
+    gpu::discard_executable_commands(&executable)!!;
 
     gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;

@@ -78,7 +78,9 @@ fn void allocation_ownership_queries_and_consumption() @test {
     GpuAllocation allocation = gpu::allocate_memory(&first, &desc)!!;
     GpuAllocation stale = allocation;
 
-    assert(@catch(gpu::free_allocation(&first, null)) == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::free_allocation: null GpuAllocation") {
+        (void)gpu::free_allocation(&first, null);
+    };
     GpuAllocation wrong_device_attempt = allocation;
     @assert_panics("gpu::free_allocation: foreign GpuAllocation") {
         (void)gpu::free_allocation(&second, &wrong_device_attempt);
@@ -237,9 +239,9 @@ fn void live_allocation_blocks_device_destruction() @test {
     gpu::free_allocation(&device, &allocation)!!;
     assert(state.allocation_free_calls == 1,
         "successful free dispatches exactly once");
-    assert(@catch(gpu::free_allocation(&device, &allocation)) == gpu::INVALID_HANDLE);
+    gpu::free_allocation(&device, &allocation)!!;
     assert(state.allocation_free_calls == 1,
-        "consumed allocation cannot release twice");
+        "freeing the zeroed variable again is a no-op");
     gpu::destroy_device(&device)!!;
 }
 

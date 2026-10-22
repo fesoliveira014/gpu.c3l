@@ -219,10 +219,11 @@ fn Runtime? create_runtime(RuntimeDesc* desc) {
    Preconditions: every surface and device owned by it is destroyed.
    Always checked: live identity and dependent counts.
    Runtime failures: RESOURCE_IN_USE preserves the runtime for retry.
-   @param runtime : "Owning token to destroy; success replaces it with the invalid value."
+   @param runtime : "Owning token to destroy; success replaces it with the invalid value. The zero handle is a no-op."
    @return "Success, or a recoverable invalid-handle or resource-in-use fault." *>
 fn void? destroy_runtime(Runtime* runtime) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (runtime != null && !runtime.is_valid()) return;
     gpu::internal::RuntimeData* data = gpu::internal::require_runtime(runtime)!;
     if (data.live_surface_count > 0 || data.live_device_count.load(AtomicOrdering.ACQUIRE) > 0) {
         return RESOURCE_IN_USE~;
@@ -365,10 +366,11 @@ fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
    Preconditions: no live children, host operations, or incomplete queue work.
    Always checked: device identity, children, pins, closing state, and progress.
    Runtime failures: RESOURCE_IN_USE or DEVICE_BUSY preserves the token.
-   @param device : "Owning device token; success replaces it with the invalid value."
+   @param device : "Owning device token; success replaces it with the invalid value. The zero handle is a no-op."
    @return "Success, or a recoverable invalid-handle, resource-in-use, busy, or device-loss fault." *>
 fn void? destroy_device(Device* device) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (device != null && !device.is_valid()) return;
     gpu::internal::validate_device_token(device)!;
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     gpu::internal::DeviceSlotControl closing;
@@ -565,13 +567,15 @@ fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
    Always checked: live identity, ownership, and detected dependents.
    Runtime failures: faults preserve the owning token.
    @param device : "Live device that owns the allocation."
-   @param allocation : "Owning allocation token; success replaces it with the invalid value."
+   @param allocation : "Owning allocation token; success replaces it with the invalid value. The zero handle is a no-op."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
 fn void? free_allocation(Device* device, GpuAllocation* allocation) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (allocation == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.ALLOCATION, gpu::internal::HandleCause.NULL_POINTER)~;
+    if (*allocation == (GpuAllocation){}) return;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
-    if (allocation == null || !allocation.is_valid()) return INVALID_HANDLE~;
+    if (!allocation.is_valid()) return gpu::internal::reject_handle(gpu::internal::HandleKind.ALLOCATION, gpu::internal::HandleCause.MALFORMED)~;
     gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
@@ -924,10 +928,11 @@ fn DedicatedTexture? create_dedicated_texture(Device* device, TextureDesc* desc,
    Always checked: live identity, ownership, and detected dependents.
    Runtime failures: faults preserve the handle; placed storage stays caller-owned.
    @param device : "Live device that owns the texture."
-   @param texture : "Owning texture handle to destroy."
+   @param texture : "Owning texture handle to destroy. The zero handle is a no-op."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
 fn void? destroy_texture(Device* device, TextureHandle texture) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (texture == (TextureHandle){}) return;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
@@ -990,10 +995,11 @@ fn void? create_texture_views(Device* device, TextureViewCreateDesc[] descs, Tex
    Always checked: live identity and ownership.
    Runtime failures: faults preserve the view.
    @param device : "Live device that owns the view."
-   @param view : "Owning view token to destroy."
+   @param view : "Owning view token to destroy. The zero handle is a no-op."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
 fn void? destroy_texture_view(Device* device, TextureView view) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (view == (TextureView){}) return;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, view.owner, gpu::internal::ResourceOwnerKind.TEXTURE_VIEW)!;
@@ -1021,10 +1027,11 @@ fn TextureIndexRange? reserve_texture_indices(Device* device, uint count) {
    A slot whose generation is exhausted stays reserved and out of both
    regions.
    @param device : "Live device that owns the heap."
-   @param range : "A range returned by `reserve_texture_indices`."
+   @param range : "A range returned by `reserve_texture_indices`. The zero handle is a no-op."
    @return "Success, or a recoverable invalid-argument, in-use, or device fault." *>
 fn void? release_texture_indices(Device* device, TextureIndexRange range) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (range.count == 0 && !range.base.is_valid()) return;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_release_texture_indices(operation.state, range);
@@ -1251,10 +1258,11 @@ fn DedicatedAccelerationStructure? create_dedicated_acceleration_structure(
 <* Destroy an acceleration structure after its final GPU use without waiting.
    Live views make destruction retryable; GPU lifetime is caller-owned.
    @param device : "Live device that owns the structure."
-   @param acceleration_structure : "Owning structure handle to destroy."
+   @param acceleration_structure : "Owning structure handle to destroy. The zero handle is a no-op."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
 fn void? destroy_acceleration_structure(Device* device, AccelerationStructureHandle acceleration_structure) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (acceleration_structure == ACCELERATION_STRUCTURE_HANDLE_INVALID) return;
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1348,10 +1356,11 @@ fn AccelerationStructureView? create_acceleration_structure_view(
 
 <* Retire one shader-visible TLAS view after caller-managed GPU completion.
    @param device : "Live device that owns the view."
-   @param view : "Owning acceleration-structure view to destroy."
+   @param view : "Owning acceleration-structure view to destroy. The zero handle is a no-op."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
 fn void? destroy_acceleration_structure_view(Device* device, AccelerationStructureView view) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (view == ACCELERATION_STRUCTURE_VIEW_INVALID) return;
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -1593,10 +1602,11 @@ fn ulong? get_ray_tracing_shader_group_stack_size(
    Always checked: live identity and ownership.
    Runtime failures: faults preserve this alias; shared backend state is refcounted.
    @param device : "Live device that owns the pipeline."
-   @param pipeline : "Owning pipeline handle to release."
+   @param pipeline : "Owning pipeline handle to release. The zero handle is a no-op."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
 fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (pipeline == (PipelineHandle){}) return;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(&operation, pipeline.owner, gpu::internal::ResourceOwnerKind.PIPELINE)!;
@@ -1700,13 +1710,13 @@ fn CommandAllocator? create_command_allocator(Device* device, Queue queue, Comma
    Preconditions: all recording, executable, and submitted units are retired.
    Always checked: identity, ownership, and allocator lifecycle.
    Runtime failures: RESOURCE_IN_USE or DEVICE_BUSY preserves the token.
-   @param allocator : "Owning allocator; success replaces it with the zero value."
+   @param allocator : "Owning allocator; success replaces it with the zero value. The zero handle is a no-op."
    @return "Success, or a recoverable invalid-handle, resource-in-use, busy, ownership, or device fault." *>
 fn void? destroy_command_allocator(CommandAllocator* allocator) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
-    if (allocator == null || !allocator.handle.is_valid()) {
-        return INVALID_HANDLE~;
-    }
+    if (allocator == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.NULL_POINTER)~;
+    if (allocator.handle == COMMAND_ALLOCATOR_HANDLE_INVALID) return;
+    if (!allocator.handle.is_valid()) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.MALFORMED)~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device, true)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_command_allocator(&operation, allocator)!;
@@ -1831,10 +1841,12 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
    Preconditions: aliases are thread-confined and have not been consumed.
    Always checked: token identity and authoritative recording phase.
    Runtime failures: failure preserves the token.
-   @param commands : "Recording token consumed on success."
+   @param commands : "Recording token consumed on success. The zero handle is a no-op."
    @return "Success, or a recoverable command-state or ownership fault." *>
 fn void? discard_commands(CommandList* commands) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (commands == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_LIST, gpu::internal::HandleCause.NULL_POINTER)~;
+    if (commands.record == null && commands.generation == 0 && commands.device_identity == 0) return;
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands)!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
@@ -1856,10 +1868,12 @@ fn void? discard_commands(CommandList* commands) {
    Preconditions: aliases are thread-confined and have not been consumed.
    Always checked: token identity and authoritative executable phase.
    Runtime failures: failure preserves the token.
-   @param commands : "Executable token consumed on success."
+   @param commands : "Executable token consumed on success. The zero handle is a no-op."
    @return "Success, or a recoverable command-state or ownership fault." *>
 fn void? discard_executable_commands(ExecutableCommandList* commands) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (commands == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.EXECUTABLE_COMMAND_LIST, gpu::internal::HandleCause.NULL_POINTER)~;
+    if (commands.record == null && commands.generation == 0 && commands.device_identity == 0) return;
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::executable_command(commands)!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
@@ -2276,10 +2290,11 @@ fn AttachmentViewHandle? create_attachment_view(Device* device, AttachmentViewDe
    Always checked: live identity and ownership.
    Runtime failures: faults preserve the view.
    @param device : "Live device that owns the attachment view."
-   @param view : "Owning attachment-view handle to destroy."
+   @param view : "Owning attachment-view handle to destroy. The zero handle is a no-op."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
 fn void? destroy_attachment_view(Device* device, AttachmentViewHandle view) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (view == (AttachmentViewHandle){}) return;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
@@ -2782,10 +2797,11 @@ fn TimestampPoolHandle? create_timestamp_pool(Device* device, TimestampPoolDesc*
 
 <* Destroy a pool after all recorded and submitted uses have retired.
    @param device : "Live device that owns the pool."
-   @param pool : "Owning pool handle to destroy."
+   @param pool : "Owning pool handle to destroy. The zero handle is a no-op."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, or device fault." *>
 fn void? destroy_timestamp_pool(Device* device, TimestampPoolHandle pool) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (pool == (TimestampPoolHandle){}) return;
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
@@ -3069,10 +3085,11 @@ fn bool SwapchainReadiness.equals(self, SwapchainReadiness other) @operator(==) 
    Preconditions: every borrowing swapchain is destroyed.
    Always checked: live identity, runtime ownership, and dependent count.
    Runtime failures: RESOURCE_IN_USE preserves the surface for retry.
-   @param surface : "Owning token to destroy; success replaces it with the invalid value."
+   @param surface : "Owning token to destroy; success replaces it with the invalid value. The zero handle is a no-op."
    @return "Success, or a recoverable invalid-handle or resource-in-use fault." *>
 fn void? destroy_surface(Surface* surface) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (surface != null && !surface.is_valid()) return;
     gpu::internal::SurfaceData* data = gpu::internal::require_surface(surface)!;
     if (data.live_swapchain_count > 0) return RESOURCE_IN_USE~;
     Runtime runtime = data.runtime;
@@ -3255,10 +3272,11 @@ fn void? wait_swapchain_presentations(Device* device, SwapchainHandle swapchain,
    Always checked: live identity, ownership, and lifecycle state.
    Runtime failures: detected use faults without consuming the handle.
    @param device : "Live device that owns the swapchain."
-   @param swapchain : "Owning swapchain handle to destroy."
+   @param swapchain : "Owning swapchain handle to destroy. The zero handle is a no-op."
    @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, surface, or device fault." *>
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
+    if (swapchain == (SwapchainHandle){}) return;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::vk::vk_destroy_swapchain(operation.state, swapchain)!;
