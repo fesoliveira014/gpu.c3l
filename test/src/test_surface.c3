@@ -717,11 +717,9 @@ fn void swapchain_wait_rejects_destroyed_device() @test {
 
     gpu::destroy_swapchain(&device, swapchain)!!;
     gpu::destroy_device(&device)!!;
-    assert(
-        @catch(gpu::wait_swapchain_presentations(&device, swapchain, 0))
-            == gpu::INVALID_HANDLE,
-        "a destroyed device rejects before backend swapchain access"
-    );
+    @assert_panics("gpu::wait_swapchain_presentations: zero Device") {
+        (void)gpu::wait_swapchain_presentations(&device, swapchain, 0);
+    };
 
     gpu::destroy_surface(&surface)!!;
     gpu::destroy_runtime(&runtime)!!;

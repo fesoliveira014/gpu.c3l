@@ -20,6 +20,7 @@ enum HandleKind : char (String type_name) @private {
     TEXTURE                     { "TextureHandle" },
     TEXTURE_VIEW                { "TextureView" },
     TEXTURE_INDEX_RANGE         { "TextureIndexRange" },
+    TEXTURE_REQUIREMENTS        { "TextureRequirements" },
     ATTACHMENT_VIEW             { "AttachmentViewHandle" },
     ACCELERATION_STRUCTURE      { "AccelerationStructureHandle" },
     ACCELERATION_STRUCTURE_VIEW { "AccelerationStructureView" },

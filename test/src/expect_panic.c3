@@ -23,7 +23,7 @@ fn void capture_expected_panic(String message, String file, String function, int
     libc::longjmp(&expected_panic.buf, 1);
 }
 
-<* Run a body that must panic and return its panic message. The previous
+<* Run a body that must panic and return a temporary copy of its message. The previous
    panic handler is restored; a body that returns normally fails the test. *>
 macro String @expect_panic(; @body) {
     builtin::PanicFn previous = builtin::panic;
@@ -34,7 +34,15 @@ macro String @expect_panic(; @body) {
         abort("expected a panic");
     }
     builtin::panic = previous;
-    return (String)expected_panic.message[:expected_panic.message_len];
+    return ((String)expected_panic.message[:expected_panic.message_len]).tcopy();
+}
+
+<* Run a body that must panic with exactly `expected`. *>
+macro void @assert_panics(String expected; @body) {
+    String message = @expect_panic() {
+        @body();
+    };
+    assert(message == expected, "unexpected panic message: %s", message);
 }
 
 fn void expect_panic_returns_abort_message() @test {

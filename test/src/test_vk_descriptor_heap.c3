@@ -465,9 +465,9 @@ fn void texture_view_rejects_foreign_device_before_heap_mutation() @test {
         second_state,
         second_texture,
     );
-    fault foreign = @catch(gpu::destroy_texture_view(&second_device, first_view));
-    assert(foreign == gpu::INVALID_HANDLE,
-        "a foreign texture view faults INVALID_HANDLE");
+    @assert_panics("gpu::destroy_texture_view: foreign TextureView") {
+        (void)gpu::destroy_texture_view(&second_device, first_view);
+    };
     assert(first_state.shader_heap.descriptors.texture_free_count == first_free_before
         && second_state.shader_heap.descriptors.texture_free_count == second_free_before,
         "foreign release stops before either heap mutates");

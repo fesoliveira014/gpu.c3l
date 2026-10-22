@@ -139,7 +139,9 @@ fn void foreign_allocation_owner_rejects_before_backend_mutation() @test {
         "coincident allocations retain distinct owners");
     GpuAllocation foreign = first_allocation;
     uint before = gpu::internal::vk::stub_allocation_free_attempt_count();
-    assert(@catch(gpu::free_allocation(&second, &foreign)) == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::free_allocation: foreign GpuAllocation") {
+        (void)gpu::free_allocation(&second, &foreign);
+    };
     assert(gpu::internal::vk::stub_allocation_free_attempt_count() == before,
         "foreign ownership rejects before backend mutation");
 
@@ -178,8 +180,9 @@ fn void stale_child_allocation_rejects_after_device_slot_reuse() @test {
     assert(replacement_allocation.owner != stale_allocation.owner,
         "replacement has a distinct child owner");
     uint before = gpu::internal::vk::stub_allocation_free_attempt_count();
-    assert(@catch(gpu::free_allocation(&replacement, &stale_allocation))
-        == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::free_allocation: foreign GpuAllocation") {
+        (void)gpu::free_allocation(&replacement, &stale_allocation);
+    };
     assert(gpu::internal::vk::stub_allocation_free_attempt_count() == before,
         "stale child owner rejects before the new tenant backend mutates");
     gpu::free_allocation(&replacement, &replacement_allocation)!!;
@@ -219,13 +222,16 @@ fn void explicit_cross_kind_token_rejects_before_backend_mutation() @test {
     };
 
     uint texture_before = gpu::internal::vk::stub_texture_destroy_attempt_count();
-    assert(@catch(gpu::destroy_texture(&device, forged_texture)) == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::destroy_texture: foreign TextureHandle") {
+        (void)gpu::destroy_texture(&device, forged_texture);
+    };
     assert(gpu::internal::vk::stub_texture_destroy_attempt_count() == texture_before,
         "allocation owner bits cannot mutate the texture table");
 
     uint allocation_before = gpu::internal::vk::stub_allocation_free_attempt_count();
-    assert(@catch(gpu::free_allocation(&device, &forged_allocation))
-        == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::free_allocation: foreign GpuAllocation") {
+        (void)gpu::free_allocation(&device, &forged_allocation);
+    };
     assert(gpu::internal::vk::stub_allocation_free_attempt_count() == allocation_before,
         "texture owner bits cannot mutate the allocation table");
 

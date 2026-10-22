@@ -80,8 +80,9 @@ fn void allocation_ownership_queries_and_consumption() @test {
 
     assert(@catch(gpu::free_allocation(&first, null)) == gpu::INVALID_HANDLE);
     GpuAllocation wrong_device_attempt = allocation;
-    assert(@catch(gpu::free_allocation(&second, &wrong_device_attempt))
-        == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::free_allocation: foreign GpuAllocation") {
+        (void)gpu::free_allocation(&second, &wrong_device_attempt);
+    };
     assert(wrong_device_attempt == allocation,
         "wrong-device free preserves the owning token");
     assert(first_state.allocation_free_calls == 0
@@ -97,7 +98,9 @@ fn void allocation_ownership_queries_and_consumption() @test {
         "mapped subspan has exact length");
     assert((ulong)gpu::get_span_address(&first, exact)!! == 0x1020,
         "address query includes the checked offset");
-    assert(@catch(gpu::get_allocation_info(&second, allocation)) == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::get_allocation_info: foreign GpuAllocation") {
+        (void)gpu::get_allocation_info(&second, allocation);
+    };
 
     first_state.allocation_block_free = true;
     GpuAllocation preserved = allocation;
@@ -191,15 +194,17 @@ fn void mapped_span_visibility_validates_ownership_and_ranges() @test {
         && first_state.allocation_invalidate_calls == 1,
         "live mapped ranges dispatch each visibility operation once");
 
-    assert(@catch(gpu::flush_mapped_span(&second, range))
-        == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::flush_mapped_span: foreign GpuAllocation") {
+        (void)gpu::flush_mapped_span(&second, range);
+    };
     GpuSpan wrong_kind = range;
     wrong_kind.owner = gpu::internal::resource_owner_tag(
         first_state.resource_owner,
         gpu::internal::ResourceOwnerKind.TEXTURE,
     );
-    assert(@catch(gpu::flush_mapped_span(&first, wrong_kind))
-        == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::flush_mapped_span: foreign GpuAllocation") {
+        (void)gpu::flush_mapped_span(&first, wrong_kind);
+    };
     assert(first_state.allocation_visibility_entries == 2,
         "cross-kind spans stop before backend dispatch");
     GpuSpan zero = range;
@@ -365,8 +370,9 @@ fn void texture_memory_rejects_foreign_and_dedicated_requirements() @test {
     AllocationDesc foreign = allocation_stub_desc(MemoryClass.TEXTURE);
     foreign.size = 128;
     foreign.texture_requirements = queried[..];
-    assert(@catch(gpu::allocate_memory(&second, &foreign))
-        == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::allocate_memory: foreign TextureRequirements") {
+        (void)gpu::allocate_memory(&second, &foreign);
+    };
     TextureRequirements incompatible_first = requirements;
     TextureRequirements incompatible_second = requirements;
     ulong owner = gpu::internal::resource_owner_tag(

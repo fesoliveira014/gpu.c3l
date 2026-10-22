@@ -121,10 +121,12 @@ fn void queue_queries_reject_stale_devices() @test {
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 
     gpu::destroy_device(&device)!!;
-    assert(@catch(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS))
-        == gpu::INVALID_HANDLE);
-    assert(@catch(gpu::get_queue_info(&device, queue))
-        == gpu::INVALID_HANDLE);
+    @assert_panics("gpu::get_queue: zero Device") {
+        (void)gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
+    };
+    @assert_panics("gpu::get_queue_info: zero Device") {
+        (void)gpu::get_queue_info(&device, queue);
+    };
 
     gpu::destroy_runtime(&runtime)!!;
 }

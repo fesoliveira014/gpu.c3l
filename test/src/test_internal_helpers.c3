@@ -2,6 +2,7 @@ module gpu;
 
 import gpu::internal @public;
 import gpu::internal::vk @public;
+import gpu_test;
 
 struct CompletionFixture {
     gpu::internal::vk::VkDeviceState state;
@@ -184,8 +185,9 @@ fn void completion_points_reject_stale_and_foreign_ownership() @test {
         "malformed points do not reach the backend");
 
     destroy_device(&first)!!;
-    assert(@catch(poll_completion(point)) == INVALID_HANDLE,
-        "a point becomes stale with its device");
+    gpu_test::@assert_panics("gpu::poll_completion: stale Device") {
+        (void)poll_completion(point);
+    };
     destroy_device(&second)!!;
 }
 

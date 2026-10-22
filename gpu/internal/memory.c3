@@ -91,10 +91,11 @@ fn void? validate_texture_allocation(
             || !requirements.compatibility.is_valid()) {
             return gpu::INVALID_ARGUMENT~;
         }
-        gpu::internal::validate_resource_owner(
-            operation,
-            texture_compatibility_owner(requirements.compatibility),
-            gpu::internal::ResourceOwnerKind.ALLOCATION,
+        gpu::internal::validate_reported_resource_owner(
+            operation:   operation,
+            owner:       texture_compatibility_owner(requirements.compatibility),
+            kind:        gpu::internal::ResourceOwnerKind.ALLOCATION,
+            handle_kind: gpu::internal::HandleKind.TEXTURE_REQUIREMENTS,
         )!;
         if (requirements.dedicated_only && !allow_dedicated) {
             return gpu::UNSUPPORTED_FEATURE~;

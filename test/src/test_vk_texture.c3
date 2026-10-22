@@ -1259,9 +1259,9 @@ fn void foreign_attachment_view_destroy_rejects_without_consuming() @test {
         &view_desc,
     )!!;
 
-    assert(@catch(gpu::destroy_attachment_view(&foreign, view))
-        == gpu::INVALID_HANDLE,
-        "foreign devices cannot consume an attachment-view handle");
+    @assert_panics("gpu::destroy_attachment_view: foreign AttachmentViewHandle") {
+        (void)gpu::destroy_attachment_view(&foreign, view);
+    };
     gpu::destroy_attachment_view(&owner, view)!!;
     gpu::destroy_texture(&owner, texture)!!;
 }

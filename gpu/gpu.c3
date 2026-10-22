@@ -369,8 +369,7 @@ fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
    @return "Success, or a recoverable invalid-handle, resource-in-use, busy, or device-loss fault." *>
 fn void? destroy_device(Device* device) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
-    if (device == null || !device.is_valid()) return INVALID_HANDLE~;
-    if (device.reserved != 0 || device.index >= gpu::internal::MAX_DEVICES) return INVALID_HANDLE~;
+    gpu::internal::validate_device_token(device)!;
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     gpu::internal::DeviceSlotControl closing;
     gpu::internal::DeviceData data;
@@ -378,9 +377,14 @@ fn void? destroy_device(Device* device) {
         gpu::internal::lock_device_registry();
         defer gpu::internal::unlock_device_registry();
         gpu::internal::DeviceSlotControl control = (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-        if (control.generation != device.generation) return INVALID_HANDLE~;
-        if (control.state == gpu::internal::DEVICE_SLOT_CLOSING) return DEVICE_BUSY~;
-        if (control.state != gpu::internal::DEVICE_SLOT_LIVE) return INVALID_HANDLE~;
+        if (control.generation != device.generation
+            || (control.state != gpu::internal::DEVICE_SLOT_LIVE
+                && control.state != gpu::internal::DEVICE_SLOT_CLOSING)) {
+            return gpu::internal::reject_handle(gpu::internal::HandleKind.DEVICE, gpu::internal::HandleCause.STALE)~;
+        }
+        if (control.state == gpu::internal::DEVICE_SLOT_CLOSING) {
+            return gpu::internal::reject_handle(gpu::internal::HandleKind.DEVICE, gpu::internal::HandleCause.DESTROY_OVERLAP)~;
+        }
         bool lost = slot.lost.load(AtomicOrdering.ACQUIRE);
         if (!lost && slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
             return RESOURCE_IN_USE~;
@@ -391,7 +395,10 @@ fn void? destroy_device(Device* device) {
         closing.state = gpu::internal::DEVICE_SLOT_CLOSING;
         if (closing.pins > 0) {
             (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
-            return DEVICE_BUSY~;
+            if (lost) return DEVICE_BUSY~;
+            // Every retained pin has a live child, so with none left a pin
+            // belongs to a host operation running concurrently with destroy.
+            return gpu::internal::reject_handle(gpu::internal::HandleKind.DEVICE, gpu::internal::HandleCause.DESTROY_OVERLAP)~;
         }
         if (!lost && slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
             (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);

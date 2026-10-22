@@ -215,9 +215,9 @@ fn void resources_reject_foreign_and_stale_identity() @test {
     gpu::discard_commands(&commands)!!;
 
     gpu::GpuAllocation foreign = owned.allocation;
-    assert(@catch(gpu::free_allocation(&second, &foreign))
-        == gpu::INVALID_HANDLE,
-        "safe resolution rejects foreign ownership");
+    @assert_panics("gpu::free_allocation: foreign GpuAllocation") {
+        (void)gpu::free_allocation(&second, &foreign);
+    };
     gpu::GpuAllocation stale = owned.allocation;
     gpu::free_allocation(&first, &owned.allocation)!!;
     owned.span = {};

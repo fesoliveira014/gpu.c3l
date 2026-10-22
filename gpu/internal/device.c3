@@ -10,7 +10,6 @@ import std::core::mem;
 const uint MAX_DEVICES @private = 64;
 const uint MAX_DEVICE_GENERATION @private = 0x00FF_FFFF;
 const uint MAX_DEVICE_OPERATION_PINS @private = 0x3FFF_FFFF;
-const uint MAX_DEVICE_OPERATION_PIN_ATTEMPTS @private = 64;
 const uint MAX_DEVICE_COMMANDS @private = 4096;
 const uint COMMAND_TOKEN_DEVICE_INDEX_BITS @private = 6;
 const uint COMMAND_TOKEN_DEVICE_GENERATION_BITS @private = 24;
@@ -148,21 +147,39 @@ fn ulong? allocate_device_resource_owner() @private {
     }
 }
 
+<* Reject a device token whose bits can never name a live device. *>
+fn void? validate_device_token(Device* device) @private {
+    if (device == null) return reject_handle(HandleKind.DEVICE, HandleCause.NULL_POINTER)~;
+    if (!device.is_valid()) return reject_handle(HandleKind.DEVICE, HandleCause.ZERO)~;
+    if (device.reserved != 0 || device.index >= MAX_DEVICES || device.generation == 0) {
+        return reject_handle(HandleKind.DEVICE, HandleCause.MALFORMED)~;
+    }
+}
+
+<* Pin a live device. A failed CAS means another thread's CAS succeeded, so
+   the loop always makes progress; contention never fails the operation. *>
 fn DeviceOperation? begin_device_operation(
     Device* device,
     bool allow_lost = false,
 ) @private {
-    if (device == null || !device.is_valid()) return gpu::INVALID_HANDLE~;
-    if (device.reserved != 0 || device.index >= MAX_DEVICES) return gpu::INVALID_HANDLE~;
+    validate_device_token(device)!;
 
     DeviceSlot* slot = &device_slots[device.index];
     ulong packed = slot.control.load(AtomicOrdering.ACQUIRE);
-    for (uint attempt = 0; attempt < MAX_DEVICE_OPERATION_PIN_ATTEMPTS; attempt++) {
+    while (true) {
         DeviceSlotControl control = (DeviceSlotControl)packed;
-        if (control.generation != device.generation) return gpu::INVALID_HANDLE~;
-        if (control.state == DEVICE_SLOT_CLOSING) return gpu::DEVICE_BUSY~;
-        if (control.state != DEVICE_SLOT_LIVE) return gpu::INVALID_HANDLE~;
-        if (control.pins == MAX_DEVICE_OPERATION_PINS) return gpu::DEVICE_BUSY~;
+        if (control.generation != device.generation) {
+            return reject_handle(HandleKind.DEVICE, HandleCause.STALE)~;
+        }
+        if (control.state == DEVICE_SLOT_CLOSING) {
+            return reject_handle(HandleKind.DEVICE, HandleCause.DESTROY_OVERLAP)~;
+        }
+        if (control.state != DEVICE_SLOT_LIVE) {
+            return reject_handle(HandleKind.DEVICE, HandleCause.STALE)~;
+        }
+        if (control.pins == MAX_DEVICE_OPERATION_PINS) {
+            return reject_handle(HandleKind.DEVICE, HandleCause.INVARIANT)~;
+        }
 
         DeviceSlotControl pinned = control;
         pinned.pins++;
@@ -190,24 +207,27 @@ fn DeviceOperation? begin_device_operation(
             .owns_pin = true,
         };
     }
-    return gpu::DEVICE_BUSY~;
 }
 
 fn DeviceOperation? borrow_retained_device_operation(
     Device* device,
     bool allow_lost = false,
 ) @private {
-    if (device == null || !device.is_valid()) return gpu::INVALID_HANDLE~;
-    if (device.reserved != 0 || device.index >= MAX_DEVICES) return gpu::INVALID_HANDLE~;
+    validate_device_token(device)!;
 
     DeviceSlot* slot = &device_slots[device.index];
     DeviceSlotControl control =
         (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-    if (control.generation != device.generation) return gpu::INVALID_HANDLE~;
-    if (control.state == DEVICE_SLOT_CLOSING) return gpu::DEVICE_BUSY~;
-    if (control.state != DEVICE_SLOT_LIVE || control.pins == 0) {
-        return gpu::INVALID_HANDLE~;
+    if (control.generation != device.generation) {
+        return reject_handle(HandleKind.DEVICE, HandleCause.STALE)~;
     }
+    if (control.state == DEVICE_SLOT_CLOSING) {
+        return reject_handle(HandleKind.DEVICE, HandleCause.DESTROY_OVERLAP)~;
+    }
+    if (control.state != DEVICE_SLOT_LIVE) {
+        return reject_handle(HandleKind.DEVICE, HandleCause.STALE)~;
+    }
+    if (control.pins == 0) return reject_handle(HandleKind.DEVICE, HandleCause.INVARIANT)~;
     if (!allow_lost && slot.lost.load(AtomicOrdering.ACQUIRE)) {
         return gpu::DEVICE_LOST~;
     }
@@ -316,14 +336,48 @@ fn fault report_device_contract_failure(
     return public_fault;
 }
 
+fn HandleKind resource_owner_handle_kind(ResourceOwnerKind kind) @private {
+    switch (kind) {
+        case ResourceOwnerKind.ALLOCATION: return HandleKind.ALLOCATION;
+        case ResourceOwnerKind.TEXTURE: return HandleKind.TEXTURE;
+        case ResourceOwnerKind.ATTACHMENT_VIEW: return HandleKind.ATTACHMENT_VIEW;
+        case ResourceOwnerKind.TEXTURE_VIEW: return HandleKind.TEXTURE_VIEW;
+        case ResourceOwnerKind.PIPELINE: return HandleKind.PIPELINE;
+        case ResourceOwnerKind.SWAPCHAIN: return HandleKind.SWAPCHAIN;
+        case ResourceOwnerKind.COMMAND_ALLOCATOR: return HandleKind.COMMAND_ALLOCATOR;
+        case ResourceOwnerKind.COMMAND: return HandleKind.COMMAND_LIST;
+        case ResourceOwnerKind.COMPLETION_POINT: return HandleKind.COMPLETION_POINT;
+        case ResourceOwnerKind.TIMESTAMP_POOL: return HandleKind.TIMESTAMP_POOL;
+        case ResourceOwnerKind.ACCELERATION_STRUCTURE: return HandleKind.ACCELERATION_STRUCTURE;
+        case ResourceOwnerKind.ACCELERATION_STRUCTURE_VIEW: return HandleKind.ACCELERATION_STRUCTURE_VIEW;
+        default: return HandleKind.DEVICE;
+    }
+}
+
 fn void? validate_resource_owner(
     DeviceOperation* operation,
     ulong owner,
     ResourceOwnerKind kind,
 ) @private {
-    if (operation == null || !operation.active) return gpu::INVALID_HANDLE~;
+    return validate_reported_resource_owner(
+        operation:   operation,
+        owner:       owner,
+        kind:        kind,
+        handle_kind: resource_owner_handle_kind(kind),
+    );
+}
+
+fn void? validate_reported_resource_owner(
+    DeviceOperation* operation,
+    ulong owner,
+    ResourceOwnerKind kind,
+    HandleKind handle_kind,
+) @private {
+    if (operation == null || !operation.active) {
+        return reject_handle(handle_kind, HandleCause.INVARIANT)~;
+    }
     if (owner != resource_owner_tag(operation.data.resource_owner, kind)) {
-        return gpu::INVALID_HANDLE~;
+        return reject_handle(handle_kind, HandleCause.FOREIGN)~;
     }
 }
 
