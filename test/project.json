@@ -15,7 +15,8 @@
   "sources": [
     "../gpu/gpu.c3i", "../gpu/gpu.c3", "../gpu/surface/**",
     "../gpu/internal/**", "../gpu/util/**",
-    "src/test_lifetime_helpers.c3", "src/bench_lifetime.c3"
+    "src/test_lifetime_helpers.c3", "src/bench_lifetime.c3",
+    "src/expect_panic.c3"
   ],
   "output": "build",
   "targets": {

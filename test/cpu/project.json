@@ -47,6 +47,7 @@
     "unit": {
       "type": "test",
       "sources": [
+        "../src/expect_panic.c3",
         "../src/test_internal_helpers.c3",
         "../src/test_vk_internal_helpers.c3",
         "../src/test_handles.c3",
