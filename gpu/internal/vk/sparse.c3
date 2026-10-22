@@ -1212,19 +1212,24 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     bind_info.signal_semaphore_count = 1;
     bind_info.p_signal_semaphores = &signal_semaphore;
 
-    vk::Result result = ops.queue_bind_sparse(
-        queue:           target.queue,
-        bind_info_count: 1,
-        p_bind_info:     &bind_info,
-        fence:           (vk::Fence)null,
-    );
-    if (result != vk::Result.SUCCESS) {
-        cancel_queue_completion_locked(state, point)!!;
-        check_backend_result(
-            state:     state,
-            operation: "bind_sparse_texture_memory",
-            result:    result,
-        )!;
+    bool lost = device_lost(state);
+    if (!lost) {
+        vk::Result result = ops.queue_bind_sparse(
+            queue:           target.queue,
+            bind_info_count: 1,
+            p_bind_info:     &bind_info,
+            fence:           (vk::Fence)null,
+        );
+        if (absorb_device_loss(state, "bind_sparse_texture_memory", result)) {
+            lost = true;
+        } else if (result != vk::Result.SUCCESS) {
+            cancel_queue_completion_locked(state, point)!!;
+            check_backend_result(
+                state:     state,
+                operation: "bind_sparse_texture_memory",
+                result:    result,
+            )!;
+        }
     }
     target.retirement_mutex.lock()!!;
     publish_sparse_bind_reference_locked(
@@ -1239,6 +1244,7 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     state.resource_mutex.unlock();
     resource_locked = false;
     publish_queue_completion_locked(state, point)!!;
+    if (lost) retire_observed_queue(state, target, ulong::max);
     return point;
 }
 

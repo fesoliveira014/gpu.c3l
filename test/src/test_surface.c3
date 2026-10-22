@@ -628,13 +628,13 @@ fn void swapchain_wait_backend_failure_preserves_handle() @test {
     )!!;
     gpu::internal::vk::VkDeviceState* state = present_wait_state(&device);
     gpu::internal::vk::stub_set_present_wait_pending_count(state, 1);
-    gpu::internal::vk::stub_set_present_wait_fault(state, gpu::DEVICE_LOST);
+    gpu::internal::vk::stub_set_present_wait_fault(state, gpu::BACKEND_ERROR);
     gpu::internal::vk::stub_reset_present_wait_counts(state);
 
     fault failure = @catch(
         gpu::wait_swapchain_presentations(&device, swapchain, 99)
     );
-    assert(failure == gpu::DEVICE_LOST, "backend failure propagates unchanged");
+    assert(failure == gpu::BACKEND_ERROR, "backend failure propagates unchanged");
     assert(
         gpu::internal::vk::stub_present_wait_call_count(state) == 1
             && gpu::internal::vk::stub_present_reset_call_count(state) == 0
@@ -643,11 +643,11 @@ fn void swapchain_wait_backend_failure_preserves_handle() @test {
     );
 
     gpu::internal::vk::stub_set_present_wait_fault(state, {});
-    gpu::internal::vk::stub_set_present_reset_fault(state, gpu::DEVICE_LOST);
+    gpu::internal::vk::stub_set_present_reset_fault(state, gpu::BACKEND_ERROR);
     fault reset_failure = @catch(
         gpu::wait_swapchain_presentations(&device, swapchain, 99)
     );
-    assert(reset_failure == gpu::DEVICE_LOST,
+    assert(reset_failure == gpu::BACKEND_ERROR,
         "reset failure propagates without consuming the handle");
     assert(
         gpu::internal::vk::stub_present_reset_call_count(state) == 1

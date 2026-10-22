@@ -1098,15 +1098,16 @@ fn void? require_queue_completion_headroom_with_query(
     ulong limit = state.max_timeline_semaphore_value_difference;
     if (prospective <= completed || prospective - completed <= limit) return;
 
-    vk::Result result = query_fn(
-        state.device,
-        completion.timeline,
-        &completed,
-    );
     check_backend_result(
         state:     state,
         operation: "submit",
-        result:    result,
+        result:    query_queue_timeline(
+            state:      state,
+            operation:  "submit",
+            completion: completion,
+            query_fn:   query_fn,
+            completed:  &completed,
+        ),
     )!;
     retire_observed_queue(state, completion, completed);
     completed = completion.retired_sequence.load(AtomicOrdering.ACQUIRE);
@@ -1645,19 +1646,26 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     )!;
     completion_signal.value = gpu::internal::completion_point_sequence(point);
 
-    vk::Result result = ops.submit(
-        completion.queue,
-        1,
-        &submit,
-        (vk::Fence)null,
-    );
-    if (result != vk::Result.SUCCESS) {
-        cancel_queue_completion_locked(state, point)!!;
-        check_backend_result(
-            state:     state,
-            operation: "submit",
-            result:    result,
-        )!;
+    // A lost device consumes the inputs without native work; the point is
+    // complete as soon as it is published.
+    bool lost = device_lost(state);
+    if (!lost) {
+        vk::Result result = ops.submit(
+            completion.queue,
+            1,
+            &submit,
+            (vk::Fence)null,
+        );
+        if (absorb_device_loss(state, "submit", result)) {
+            lost = true;
+        } else if (result != vk::Result.SUCCESS) {
+            cancel_queue_completion_locked(state, point)!!;
+            check_backend_result(
+                state:     state,
+                operation: "submit",
+                result:    result,
+            )!;
+        }
     }
     if (waits_for_sparse_bind) completion.pending_sparse_sequence = 0;
 
@@ -1689,6 +1697,7 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
         record.state = gpu::internal::CommandState.SUBMITTED;
     }
     publish_queue_completion_locked(state, point)!!;
+    if (lost) retire_observed_queue(state, completion, ulong::max);
     $if env::TESTING:
         reach_submission_checkpoint(
             ops,

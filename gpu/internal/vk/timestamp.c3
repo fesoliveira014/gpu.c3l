@@ -385,6 +385,10 @@ fn void? vk_read_timestamps(
     TimestampPoolSlot* slot = state.timestamp_pools.get(pool)!;
     validate_timestamp_range(slot.capacity, first, count)!;
     usz required = timestamp_result_bytes(count)!;
+    if (device_lost(state)) {
+        out[:count] = 0;
+        return;
+    }
     vk::Result result = vk::get_query_pool_results(
         device:      state.device,
         query_pool:  slot.pool,
@@ -396,6 +400,10 @@ fn void? vk_read_timestamps(
         flags:       (vk::QueryResultFlags)
             vk::QueryResultFlagBits.RESULT_64_BIT,
     );
+    if (absorb_device_loss(state, "read_timestamps", result)) {
+        out[:count] = 0;
+        return;
+    }
     if (result == vk::Result.NOT_READY) return gpu::DEVICE_BUSY~;
     check_device_result(state, result)!;
 }

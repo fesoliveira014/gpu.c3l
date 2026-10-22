@@ -1584,14 +1584,12 @@ fn void sparse_bind_unpublished_wait_and_malformed_allocation_are_pre_native() @
 }
 
 fn void sparse_bind_fault_mapping_and_inputs_are_transactional() @test {
-    vk::Result[3] results = {
+    vk::Result[2] results = {
         vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
-        vk::Result.ERROR_DEVICE_LOST,
         vk::Result.ERROR_INITIALIZATION_FAILED,
     };
-    fault[3] expected = {
+    fault[2] expected = {
         gpu::OUT_OF_DEVICE_MEMORY,
-        gpu::DEVICE_LOST,
         gpu::BACKEND_ERROR,
     };
     foreach (i, result : results) {
@@ -1629,6 +1627,45 @@ fn void sparse_bind_fault_mapping_and_inputs_are_transactional() @test {
             ) == 0);
         destroy_sparse_bind_fixture(&fixture);
     }
+}
+
+fn void sparse_bind_after_loss_publishes_complete_point() @test {
+    SparseBindFixture fixture;
+    init_sparse_bind_fixture(&fixture);
+    defer destroy_sparse_bind_fixture(&fixture);
+    gpu::SparseTextureTileBind[1] tiles = {{
+        .aspect     = gpu::SparseTextureAspect.COLOR,
+        .mip_level  = 0,
+        .offset     = { 0, 0, 0 },
+        .extent     = { 64, 64, 1 },
+        .allocation = fixture.allocation,
+    }};
+    gpu::SparseTextureBindDesc desc = {
+        .texture = fixture.texture,
+        .tiles   = tiles[..],
+    };
+    vk::SparseBindNativeOps ops = sparse_bind_ops();
+    sparse_bind_capture = {};
+    sparse_bind_result = vk::Result.ERROR_DEVICE_LOST;
+    defer sparse_bind_result = vk::Result.SUCCESS;
+
+    gpu::CompletionPoint point = vk::vk_bind_sparse_texture_memory_with_ops(
+        state: &fixture.state,
+        queue: fixture.queue,
+        desc:  &desc,
+        ops:   &ops,
+    )!!;
+    ulong sequence = gpu::internal::completion_point_sequence(point);
+
+    assert(sparse_bind_capture.calls == 1);
+    assert(fixture.completions[0].published_sequence.load(
+            AtomicOrdering.ACQUIRE,
+        ) == sequence,
+        "device loss publishes the reserved completion point");
+    assert(fixture.completions[0].retired_sequence.load(
+            AtomicOrdering.ACQUIRE,
+        ) == sequence,
+        "the published point is already complete");
 }
 
 fn void sparse_bind_shape_limits_precede_allocation_and_native_work() @test {

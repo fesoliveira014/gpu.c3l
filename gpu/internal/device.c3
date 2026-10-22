@@ -158,10 +158,7 @@ fn void? validate_device_token(Device* device) @private {
 
 <* Pin a live device. A failed CAS means another thread's CAS succeeded, so
    the loop always makes progress; contention never fails the operation. *>
-fn DeviceOperation? begin_device_operation(
-    Device* device,
-    bool allow_lost = false,
-) @private {
+fn DeviceOperation? begin_device_operation(Device* device) @private {
     validate_device_token(device)!;
 
     DeviceSlot* slot = &device_slots[device.index];
@@ -194,11 +191,6 @@ fn DeviceOperation? begin_device_operation(
             packed = seen;
             continue;
         }
-        if (!allow_lost && slot.lost.load(AtomicOrdering.ACQUIRE)) {
-            DeviceSlotControl pin = { .pins = 1 };
-            (void)slot.control.sub((ulong)pin, AtomicOrdering.RELEASE);
-            return gpu::DEVICE_LOST~;
-        }
         return {
             .slot     = slot,
             .data     = &slot.data,
@@ -209,10 +201,7 @@ fn DeviceOperation? begin_device_operation(
     }
 }
 
-fn DeviceOperation? borrow_retained_device_operation(
-    Device* device,
-    bool allow_lost = false,
-) @private {
+fn DeviceOperation? borrow_retained_device_operation(Device* device) @private {
     validate_device_token(device)!;
 
     DeviceSlot* slot = &device_slots[device.index];
@@ -228,9 +217,6 @@ fn DeviceOperation? borrow_retained_device_operation(
         return reject_handle(HandleKind.DEVICE, HandleCause.STALE)~;
     }
     if (control.pins == 0) return reject_handle(HandleKind.DEVICE, HandleCause.INVARIANT)~;
-    if (!allow_lost && slot.lost.load(AtomicOrdering.ACQUIRE)) {
-        return gpu::DEVICE_LOST~;
-    }
     return {
         .slot   = slot,
         .data   = &slot.data,
@@ -381,16 +367,30 @@ fn void? validate_reported_resource_owner(
     }
 }
 
-<* Caller must hold an operation pin or be this device's destroying thread. *>
-fn void mark_device_lost(Device* device) @private {
-    if (device == null || !device.is_valid()) return;
-    if (device.reserved != 0 || device.index >= MAX_DEVICES) return;
+fn DeviceSlot* live_device_slot(Device* device) @private {
+    if (device == null || !device.is_valid()) return null;
+    if (device.reserved != 0 || device.index >= MAX_DEVICES) return null;
 
     DeviceSlot* slot = &device_slots[device.index];
     DeviceSlotControl control = (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-    if (control.generation != device.generation) return;
-    if (control.state != DEVICE_SLOT_LIVE && control.state != DEVICE_SLOT_CLOSING) return;
-    slot.lost.store(true, AtomicOrdering.RELEASE);
+    if (control.generation != device.generation) return null;
+    if (control.state != DEVICE_SLOT_LIVE && control.state != DEVICE_SLOT_CLOSING) return null;
+    return slot;
+}
+
+<* Record observed device loss. Caller must hold an operation pin or be this
+   device's destroying thread.
+   @return "True only for the call that first marked the device lost." *>
+fn bool mark_device_lost(Device* device) @private {
+    DeviceSlot* slot = live_device_slot(device);
+    if (slot == null) return false;
+    return !slot.lost.set(AtomicOrdering.ACQUIRE_RELEASE);
+}
+
+<* Caller must hold an operation pin or be this device's destroying thread. *>
+fn bool device_marked_lost(Device* device) @private {
+    DeviceSlot* slot = live_device_slot(device);
+    return slot != null && slot.lost.load(AtomicOrdering.ACQUIRE);
 }
 
 <* Caller must hold an operation pin for this device. *>

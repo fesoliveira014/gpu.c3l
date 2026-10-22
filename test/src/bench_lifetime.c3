@@ -71,19 +71,10 @@ fn void? wait_bench_queue(gpu::Device* device, gpu::QueueKind queue) {
 fn void? destroy_bench_device(gpu::Device* device) {
     if (device == null || !device.is_valid()) return;
     gpu::Runtime runtime;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device, true)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     if (operation.data.runtime_retained) runtime = operation.data.runtime;
     gpu::internal::end_device_operation(&operation);
-    gpu::DeviceCaps? caps_result = gpu::get_device_caps(device);
-    if (catch err = caps_result) {
-        if (err == gpu::DEVICE_LOST) {
-            gpu::destroy_device(device)!;
-            if (runtime.is_valid()) gpu::destroy_runtime(&runtime)!;
-            return;
-        }
-        return err~;
-    }
-    gpu::QueueRoles queues = caps_result.queues;
+    gpu::QueueRoles queues = gpu::get_device_caps(device)!.queues;
     if (queues.graphics) {
         wait_bench_queue(device, gpu::QueueKind.GRAPHICS)!;
     }

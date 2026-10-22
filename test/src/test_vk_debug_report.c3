@@ -717,7 +717,7 @@ fn void acceleration_structure_leaks_route_semantic_diagnostics() @test {
         "acceleration-structure leaks preserve standard metadata and names");
 }
 
-fn void teardown_reports_live_acceleration_structure() @test {
+fn void leak_report_routes_live_acceleration_structure() @test {
     gpu::Runtime runtime;
     gpu::Device device = create_ray_query_test_device(&runtime)!!;
     gpu::AccelerationStructureDesc desc = {
@@ -738,21 +738,21 @@ fn void teardown_reports_live_acceleration_structure() @test {
     state.debug_callback = &capture_leak_message;
     state.debug_user_data = &capture;
 
-    gpu::internal::mark_device_lost(&device);
+    uint leaks = vk::report_resource_leaks(state);
+    gpu::destroy_acceleration_structure(&device, acceleration_structure)!!;
     destroy_test_device(&device)!!;
     runtime = {};
 
-    assert(!device.is_valid(),
-        "device-loss teardown consumes the device with a live structure");
+    assert(leaks == 1, "the leak report counts the live structure");
     assert(capture.total == 1
             && capture.acceleration_structures == 1
             && capture.acceleration_structure_a_seen,
-        "Teardown routes the live acceleration-structure owner once");
+        "the leak report routes the live acceleration-structure owner once");
     assert(capture.acceleration_structure_identity_valid
             && capture.public_identities == 1,
-        "Teardown preserves the exact live owner identity");
+        "the leak report preserves the exact live owner identity");
     assert(capture.metadata_valid && capture.named_resources_valid,
-        "Teardown preserves standard leak metadata and name");
+        "the leak report preserves standard leak metadata and name");
 }
 
 fn void debug_name_copy_is_independent() @test {

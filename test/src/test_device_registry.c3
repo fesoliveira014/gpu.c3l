@@ -600,7 +600,7 @@ fn void command_record_is_not_reused_before_discard_returns() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void lost_commands_can_be_discarded() @test {
+fn void lost_device_commands_record_end_and_discard() @test {
     CommandPinFixture fixture;
     gpu::Device device = gpu::internal::register_device(
         state:  &fixture.state,
@@ -614,21 +614,19 @@ fn void lost_commands_can_be_discarded() @test {
         .after = { .compute = true },
     };
     gpu::cmd_barrier(&commands, &barrier)!!;
-    fault end_fault = @catch(gpu::end_commands(&commands));
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     fault destroy_fault = @catch(gpu::destroy_device(&device));
     uint destroy_calls_before_discard =
         fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE);
-    gpu::discard_commands(&commands)!!;
+    gpu::discard_executable_commands(&executable)!!;
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     gpu::internal::DeviceSlotControl after_discard =
         (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
 
     assert(fixture.state.command_entered.load(AtomicOrdering.ACQUIRE),
         "recording reaches the backend after device loss");
-    assert(end_fault == gpu::DEVICE_LOST,
-        "a lifecycle boundary reports loss without consuming the token");
-    assert(destroy_fault == gpu::DEVICE_BUSY,
-        "a lost device remains busy while a command retains its lifetime pin");
+    assert(destroy_fault == gpu::RESOURCE_IN_USE,
+        "a live command child blocks destroying a lost device");
     assert(destroy_calls_before_discard == 0,
         "device teardown does not begin before the lost command is discarded");
     assert(after_discard.pins == 0,
@@ -816,14 +814,12 @@ fn void device_loss_isolated_to_marked_slot() @test {
 
     gpu::internal::mark_device_lost(&first);
 
-    assert(
-        @catch(gpu::get_device_caps(&first)) == gpu::DEVICE_LOST,
-        "the affected device stays lost"
-    );
+    assert(gpu::is_device_lost(&first), "the affected device stays lost");
+    assert(!gpu::is_device_lost(&second), "a peer device is unaffected");
+    (void)gpu::get_device_caps(&first)!!;
     (void)gpu::get_device_caps(&second)!!;
 
     gpu::Device stale = first;
-    gpu::internal::device_slots[first.index].live_children.store(1, AtomicOrdering.RELAXED);
     gpu::destroy_device(&first)!!;
     DeviceFixture replacement_fixture;
     gpu::Device replacement = fixture_device(&replacement_fixture);

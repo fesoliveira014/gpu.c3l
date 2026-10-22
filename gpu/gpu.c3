@@ -310,6 +310,21 @@ fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
     );
 }
 
+<* Report whether the library has observed the loss of this device.
+   Loss is observed by calls that reach the driver, such as submission,
+   completion polling and waits, and presentation; this query never calls the
+   driver. Once true it stays true until the device is destroyed. Thread-safe.
+   After loss, calls keep succeeding without GPU effect and GPU results are
+   undefined.
+   @param device : "Live device to query."
+   @return "Whether device loss has been observed." *>
+fn bool is_device_lost(Device* device) {
+    gpu::internal::DeviceOperation operation =
+        gpu::internal::@require_valid(gpu::internal::begin_device_operation(device));
+    defer gpu::internal::end_device_operation(&operation);
+    return operation.slot.lost.load(AtomicOrdering.ACQUIRE);
+}
+
 <* Snapshot the selected device's immutable capabilities.
    @param device : "Live device to query."
    @return "The device capabilities, or a recoverable busy or device-loss fault." *>
@@ -387,36 +402,29 @@ fn void? destroy_device(Device* device) {
         if (control.state == gpu::internal::DEVICE_SLOT_CLOSING) {
             return gpu::internal::reject_handle(gpu::internal::HandleKind.DEVICE, gpu::internal::HandleCause.DESTROY_OVERLAP)~;
         }
-        bool lost = slot.lost.load(AtomicOrdering.ACQUIRE);
-        if (!lost && slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
-            return RESOURCE_IN_USE~;
-        }
+        if (slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) return RESOURCE_IN_USE~;
         gpu::internal::DeviceSlotControl state_step = { .state = 1 };
         ulong previous = slot.control.add((ulong)state_step, AtomicOrdering.ACQUIRE_RELEASE);
         closing = (gpu::internal::DeviceSlotControl)previous;
         closing.state = gpu::internal::DEVICE_SLOT_CLOSING;
         if (closing.pins > 0) {
             (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
-            if (lost) return DEVICE_BUSY~;
             // Every retained pin has a live child, so with none left a pin
             // belongs to a host operation running concurrently with destroy.
             return gpu::internal::reject_handle(gpu::internal::HandleKind.DEVICE, gpu::internal::HandleCause.DESTROY_OVERLAP)~;
         }
-        if (!lost && slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
+        if (slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
             (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
             return RESOURCE_IN_USE~;
         }
-        if (!lost) {
-            if (catch readiness_fault =
-                gpu::internal::vk::vk_check_device_destroy(slot.data.state)) {
-                (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
-                return readiness_fault~;
-            }
-            lost = slot.lost.load(AtomicOrdering.ACQUIRE);
-            if (!lost && slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
-                (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
-                return RESOURCE_IN_USE~;
-            }
+        if (catch readiness_fault =
+            gpu::internal::vk::vk_check_device_destroy(slot.data.state)) {
+            (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
+            return readiness_fault~;
+        }
+        if (slot.live_children.load(AtomicOrdering.ACQUIRE) > 0) {
+            (void)slot.control.sub((ulong)state_step, AtomicOrdering.RELEASE);
+            return RESOURCE_IN_USE~;
         }
         data = slot.data;
     }
@@ -1717,7 +1725,7 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
     if (allocator == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.NULL_POINTER)~;
     if (allocator.handle == COMMAND_ALLOCATOR_HANDLE_INVALID) return;
     if (!allocator.handle.is_valid()) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.MALFORMED)~;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device, true)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_command_allocator(&operation, allocator)!;
     gpu::internal::vk::vk_destroy_command_allocator(
@@ -1855,7 +1863,6 @@ fn void? discard_commands(CommandList* commands) {
         gpu::internal::recording_command(commands)!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         record,
-        allow_lost: true,
     )!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::vk::vk_discard_commands(
@@ -1882,7 +1889,6 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
         gpu::internal::executable_command(commands)!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         record,
-        allow_lost: true,
     )!;
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::vk::vk_discard_commands(

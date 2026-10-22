@@ -207,11 +207,8 @@ faultdef
     OUT_OF_HOST_MEMORY,
     // Runtime failure: device memory is exhausted.
     OUT_OF_DEVICE_MEMORY,
-    // Runtime failure: the driver reported device loss. The affected device
-    // rejects later operations; peer devices remain usable.
-    DEVICE_LOST,
-    // Runtime/lifecycle failure: closing state, bounded contention, or
-    // incomplete work prevented progress. Safe to retry.
+    // Runtime failure: GPU work the call depends on has not finished. Safe to
+    // retry after it completes.
     DEVICE_BUSY,
     // Always checked lifecycle floor: destruction or mutation found a live
     // owner or dependent. Release it first.

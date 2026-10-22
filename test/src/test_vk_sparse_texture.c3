@@ -1104,6 +1104,9 @@ fn void sparse_texture_real_lifecycle_when_supported() @test {
                 gpu::create_sparse_texture(&device, &desc)!!;
             assert(teardown_texture.is_valid());
             gpu::internal::mark_device_lost(&device);
+            assert(@catch(gpu::destroy_device(&device))
+                == gpu::RESOURCE_IN_USE);
+            gpu::destroy_texture(&device, teardown_texture)!!;
             gpu::destroy_device(&device)!!;
             return;
         }

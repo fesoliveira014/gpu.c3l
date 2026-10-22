@@ -282,7 +282,7 @@ fn void partial_creation_rolls_back_before_publication() @test {
     }
 }
 
-fn void device_loss_discards_commands() @test {
+fn void lost_device_discards_commands() @test {
     {
         RuntimeDiagnosticCapture capture;
         gpu::RuntimeDesc desc = diagnostic_runtime_desc(
@@ -301,8 +301,9 @@ fn void device_loss_discards_commands() @test {
         gpu::discard_commands(&commands)!!;
 
         gpu::destroy_command_allocator(&allocator)!!;
+        free_owned_span(&device, &owned)!!;
         destroy_test_device(&device)!!;
         assert(!device.is_valid(),
-            "device-loss teardown consumes the device");
+            "lost-device teardown consumes the device");
     }
 }

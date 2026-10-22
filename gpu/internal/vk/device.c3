@@ -1317,16 +1317,16 @@ fn bool? device_destroy_ready_with_query(
             >= expected) continue;
 
         ulong current;
-        vk::Result result = query_fn(
-            state.device,
-            completion.timeline,
-            &current,
-        );
-        if (result == vk::Result.ERROR_DEVICE_LOST) {
-            observe_device_result(state, result);
-            return true;
-        }
-        check_device_result(state, result)!;
+        check_device_result(
+            state,
+            query_queue_timeline(
+                state:      state,
+                operation:  "destroy_device",
+                completion: completion,
+                query_fn:   query_fn,
+                completed:  &current,
+            ),
+        )!;
         if (current < expected) return false;
     }
 
@@ -1366,7 +1366,7 @@ fn void vk_destroy_device(VkDeviceState* state) {
     destroy_state(state);
 }
 
-<* Reverse-order cleanup after accepted destruction, device loss, or partial creation. *>
+<* Reverse-order cleanup after accepted destruction or partial creation. *>
 fn void destroy_state(VkDeviceState* state) @private {
     if (state == null) return;
     if (state.device != null) {
@@ -1400,7 +1400,7 @@ fn void destroy_state(VkDeviceState* state) @private {
         destroy_descriptor_heap(state);
         destroy_sampler_table(state);
         destroy_attachment_view_table(state);
-        // Internal textures and device-loss leftovers remain backend-owned.
+        // Internal textures remain backend-owned.
         if (state.textures.slots.ptr != null) {
             foreach (&cell : state.textures.slots[:state.textures.next_new]) {
                 if (cell.used) {

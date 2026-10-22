@@ -392,10 +392,12 @@ fn bool? poll_queue_completion_with_ops(
     check_backend_result(
         state:     state,
         operation: "poll_completion",
-        result:    ops.query(
-            state.device,
-            completion.timeline,
-            &current,
+        result:    query_queue_timeline(
+            state:      state,
+            operation:  "poll_completion",
+            completion: completion,
+            query_fn:   ops.query,
+            completed:  &current,
         ),
     )!;
     if (current < sequence) return false;
@@ -501,23 +503,29 @@ fn void? vk_wait_completion_with_wait(
     if (completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence) {
         return;
     }
-    vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
-        .set_semaphore_count(1)
-        .set_semaphores((&completion.timeline)[:1])
-        .set_values((&sequence)[:1]);
-    check_wait_backend_result(
-        state:     state,
-        operation: "wait_completion",
-        result:    wait_fn(
-            state.device,
-            &wait_info,
-            timeout_ns,
-        ),
-    )!;
+    ulong observed = sequence;
+    if (device_lost(state)) {
+        observed = ulong::max;
+    } else {
+        vk::SemaphoreWaitInfo wait_info = vk::semaphore_wait_info()
+            .set_semaphore_count(1)
+            .set_semaphores((&completion.timeline)[:1])
+            .set_values((&sequence)[:1]);
+        vk::Result result = wait_fn(state.device, &wait_info, timeout_ns);
+        if (absorb_device_loss(state, "wait_completion", result)) {
+            observed = ulong::max;
+        } else {
+            check_wait_backend_result(
+                state:     state,
+                operation: "wait_completion",
+                result:    result,
+            )!;
+        }
+    }
     retire_observed_completion_and_drain_with_query(
         state:              state,
         observed_queue_id:  queue_id,
-        observed_completed: sequence,
+        observed_completed: observed,
         query_fn:           &real_semaphore_counter_query,
     )!;
 }

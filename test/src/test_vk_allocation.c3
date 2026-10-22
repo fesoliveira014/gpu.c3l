@@ -660,7 +660,7 @@ fn void allocation_transaction_rolls_back_every_failure() @test {
     );
     check_allocation_failure(
         failure:          AllocationFailurePoint.DEVICE_LOST,
-        expected_fault:   gpu::DEVICE_LOST,
+        expected_fault:   gpu::BACKEND_ERROR,
         expected_destroy: 0,
     );
     check_allocation_failure(
@@ -1550,7 +1550,7 @@ fn void live_allocation_blocks_normal_device_destruction() @test {
     destroy_test_device(&device)!!;
 }
 
-fn void lost_device_releases_live_allocation_backing() @test {
+fn void lost_device_destroy_waits_for_live_allocation() @test {
     gpu::Device device = create_allocation_test_device(
         "gpu_allocation_device_loss_test",
     );
@@ -1562,8 +1562,10 @@ fn void lost_device_releases_live_allocation_backing() @test {
     assert(allocation.is_valid());
 
     gpu::internal::mark_device_lost(&device);
+    assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
+        "a live allocation blocks destroying a lost device");
+    gpu::free_allocation(&device, &allocation)!!;
     destroy_test_device(&device)!!;
 
-    assert(!device.is_valid(),
-        "lost-device teardown consumes the device with live allocation backing");
+    assert(!device.is_valid(), "lost-device teardown consumes the device");
 }

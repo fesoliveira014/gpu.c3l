@@ -146,13 +146,9 @@ fn void publish_executable_command_list(
 
 fn gpu::internal::DeviceOperation? command_operation(
     gpu::internal::vk::CommandRecord* record,
-    bool allow_lost = false,
 ) @private {
     if (record == null) return reject_handle(HandleKind.COMMAND_LIST, HandleCause.INVARIANT)~;
-    return gpu::internal::borrow_retained_device_operation(
-        &record.device,
-        allow_lost,
-    );
+    return gpu::internal::borrow_retained_device_operation(&record.device);
 }
 
 fn bool generated_work_kind_valid(GeneratedWorkKind kind) @private {

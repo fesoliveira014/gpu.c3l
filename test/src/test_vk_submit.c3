@@ -1288,7 +1288,7 @@ fn void completion_sequence_exhaustion_precedes_native_submit() @test {
     gpu::wait_completion(point, 1_000_000_000)!!;
 }
 
-fn void native_device_loss_rolls_back_and_allows_discard() @test {
+fn void native_device_loss_publishes_complete_point() @test {
     gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
@@ -1300,57 +1300,24 @@ fn void native_device_loss_rolls_back_and_allows_discard() @test {
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
-    uint allocator_buffer = record.allocator_buffer;
-    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
-    defer discard_test_executable(&commands_executable)!!;
-    gpu::ExecutableCommandList[1] lists = { commands_executable };
+    gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)!! };
     gpu::SubmitDesc desc = { .command_lists = lists[..] };
-    ulong next_before = completion.next_sequence;
     ulong published_before = completion.published_sequence.load(
         AtomicOrdering.ACQUIRE,
     );
-    AllocatorSubmissionState allocator_before = allocator_submission_state(
-        state,
-        command_allocator.handle,
-        allocator_buffer,
-    );
 
-    assert(@catch(vk::vk_submit_with(
+    gpu::CompletionPoint point = vk::vk_submit_with(
         state,
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+        command_queue,
         &desc,
         &lose_user_submit,
-    ))
-        == gpu::DEVICE_LOST,
-        "native device loss keeps its public fault");
-    assert(completion.next_sequence == next_before,
-        "device loss rolls back the reserved queue sequence");
+    )!!;
     assert(completion.published_sequence.load(AtomicOrdering.ACQUIRE)
-        == published_before,
-        "device loss publishes no completion point");
-    assert(lists[0].is_valid(),
-        "device loss leaves the executable token discardable");
-    AllocatorSubmissionState allocator_after = allocator_submission_state(
-        state,
-        command_allocator.handle,
-        allocator_buffer,
-    );
-    assert(allocator_after.available == allocator_before.available
-            && allocator_after.recordings == allocator_before.recordings
-            && allocator_after.executables == allocator_before.executables
-            && allocator_after.in_flight == allocator_before.in_flight
-            && allocator_after.scratch_in_use
-                == allocator_before.scratch_in_use,
-        "device-loss submission failure preserves allocator ownership exactly");
-    assert(@catch(gpu::destroy_command_allocator(&command_allocator))
-            == gpu::RESOURCE_IN_USE,
-        "device-loss submission failure leaves allocator destruction retryable");
-
-    gpu::discard_executable_commands(&lists[0])!!;
-    assert(!lists[0].is_valid(),
-        "discard consumes the token after device loss");
+            > published_before,
+        "device loss publishes the reserved completion point");
+    assert(gpu::poll_completion(point)!!,
+        "the published point is already complete");
+    assert(gpu::is_device_lost(&device), "native loss marks the device lost");
 }
 
 fn void completion_wait_infos_preserve_cross_and_same_queue_waits() @test {

@@ -513,7 +513,7 @@ fn void acquire_result_mapping() @test {
     assert(not_ready == gpu::WAIT_TIMEOUT, "acquire not-ready is retryable");
     assert(out_of_date == gpu::SWAPCHAIN_OUT_OF_DATE, "out-of-date requires swapchain resize");
     assert(surface_lost == gpu::SURFACE_LOST, "surface loss remains distinct");
-    assert(device_lost == gpu::DEVICE_LOST, "unrelated results delegate to the common mapper");
+    assert(device_lost == gpu::BACKEND_ERROR, "unrelated results delegate to the common mapper");
 }
 
 fn void present_result_mapping() @test {
@@ -526,7 +526,7 @@ fn void present_result_mapping() @test {
 
     assert(out_of_date == gpu::SWAPCHAIN_OUT_OF_DATE, "out-of-date requires swapchain resize");
     assert(surface_lost == gpu::SURFACE_LOST, "surface loss requires surface recreation");
-    assert(device_lost == gpu::DEVICE_LOST, "unrelated results delegate to the common mapper");
+    assert(device_lost == gpu::BACKEND_ERROR, "unrelated results delegate to the common mapper");
 }
 
 fn void image_count_clamp() @test {
@@ -1043,7 +1043,7 @@ fn void mapped_acquire_errors_preserve_transaction_state() @test {
     assert_mapped_acquire_failure_preserves_state(
         &fixture,
         vk::Result.ERROR_DEVICE_LOST,
-        gpu::DEVICE_LOST,
+        gpu::BACKEND_ERROR,
     );
 }
 
@@ -1873,7 +1873,7 @@ fn void wait_present_fences_reset_failure_preserves_pending_bits() @test {
     slot.present_fence_pending[1] = true;
     reset_present_wait_capture(
         vk::Result.SUCCESS,
-        vk::Result.ERROR_DEVICE_LOST,
+        vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
     );
 
     fault reset_failure = @catch(gpu::internal::vk::wait_present_fences_with(
@@ -1883,8 +1883,8 @@ fn void wait_present_fences_reset_failure_preserves_pending_bits() @test {
         wait_fn:    &capture_fence_wait,
         reset_fn:   &capture_fence_reset_all,
     ));
-    assert(reset_failure == gpu::DEVICE_LOST,
-        "reset failure maps to DEVICE_LOST");
+    assert(reset_failure == gpu::OUT_OF_DEVICE_MEMORY,
+        "reset failure maps through the common mapper");
     assert(slot.present_fence_pending[0] && slot.present_fence_pending[1],
         "reset failure preserves all pending bits");
 

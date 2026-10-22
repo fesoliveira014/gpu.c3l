@@ -1669,7 +1669,7 @@ fn void live_descriptors_block_device_destruction() @test {
     destroy_test_device(&device)!!;
 }
 
-fn void device_loss_teardown_accepts_live_texture_views() @test {
+fn void lost_device_destroy_waits_for_live_texture_views() @test {
     gpu::Device device = make_heap_test_device(8, 1);
     gpu::TextureHandle texture = make_heap_view_texture(&device);
     gpu::TextureViewDesc desc = {
@@ -1693,9 +1693,14 @@ fn void device_loss_teardown_accepts_live_texture_views() @test {
         state:     state,
         operation: "descriptor teardown",
         result:    vk::Result.ERROR_DEVICE_LOST,
-    )) == gpu::DEVICE_LOST,
-        "the fixture enters forced device-loss teardown");
+    )) == gpu::BACKEND_ERROR,
+        "the fixture observes device loss");
+    assert(gpu::is_device_lost(&device), "the fixture device is lost");
 
+    assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
+        "live texture views block destroying a lost device");
+    gpu::destroy_texture_view(&device, view)!!;
+    gpu::destroy_texture(&device, texture)!!;
     destroy_test_device(&device)!!;
 }
 

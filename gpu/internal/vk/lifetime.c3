@@ -115,6 +115,27 @@ fn CommandRecord* release_pending_command_locked(
     return next;
 }
 
+<* Read a queue's completed timeline value. Once the device is lost every
+   sequence counts as complete, so retirement releases all submitted work. *>
+fn vk::Result query_queue_timeline(
+    VkDeviceState* state,
+    ZString operation,
+    QueueCompletionState* completion,
+    SemaphoreCounterQueryFn query_fn,
+    ulong* completed,
+) @private {
+    if (device_lost(state)) {
+        *completed = ulong::max;
+        return vk::Result.SUCCESS;
+    }
+    vk::Result result = query_fn(state.device, completion.timeline, completed);
+    if (absorb_device_loss(state, operation, result)) {
+        *completed = ulong::max;
+        return vk::Result.SUCCESS;
+    }
+    return result;
+}
+
 <* Retires no further than the published prefix. Requires retirement_mutex. *>
 fn void retire_queue_through_locked(
     VkDeviceState* state,
@@ -189,10 +210,12 @@ fn bool? query_pending_queue(
 
     check_device_result(
         state,
-        query_fn(
-            state.device,
-            completion.timeline,
-            completed,
+        query_queue_timeline(
+            state:      state,
+            operation:  "retire_completed_work",
+            completion: completion,
+            query_fn:   query_fn,
+            completed:  completed,
         ),
     )!;
     return true;
@@ -280,7 +303,13 @@ fn void? retire_queue_latest_with_query(
     check_backend_result(
         state:     state,
         operation: "begin_commands",
-        result:    query_fn(state.device, completion.timeline, &current),
+        result:    query_queue_timeline(
+            state:      state,
+            operation:  "begin_commands",
+            completion: completion,
+            query_fn:   query_fn,
+            completed:  &current,
+        ),
     )!;
     retire_observed_completion_and_drain_with_query(
         state:              state,
@@ -332,10 +361,12 @@ fn void? drain_queue_if_needed_with_query(
     ulong completed;
     check_device_result(
         state,
-        query_fn(
-            state.device,
-            completion.timeline,
-            &completed,
+        query_queue_timeline(
+            state:      state,
+            operation:  "retire_completed_work",
+            completion: completion,
+            query_fn:   query_fn,
+            completed:  &completed,
         ),
     )!;
     retire_queue_through_locked(state, completion, completed);
