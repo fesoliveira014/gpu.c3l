@@ -1,6 +1,7 @@
 module gpu::util;
 
 import gpu;
+import gpu::internal @public;
 import std::io;
 
 <* Return one fresh surface from the supplied runtime, transferring ownership.
@@ -81,6 +82,7 @@ fn DeviceContextDesc default_device_context_desc() {
    @param desc : "Call-scoped settings; never modified. Null is invalid."
    @return "A complete context, or the original fault after best-effort cleanup." *>
 fn DeviceContext? create_device_context(DeviceContextDesc* desc) {
+    defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     validate_context_desc(desc)!;
     DeviceContextDesc settings = *desc;
     gpu::DeviceDesc device_desc = settings.device;
@@ -206,10 +208,14 @@ fn gpu::Surface? create_context_surface(
     DeviceContextDesc* settings,
 ) @private {
     gpu::Surface surface = settings.create_surface(runtime, settings.surface_user_data)!;
+    // Reject a foreign callback result before any call could destroy it.
+    gpu::internal::SurfaceData* data = gpu::internal::require_surface(&surface)!;
+    if ((ulong)data.runtime != (ulong)*runtime) {
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.SURFACE, gpu::internal::HandleCause.MISMATCHED)~;
+    }
     gpu::Adapter first_adapter = adapters.get(0)!;
     if (catch err = gpu::supports_presentation(&first_adapter, &surface)) {
-        // Identity faults must not destroy a foreign callback result.
-        if (err != gpu::INVALID_HANDLE) (void)gpu::destroy_surface(&surface);
+        (void)gpu::destroy_surface(&surface);
         return err~;
     }
     return surface;

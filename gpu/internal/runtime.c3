@@ -21,13 +21,21 @@ struct RuntimeData @private {
 
 RuntimeData[MAX_RUNTIMES] runtime_slots @private;
 
-fn RuntimeData* resolve_runtime(Runtime* runtime) @private {
-    if (runtime == null || !runtime.is_valid()) return null;
-    if (runtime.reserved != 0) return null;
-    if (runtime.index >= MAX_RUNTIMES) return null;
+fn RuntimeData*? require_runtime(Runtime* runtime) @private {
+    if (runtime == null) return reject_handle(HandleKind.RUNTIME, HandleCause.NULL_POINTER)~;
+    if (!runtime.is_valid()) return reject_handle(HandleKind.RUNTIME, HandleCause.ZERO)~;
+    if (runtime.reserved != 0 || runtime.index >= MAX_RUNTIMES) {
+        return reject_handle(HandleKind.RUNTIME, HandleCause.MALFORMED)~;
+    }
     RuntimeData* data = &runtime_slots[runtime.index];
-    if (!data.used || data.generation != runtime.generation) return null;
+    if (!data.used || data.generation != runtime.generation) {
+        return reject_handle(HandleKind.RUNTIME, HandleCause.STALE)~;
+    }
     return data;
+}
+
+fn RuntimeData* resolve_runtime(Runtime* runtime) @private {
+    return require_runtime(runtime) ?? null;
 }
 
 fn Runtime? register_runtime(
@@ -54,22 +62,19 @@ fn Runtime? register_runtime(
 }
 
 fn void? runtime_retain_surface(Runtime* runtime) @private {
-    RuntimeData* data = resolve_runtime(runtime);
-    if (data == null) return gpu::INVALID_HANDLE~;
+    RuntimeData* data = require_runtime(runtime)!;
     if (data.live_surface_count == uint::max) return gpu::INVALID_RESOURCE_STATE~;
     data.live_surface_count++;
 }
 
 fn void? runtime_release_surface(Runtime* runtime) @private {
-    RuntimeData* data = resolve_runtime(runtime);
-    if (data == null) return gpu::INVALID_HANDLE~;
+    RuntimeData* data = require_runtime(runtime)!;
     if (data.live_surface_count == 0) return gpu::INVALID_RESOURCE_STATE~;
     data.live_surface_count--;
 }
 
 fn void? runtime_retain_device(Runtime* runtime) @private {
-    RuntimeData* data = resolve_runtime(runtime);
-    if (data == null) return gpu::INVALID_HANDLE~;
+    RuntimeData* data = require_runtime(runtime)!;
     uint count = data.live_device_count.load(AtomicOrdering.RELAXED);
     while (true) {
         if (count == uint::max) return gpu::INVALID_RESOURCE_STATE~;
@@ -86,8 +91,7 @@ fn void? runtime_retain_device(Runtime* runtime) @private {
 }
 
 fn void? runtime_release_device(Runtime* runtime) @private {
-    RuntimeData* data = resolve_runtime(runtime);
-    if (data == null) return gpu::INVALID_HANDLE~;
+    RuntimeData* data = require_runtime(runtime)!;
     uint count = data.live_device_count.load(AtomicOrdering.RELAXED);
     while (true) {
         if (count == 0) return gpu::INVALID_RESOURCE_STATE~;

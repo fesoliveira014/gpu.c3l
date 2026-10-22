@@ -381,10 +381,10 @@ fn Device? register_device(
     Adapter registered_adapter;
     RuntimeData* runtime_data;
     if (has_runtime) {
-        runtime_data = resolve_runtime(retained_runtime);
-        RuntimeData* adapter_data = resolve_adapter(adapter);
-        if (runtime_data == null || adapter_data != runtime_data) {
-            return gpu::INVALID_HANDLE~;
+        runtime_data = require_runtime(retained_runtime)!;
+        RuntimeData* adapter_data = require_adapter(adapter)!;
+        if (adapter_data != runtime_data) {
+            return reject_handle(HandleKind.ADAPTER, HandleCause.MISMATCHED)~;
         }
         if (runtime_data.live_device_count.load(AtomicOrdering.ACQUIRE) == 0) return gpu::INVALID_RESOURCE_STATE~;
         runtime = *retained_runtime;
@@ -394,10 +394,11 @@ fn Device? register_device(
     Surface registered_surface;
     if (presentation_surface != null) {
         if (!has_runtime) return gpu::INVALID_ARGUMENT~;
-        SurfaceData* surface_data = resolve_surface(presentation_surface);
-        if (surface_data == null) return gpu::INVALID_HANDLE~;
+        SurfaceData* surface_data = require_surface(presentation_surface)!;
         RuntimeData* surface_runtime = resolve_runtime(&surface_data.runtime);
-        if (surface_runtime != runtime_data) return gpu::INVALID_HANDLE~;
+        if (surface_runtime != runtime_data) {
+            return reject_handle(HandleKind.SURFACE, HandleCause.MISMATCHED)~;
+        }
         registered_surface = *presentation_surface;
     }
     caps.presentation_enabled = registered_surface.is_valid();

@@ -423,7 +423,10 @@ fn void context_rejects_foreign_surface_without_destroying_it() @test {
     util::DeviceContextDesc desc = util::default_device_context_desc();
     desc.create_surface = &context_surface_factory;
     desc.surface_user_data = &capture;
-    assert(@catch(util::create_device_context(&desc)) == gpu::INVALID_HANDLE);
+    String message = @expect_panic() {
+        (void)util::create_device_context(&desc);
+    };
+    assert(message == "gpu::create_device_context: mismatched Surface");
     assert(vk::stub_surface_destroy_count() == 0);
     Adapter adapter = gpu::enumerate_adapters(&foreign)!!.get(0)!!;
     assert(gpu::supports_presentation(&adapter, &capture.surface)!!);
@@ -436,7 +439,10 @@ fn void context_rejects_zero_surface_and_releases_unsupported_surface() @test {
     util::DeviceContextDesc desc = util::default_device_context_desc();
     desc.create_surface = &context_surface_factory;
     desc.surface_user_data = &capture;
-    assert(@catch(util::create_device_context(&desc)) == gpu::INVALID_HANDLE);
+    String message = @expect_panic() {
+        (void)util::create_device_context(&desc);
+    };
+    assert(message == "gpu::create_device_context: zero Surface");
     assert(vk::stub_surface_destroy_count() == 0);
     assert(vk::stub_runtime_destroy_count() == 1);
 
@@ -482,8 +488,12 @@ fn void context_rejects_stale_surface_without_destroying_replacement() @test {
     util::DeviceContextDesc desc = util::default_device_context_desc();
     desc.create_surface = &context_surface_factory;
     desc.surface_user_data = &capture;
-    assert(@catch(util::create_device_context(&desc)) == gpu::INVALID_HANDLE);
+    String message = @expect_panic() {
+        (void)util::create_device_context(&desc);
+    };
+    assert(message == "gpu::create_device_context: stale Surface");
     assert(vk::stub_surface_destroy_count() == 1);
+    assert(vk::stub_runtime_destroy_count() == 1, "the context runtime rolls back before termination");
     Adapter adapter = gpu::enumerate_adapters(&foreign)!!.get(0)!!;
     assert(gpu::supports_presentation(&adapter, &replacement)!!);
 }

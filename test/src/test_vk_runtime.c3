@@ -33,10 +33,11 @@ fn void runtimes_enumerate_vulkan_adapters_independently() @test {
     assert(diagnostics.driver_name.len > 0, "driver identity is available for logging");
 
     gpu::destroy_runtime(&first)!!;
-    assert(
-        @catch(gpu::get_adapter_info(&first_adapter)) == gpu::INVALID_HANDLE,
-        "destroying one runtime invalidates only its borrowed adapters"
-    );
+    String message = @expect_panic() {
+        (void)gpu::get_adapter_info(&first_adapter);
+    };
+    assert(message == "gpu::get_adapter_info: stale Adapter",
+        "destroying one runtime invalidates only its borrowed adapters");
     assert(
         gpu::get_adapter_info(&second_adapter)!!.name.len > 0,
         "the second runtime remains valid after the first is destroyed"

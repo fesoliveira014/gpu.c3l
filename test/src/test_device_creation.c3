@@ -249,10 +249,11 @@ fn void unsupported_and_stale_adapter_creation_faults_before_allocation() @test 
     assert(gpu::internal::vk::stub_device_temporary_create_count() == 0, "unsupported requests allocate nothing");
 
     gpu::destroy_runtime(&runtime)!!;
-    assert(
-        @catch(gpu::create_device(&adapter)) == gpu::INVALID_HANDLE,
-        "a stale adapter faults before device work"
-    );
+    String message = @expect_panic() {
+        (void)gpu::create_device(&adapter);
+    };
+    assert(message == "gpu::create_device: stale Adapter",
+        "a stale adapter terminates before device work");
     assert(gpu::internal::vk::stub_device_temporary_create_count() == 0, "stale adapters allocate nothing");
 }
 
@@ -298,7 +299,7 @@ fn void invalid_retained_runtime_metadata_is_rejected_before_publication() @test
         owner:            &owner,
     );
 
-    assert(@catch(result) == gpu::INVALID_HANDLE);
+    assert(@catch(result) == gpu::internal::HANDLE_REJECTED);
     assert(gpu::internal::device_slot_available(), "invalid ownership metadata publishes no device");
     assert((ulong)owner == 0, "invalid ownership metadata writes no backend owner");
     gpu::internal::runtime_release_device(&runtime)!!;

@@ -29,6 +29,7 @@
     "../../gpu/internal/render_pass.c3",
     "../../gpu/internal/sync.c3",
     "../../gpu/internal/queue.c3",
+    "../../gpu/internal/rejection.c3",
     "../../gpu/internal/vk/internal.c3",
     "vk_stub.c3"
   ],

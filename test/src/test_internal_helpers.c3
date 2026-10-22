@@ -467,3 +467,19 @@ fn void submit_wait_mask_shape_is_backend_independent() @test {
     assert(gpu::internal::stage_mask_valid({ .mesh_shader }));
     assert(gpu::internal::submit_wait_stage_mask_valid({ .mesh_shader }));
 }
+
+fn void rejected_handle_message_names_operation_and_type() @test {
+    char[128] buffer;
+    (void)gpu::internal::reject_handle(
+        gpu::internal::HandleKind.TEXTURE,
+        gpu::internal::HandleCause.STALE,
+    );
+    assert(gpu::internal::rejected_handle_message("create_texture_view", buffer[..])
+        == "gpu::create_texture_view: stale TextureHandle");
+    (void)gpu::internal::reject_handle(
+        gpu::internal::HandleKind.DEVICE,
+        gpu::internal::HandleCause.DESTROY_OVERLAP,
+    );
+    assert(gpu::internal::rejected_handle_message("get_queue", buffer[..])
+        == "gpu::get_queue: Device used concurrently with destroy_device");
+}

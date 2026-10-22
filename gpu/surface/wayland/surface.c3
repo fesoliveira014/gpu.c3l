@@ -17,14 +17,14 @@ fn gpu::Surface? create_surface(
     DisplayHandle display,
     SurfaceHandle surface,
 ) {
+    defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     void* native_display = (void*)display;
     void* native_surface = (void*)surface;
     if (native_display == null || native_surface == null) {
         return gpu::INVALID_ARGUMENT~;
     }
 
-    gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_runtime(runtime);
-    if (runtime_data == null) return gpu::INVALID_HANDLE~;
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::require_runtime(runtime)!;
     void* backend_surface = gpu::internal::vk::vk_create_wayland_surface(
         runtime_data.state,
         native_display,

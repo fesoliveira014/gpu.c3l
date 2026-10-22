@@ -755,7 +755,7 @@ fn uint stub_sampler_native_destroy_count() => sampler_native_destroys;
 
 fn void destroy_vk_runtime_state(VkRuntimeState* state) {
     if (probe_destroy_visibility) {
-        destroy_visibility_fault = @catch(gpu::enumerate_adapters(&state.runtime));
+        destroy_visibility_fault = @catch(gpu::internal::require_runtime(&state.runtime));
         probe_destroy_visibility = false;
     }
     runtime_destroys++;
