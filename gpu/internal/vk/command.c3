@@ -999,7 +999,12 @@ fn CommandRecord*? begin_commands_locked(
         )) {
         return gpu::RESOURCE_IN_USE~;
     }
-    if (slot.available_count == 0) return gpu::DEVICE_BUSY~;
+    if (slot.available_count == 0) {
+        // Waiting frees a unit only while one is in flight; otherwise every
+        // unit is held by the application.
+        if (slot.in_flight_buffers > 0) return gpu::DEVICE_BUSY~;
+        return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
+    }
     uint buffer_index = slot.available[--slot.available_count];
     CommandScratch* scratch = &slot.scratch[buffer_index];
     scratch.in_use = true;

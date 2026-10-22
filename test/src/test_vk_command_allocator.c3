@@ -840,8 +840,9 @@ fn void command_allocator_capacity_and_destroy_are_non_waiting() @test {
         "an empty live allocator remains a device child");
 
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    assert(@catch(gpu::begin_commands(&allocator)) == gpu::DEVICE_BUSY,
-        "begin reports temporary exhaustion at fixed buffer capacity");
+    assert(@catch(gpu::begin_commands(&allocator))
+        == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
+        "begin reports capacity when the only unit is a live recording");
     assert(@catch(gpu::destroy_command_allocator(&allocator))
         == gpu::RESOURCE_IN_USE,
         "destroy preserves an allocator with a live recording");
@@ -1191,4 +1192,89 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
         && scratch.in_use,
         "the same recording succeeds on immediate end retry");
     gpu::internal::vk::vk_discard_commands(state, record, true)!!;
+}
+
+fn vk::Result drop_allocator_test_submit(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) {
+    (void)queue;
+    (void)submit_count;
+    (void)submits;
+    (void)fence;
+    return vk::Result.SUCCESS;
+}
+
+fn void held_units_exceed_allocator_capacity() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "command_allocator_held_units_test",
+    };
+    gpu::Device device = create_test_device(&runtime_desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocatorDesc desc = { .command_buffer_capacity = 2 };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+        &desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::ExecutableCommandList[2] held;
+    for (uint i = 0; i < 2; i++) {
+        gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+        held[i] = gpu::end_commands(&commands)!!;
+    }
+
+    assert(@catch(gpu::begin_commands(&allocator))
+        == gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED,
+        "every unit held by unsubmitted lists exceeds the allocator capacity");
+    gpu::discard_executable_commands(&held[0])!!;
+    gpu::CommandList next = gpu::begin_commands(&allocator)!!;
+    gpu::discard_commands(&next)!!;
+    gpu::discard_executable_commands(&held[1])!!;
+}
+
+fn void mixed_held_and_in_flight_units_report_busy() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "command_allocator_mixed_units_test",
+    };
+    gpu::Device device = create_test_device(&runtime_desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocatorDesc desc = { .command_buffer_capacity = 2 };
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+        &desc,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::internal::vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+
+    gpu::CommandList first = gpu::begin_commands(&allocator)!!;
+    gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&first)!! };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint point = gpu::internal::vk::vk_submit_with(
+        state,
+        queue,
+        &submit,
+        &drop_allocator_test_submit,
+    )!!;
+    gpu::CommandList second = gpu::begin_commands(&allocator)!!;
+    gpu::ExecutableCommandList held = gpu::end_commands(&second)!!;
+
+    assert(@catch(gpu::begin_commands(&allocator)) == gpu::DEVICE_BUSY,
+        "a unit still in flight makes begin report busy");
+    gpu::internal::vk::QueueCompletionState* completion =
+        gpu::internal::vk::queue_completion_state(state, queue.id)!!;
+    vk::SemaphoreSignalInfo signal = vk::semaphore_signal_info()
+        .set_semaphore(completion.timeline)
+        .set_value(gpu::internal::completion_point_sequence(point));
+    assert(vk::signal_semaphore(state.device, &signal) == vk::Result.SUCCESS,
+        "the host completes the in-flight unit");
+    gpu::CommandList next = gpu::begin_commands(&allocator)!!;
+    gpu::discard_commands(&next)!!;
+    gpu::discard_executable_commands(&held)!!;
 }

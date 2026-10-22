@@ -1796,7 +1796,11 @@ fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipe
    do not infer shader use or wait for completion.
    Preconditions: allocator use follows its threading and queue contract.
    Always checked: live identity, ownership, and fixed-unit availability.
-   Runtime failures: DEVICE_BUSY preserves the allocator; success retains its device.
+   Runtime failures: DEVICE_BUSY when every free unit is still in flight (wait
+   on an older completion point and retry); COMMAND_ALLOCATOR_CAPACITY_EXCEEDED
+   when every unit is held by open recordings or unsubmitted lists (submit or
+   discard one and retry, or use a larger allocator). Both preserve the
+   allocator; success retains its device.
    The allocator and returned token are confined to one recording thread.
    @param allocator : "Live allocator with one available fixed recording unit."
    @return "A recording token, or a recoverable capacity, busy, or device fault." *>
