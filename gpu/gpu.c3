@@ -220,7 +220,7 @@ fn Runtime? create_runtime(RuntimeDesc* desc) {
    Always checked: live identity and dependent counts.
    Runtime failures: RESOURCE_IN_USE preserves the runtime for retry.
    @param runtime : "Owning token to destroy; success replaces it with the invalid value. The zero handle is a no-op."
-   @return "Success, or a recoverable invalid-handle or resource-in-use fault." *>
+   @return "Success, or a recoverable resource-in-use fault." *>
 fn void? destroy_runtime(Runtime* runtime) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (runtime != null && !runtime.is_valid()) return;
@@ -238,7 +238,7 @@ fn void? destroy_runtime(Runtime* runtime) {
 
 <* Return an allocation-free view of the runtime's borrowed adapters.
    @param runtime : "Live runtime whose immutable adapter cache is borrowed."
-   @return "A runtime-owned adapter view, or a recoverable invalid-handle fault." *>
+   @return "A runtime-owned adapter view." *>
 fn AdapterList? enumerate_adapters(Runtime* runtime) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::RuntimeData* data = gpu::internal::require_runtime(runtime)!;
@@ -251,7 +251,7 @@ fn AdapterList? enumerate_adapters(Runtime* runtime) {
 <* Query backend-neutral information for a borrowed adapter.
    Returned strings are read-only and remain valid until runtime destruction.
    @param adapter : "Borrowed adapter token."
-   @return "Cached adapter information, or a recoverable invalid-handle fault." *>
+   @return "Cached adapter information." *>
 fn AdapterInfo? get_adapter_info(Adapter* adapter) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::RuntimeData* data = gpu::internal::require_adapter(adapter)!;
@@ -264,7 +264,7 @@ fn AdapterInfo? get_adapter_info(Adapter* adapter) {
 <* Query backend and driver identity for diagnostics and logging.
    Returned strings are read-only and remain valid until runtime destruction.
    @param adapter : "Borrowed adapter token."
-   @return "Cached diagnostic identity, or a recoverable invalid-handle fault." *>
+   @return "Cached diagnostic identity." *>
 fn AdapterDiagnostics? get_adapter_diagnostics(Adapter* adapter) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::RuntimeData* data = gpu::internal::require_adapter(adapter)!;
@@ -278,7 +278,7 @@ fn AdapterDiagnostics? get_adapter_diagnostics(Adapter* adapter) {
    `unmet_requirement` is a borrowed static label.
    @param adapter : "Borrowed adapter to evaluate."
    @param desc : "Borrowed requirements; null selects the zero-value defaults."
-   @return "The support result, or a recoverable invalid-argument or invalid-handle fault." *>
+   @return "The support result, or a recoverable invalid-argument fault." *>
 fn DeviceSupport? supports_device_desc(Adapter* adapter, DeviceDesc* desc = null) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     DeviceDesc normalized = gpu::internal::normalize_device_desc(desc)!;
@@ -294,7 +294,7 @@ fn DeviceSupport? supports_device_desc(Adapter* adapter, DeviceDesc* desc = null
    The adapter and surface are borrowed for the call and must share a runtime.
    @param adapter : "Borrowed adapter to query."
    @param surface : "Borrowed runtime-owned surface."
-   @return "Presentation support, or a recoverable invalid-handle or backend query fault." *>
+   @return "Presentation support, or a recoverable backend query fault." *>
 fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::RuntimeData* adapter_runtime = gpu::internal::require_adapter(adapter)!;
@@ -312,7 +312,7 @@ fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
 
 <* Snapshot the selected device's immutable capabilities.
    @param device : "Live device to query."
-   @return "The device capabilities, or a recoverable invalid-handle, busy, or device-loss fault." *>
+   @return "The device capabilities, or a recoverable busy or device-loss fault." *>
 fn DeviceCaps? get_device_caps(Device* device) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -367,7 +367,7 @@ fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
    Always checked: device identity, children, pins, closing state, and progress.
    Runtime failures: RESOURCE_IN_USE or DEVICE_BUSY preserves the token.
    @param device : "Owning device token; success replaces it with the invalid value. The zero handle is a no-op."
-   @return "Success, or a recoverable invalid-handle, resource-in-use, busy, or device-loss fault." *>
+   @return "Success, or a recoverable resource-in-use, busy, or device-loss fault." *>
 fn void? destroy_device(Device* device) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (device != null && !device.is_valid()) return;
@@ -463,7 +463,7 @@ fn Queue? get_queue(Device* device, QueueKind kind) {
    A stale, foreign, or malformed token terminates.
    @param device : "Live device expected to own the queue."
    @param queue : "Selected queue token to inspect."
-   @return "Stable queue information, or a recoverable ownership, invalid-handle, or device fault." *>
+   @return "Stable queue information, or a recoverable device fault." *>
 fn QueueInfo? get_queue_info(Device* device, Queue queue) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -550,7 +550,7 @@ fn bool TextureCompatibility.is_valid(self) {
    allocation and frees it with `free_allocation` after GPU use is quiescent.
    @param device : "Live device that will own the allocation."
    @param desc : "Borrowed size, memory-class, access, alignment, and debug-name description."
-   @return "An owning allocation token, or a recoverable invalid-argument, invalid-handle, unsupported-feature, capacity, allocation, busy, device-loss, or backend fault." *>
+   @return "An owning allocation token, or a recoverable invalid-argument, unsupported-feature, capacity, allocation, busy, device-loss, or backend fault." *>
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -568,7 +568,7 @@ fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
    Runtime failures: faults preserve the owning token.
    @param device : "Live device that owns the allocation."
    @param allocation : "Owning allocation token; success replaces it with the invalid value. The zero handle is a no-op."
-   @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
+   @return "Success, or a recoverable in-use, busy, or device fault." *>
 fn void? free_allocation(Device* device, GpuAllocation* allocation) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (allocation == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.ALLOCATION, gpu::internal::HandleCause.NULL_POINTER)~;
@@ -589,7 +589,7 @@ fn void? free_allocation(Device* device, GpuAllocation* allocation) {
 <* Return immutable properties for a live allocation.
    @param device : "Live device that owns the allocation."
    @param allocation : "Allocation token to query."
-   @return "Immutable allocation properties, or a recoverable ownership, invalid-handle, or device fault." *>
+   @return "Immutable allocation properties, or a recoverable device fault." *>
 fn AllocationInfo? get_allocation_info(Device* device, GpuAllocation allocation) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -606,7 +606,7 @@ fn AllocationInfo? get_allocation_info(Device* device, GpuAllocation allocation)
    The returned non-owning span remains valid only while the allocation is live.
    @param device : "Live device that owns the allocation."
    @param allocation : "Allocation whose complete range is borrowed."
-   @return "A non-owning span, or a recoverable invalid-argument, ownership, invalid-handle, busy, or device-loss fault." *>
+   @return "A non-owning span, or a recoverable invalid-argument, busy, or device-loss fault." *>
 fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -623,7 +623,7 @@ fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
    The slice inherits the allocation lifetime; callers synchronize CPU access.
    @param device : "Live device that owns the span."
    @param span : "Non-owning host-visible allocation range."
-   @return "A borrowed mapped byte slice, or a recoverable ownership, mapping, range, or device fault." *>
+   @return "A borrowed mapped byte slice, or a recoverable mapping, range, or device fault." *>
 fn char[]? get_span_mapping(Device* device, GpuSpan span) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -635,7 +635,7 @@ fn char[]? get_span_mapping(Device* device, GpuSpan span) {
    The address inherits the allocation lifetime.
    @param device : "Live device that owns the span."
    @param span : "Non-owning allocation range."
-   @return "The span's GPU address, or a recoverable ownership, range, or device fault." *>
+   @return "The span's GPU address, or a recoverable range or device fault." *>
 fn GpuAddress? get_span_address(Device* device, GpuSpan span) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -683,7 +683,7 @@ fn MappedGpuSpan? allocate_mapped_memory(Device* device, AllocationDesc* desc) {
    no-ops. This call does not submit or wait.
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose CPU writes become visible."
-   @return "Success, or a recoverable ownership, mapping, range, or device fault." *>
+   @return "Success, or a recoverable mapping, range, or device fault." *>
 fn void? flush_mapped_span(Device* device, GpuSpan span) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -701,7 +701,7 @@ fn void? flush_mapped_span(Device* device, GpuSpan span) {
    are no-ops. This call does not wait.
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose GPU writes become visible."
-   @return "Success, or a recoverable ownership, mapping, range, or device fault." *>
+   @return "Success, or a recoverable mapping, range, or device fault." *>
 fn void? invalidate_mapped_span(Device* device, GpuSpan span) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -717,7 +717,7 @@ fn void? invalidate_mapped_span(Device* device, GpuSpan span) {
 <* Snapshot per-heap memory usage, live counts and table capacities.
    Values are advisory under concurrent mutation.
    @param device : "Live device to query."
-   @return "A memory statistics snapshot, or a recoverable invalid-handle, busy, or device-loss fault." *>
+   @return "A memory statistics snapshot, or a recoverable busy or device-loss fault." *>
 fn MemoryStats? get_memory_stats(Device* device) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -730,7 +730,7 @@ fn MemoryStats? get_memory_stats(Device* device) {
    concurrent mutation.
    @param device : "Live device to query."
    @param detailed : "Whether to include detailed allocation information."
-   @return "An owned report string, or a recoverable invalid-handle, allocation, busy, device-loss, or backend fault." *>
+   @return "An owned report string, or a recoverable allocation, busy, device-loss, or backend fault." *>
 fn String? build_memory_report(Device* device, bool detailed) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -929,7 +929,7 @@ fn DedicatedTexture? create_dedicated_texture(Device* device, TextureDesc* desc,
    Runtime failures: faults preserve the handle; placed storage stays caller-owned.
    @param device : "Live device that owns the texture."
    @param texture : "Owning texture handle to destroy. The zero handle is a no-op."
-   @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
+   @return "Success, or a recoverable in-use, busy, or device fault." *>
 fn void? destroy_texture(Device* device, TextureHandle texture) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (texture == (TextureHandle){}) return;
@@ -946,7 +946,7 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
    @param device : "Live device that owns the texture."
    @param texture : "Texture whose subresources are exposed."
    @param desc : "Borrowed view description; null selects the full default view."
-   @return "An owning view token, or a recoverable validation, ownership, capacity, allocation, or device fault." *>
+   @return "An owning view token, or a recoverable validation, capacity, allocation, or device fault." *>
 fn TextureView? create_texture_view(Device* device, TextureHandle texture, TextureViewDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -964,7 +964,7 @@ fn TextureView? create_texture_view(Device* device, TextureHandle texture, Textu
    @param device : "Live device that owns every input texture."
    @param descs : "Borrowed batch of texture and view descriptions."
    @param out_views : "Caller-owned output slice with exactly the input length."
-   @return "Success, or a recoverable validation, ownership, capacity, allocation, or device fault." *>
+   @return "Success, or a recoverable validation, capacity, allocation, or device fault." *>
 fn void? create_texture_views(Device* device, TextureViewCreateDesc[] descs, TextureView[] out_views) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -996,7 +996,7 @@ fn void? create_texture_views(Device* device, TextureViewCreateDesc[] descs, Tex
    Runtime failures: faults preserve the view.
    @param device : "Live device that owns the view."
    @param view : "Owning view token to destroy. The zero handle is a no-op."
-   @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
+   @return "Success, or a recoverable in-use, busy, or device fault." *>
 fn void? destroy_texture_view(Device* device, TextureView view) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (view == (TextureView){}) return;
@@ -1043,7 +1043,7 @@ fn void? release_texture_indices(Device* device, TextureIndexRange range) {
    @param slot : "A slot inside a live reservation."
    @param texture : "Texture whose subresources are exposed."
    @param desc : "Borrowed view description; null selects the full default view."
-   @return "An owning view token, or a recoverable invalid-argument, in-use, ownership, allocation, or device fault." *>
+   @return "An owning view token, or a recoverable invalid-argument, in-use, allocation, or device fault." *>
 fn TextureView? create_texture_view_at(Device* device, TextureIndex slot, TextureHandle texture, TextureViewDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -1066,7 +1066,7 @@ fn TextureView? create_texture_view_at(Device* device, TextureIndex slot, Textur
    @param view : "Live view token, rewritten on success."
    @param texture : "Texture the slot will expose."
    @param desc : "Borrowed view description; null selects the full default view."
-   @return "Success, or a recoverable invalid-handle, ownership, capacity, allocation, or device fault." *>
+   @return "Success, or a recoverable capacity, allocation, or device fault." *>
 fn void? update_texture_view(Device* device, TextureView* view, TextureHandle texture, TextureViewDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (view == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.TEXTURE_VIEW, gpu::internal::HandleCause.NULL_POINTER)~;
@@ -1259,7 +1259,7 @@ fn DedicatedAccelerationStructure? create_dedicated_acceleration_structure(
    Live views make destruction retryable; GPU lifetime is caller-owned.
    @param device : "Live device that owns the structure."
    @param acceleration_structure : "Owning structure handle to destroy. The zero handle is a no-op."
-   @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
+   @return "Success, or a recoverable in-use, busy, or device fault." *>
 fn void? destroy_acceleration_structure(Device* device, AccelerationStructureHandle acceleration_structure) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (acceleration_structure == ACCELERATION_STRUCTURE_HANDLE_INVALID) return;
@@ -1282,7 +1282,7 @@ fn void? destroy_acceleration_structure(Device* device, AccelerationStructureHan
    structure. Top-level structures are not address inputs to instances.
    @param device : "Live device that owns the BLAS."
    @param acceleration_structure : "Live bottom-level structure handle."
-   @return "A nonzero BLAS address, or a recoverable argument, ownership, handle, or device fault." *>
+   @return "A nonzero BLAS address, or a recoverable argument, handle, or device fault." *>
 fn GpuAddress? get_acceleration_structure_address(Device* device, AccelerationStructureHandle acceleration_structure) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation =
@@ -1302,7 +1302,7 @@ fn GpuAddress? get_acceleration_structure_address(Device* device, AccelerationSt
 <* Validate a bottom-level structure and pack one exact 64-byte TLAS instance.
    @param device : "Live device that owns the referenced BLAS."
    @param desc : "Borrowed transform, BLAS, mask, index, and flag values."
-   @return "A packed instance, or a recoverable argument, ownership, handle, or device fault." *>
+   @return "A packed instance, or a recoverable argument, handle, or device fault." *>
 fn AccelerationStructureInstance? make_acceleration_structure_instance(
     Device* device,
     AccelerationStructureInstanceDesc* desc,
@@ -1331,7 +1331,7 @@ fn AccelerationStructureInstance? make_acceleration_structure_instance(
 <* Publish a live TLAS in the shader-visible acceleration-structure heap.
    @param device : "Live ray-query-enabled device that owns the TLAS."
    @param acceleration_structure : "Live top-level structure to publish."
-   @return "An owning view containing its raw shader index, or a recoverable validation, ownership, capacity, allocation, or device fault." *>
+   @return "An owning view containing its raw shader index, or a recoverable validation, capacity, allocation, or device fault." *>
 fn AccelerationStructureView? create_acceleration_structure_view(
     Device* device,
     AccelerationStructureHandle acceleration_structure,
@@ -1357,7 +1357,7 @@ fn AccelerationStructureView? create_acceleration_structure_view(
 <* Retire one shader-visible TLAS view after caller-managed GPU completion.
    @param device : "Live device that owns the view."
    @param view : "Owning acceleration-structure view to destroy. The zero handle is a no-op."
-   @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
+   @return "Success, or a recoverable in-use, busy, or device fault." *>
 fn void? destroy_acceleration_structure_view(Device* device, AccelerationStructureView view) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (view == ACCELERATION_STRUCTURE_VIEW_INVALID) return;
@@ -1531,7 +1531,7 @@ fn PipelineHandle? create_ray_tracing_pipeline(Device* device, RayTracingPipelin
    for a live ray-tracing pipeline. The result contains no borrowed storage.
    @param device : "Live device that owns pipeline."
    @param pipeline : "Live ray-tracing pipeline handle."
-   @return "The pipeline group ranges, or a recoverable ownership, kind, or device fault." *>
+   @return "The pipeline group ranges, or a recoverable kind or device fault." *>
 fn RayTracingPipelineInfo? get_ray_tracing_pipeline_info(Device* device, PipelineHandle pipeline) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation =
@@ -1551,7 +1551,7 @@ fn RayTracingPipelineInfo? get_ray_tracing_pipeline_info(Device* device, Pipelin
    @param first_group : "First group in the deterministic pipeline order."
    @param group_count : "Number of contiguous handles to copy."
    @param out : "Caller-owned exact-size output bytes."
-   @return "Success, or a recoverable ownership, kind, range, output-size, or device fault." *>
+   @return "Success, or a recoverable kind, range, output-size, or device fault." *>
 fn void? get_ray_tracing_shader_group_handles(
     Device* device,
     PipelineHandle pipeline,
@@ -1578,7 +1578,7 @@ fn void? get_ray_tracing_shader_group_handles(
    @param pipeline : "Live ray-tracing pipeline handle."
    @param group : "Group index in the deterministic pipeline order."
    @param group_shader : "Shader role present in the selected group."
-   @return "The native byte requirement, or a recoverable ownership, kind, enum, range, role, or device fault." *>
+   @return "The native byte requirement, or a recoverable kind, enum, range, role, or device fault." *>
 fn ulong? get_ray_tracing_shader_group_stack_size(
     Device* device,
     PipelineHandle pipeline,
@@ -1603,7 +1603,7 @@ fn ulong? get_ray_tracing_shader_group_stack_size(
    Runtime failures: faults preserve this alias; shared backend state is refcounted.
    @param device : "Live device that owns the pipeline."
    @param pipeline : "Owning pipeline handle to release. The zero handle is a no-op."
-   @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
+   @return "Success, or a recoverable in-use, busy, or device fault." *>
 fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (pipeline == (PipelineHandle){}) return;
@@ -1618,7 +1618,7 @@ fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
    are built — re-query before each export. Must not be called concurrently
    with pipeline creation.
    @param device : "Live device whose cache is queried."
-   @return "The current cache byte size, or a recoverable invalid-handle, busy, device-loss, or backend fault." *>
+   @return "The current cache byte size, or a recoverable busy, device-loss, or backend fault." *>
 fn usz? get_pipeline_cache_size(Device* device) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -1633,7 +1633,7 @@ fn usz? get_pipeline_cache_size(Device* device) {
    creation.
    @param device : "Live device whose cache is exported."
    @param out : "Caller-owned output storage sized from a fresh cache-size query."
-   @return "Bytes written, or a recoverable invalid-argument, invalid-handle, busy, device-loss, or backend fault." *>
+   @return "Bytes written, or a recoverable invalid-argument, busy, device-loss, or backend fault." *>
 fn usz? get_pipeline_cache_data(Device* device, char[] out) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -1711,7 +1711,7 @@ fn CommandAllocator? create_command_allocator(Device* device, Queue queue, Comma
    Always checked: identity, ownership, and allocator lifecycle.
    Runtime failures: RESOURCE_IN_USE or DEVICE_BUSY preserves the token.
    @param allocator : "Owning allocator; success replaces it with the zero value. The zero handle is a no-op."
-   @return "Success, or a recoverable invalid-handle, resource-in-use, busy, ownership, or device fault." *>
+   @return "Success, or a recoverable resource-in-use, busy, or device fault." *>
 fn void? destroy_command_allocator(CommandAllocator* allocator) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (allocator == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.NULL_POINTER)~;
@@ -1736,7 +1736,7 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
    The caller externally synchronizes the allocator.
    @param allocator : "Live quiescent allocator that owns the reservation."
    @param desc : "Borrowed pipeline, work-kind, command-count, and concurrency description."
-   @return "Success, or a recoverable validation, ownership, capacity, allocation, busy, or device fault." *>
+   @return "Success, or a recoverable validation, capacity, allocation, busy, or device fault." *>
 fn void? reserve_generated_work(CommandAllocator* allocator, GeneratedWorkReservationDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (allocator == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.NULL_POINTER)~;
@@ -1769,7 +1769,7 @@ fn void? reserve_generated_work(CommandAllocator* allocator, GeneratedWorkReserv
    @param allocator : "Live quiescent allocator that owns the reservation."
    @param pipeline : "Exact pipeline named by the reservation."
    @param kind : "Generated-work record kind named by the reservation."
-   @return "Success, or a recoverable validation, ownership, invalid-handle, busy, or device fault." *>
+   @return "Success, or a recoverable validation, busy, or device fault." *>
 fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipeline, GeneratedWorkKind kind) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (allocator == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.NULL_POINTER)~;
@@ -1799,7 +1799,7 @@ fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipe
    Runtime failures: DEVICE_BUSY preserves the allocator; success retains its device.
    The allocator and returned token are confined to one recording thread.
    @param allocator : "Live allocator with one available fixed recording unit."
-   @return "A recording token, or a recoverable invalid-handle, ownership, capacity, busy, or device fault." *>
+   @return "A recording token, or a recoverable capacity, busy, or device fault." *>
 fn CommandList? begin_commands(CommandAllocator* allocator) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (allocator == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_ALLOCATOR, gpu::internal::HandleCause.NULL_POINTER)~;
@@ -1842,7 +1842,7 @@ fn ExecutableCommandList? end_commands(CommandList* commands) {
    Always checked: token identity and authoritative recording phase.
    Runtime failures: failure preserves the token.
    @param commands : "Recording token consumed on success. The zero handle is a no-op."
-   @return "Success, or a recoverable command-state or ownership fault." *>
+   @return "Success, or a recoverable command-state fault." *>
 fn void? discard_commands(CommandList* commands) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (commands == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_LIST, gpu::internal::HandleCause.NULL_POINTER)~;
@@ -1869,7 +1869,7 @@ fn void? discard_commands(CommandList* commands) {
    Always checked: token identity and authoritative executable phase.
    Runtime failures: failure preserves the token.
    @param commands : "Executable token consumed on success. The zero handle is a no-op."
-   @return "Success, or a recoverable command-state or ownership fault." *>
+   @return "Success, or a recoverable command-state fault." *>
 fn void? discard_executable_commands(ExecutableCommandList* commands) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (commands == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.EXECUTABLE_COMMAND_LIST, gpu::internal::HandleCause.NULL_POINTER)~;
@@ -1913,7 +1913,7 @@ fn void cmd_end_label(CommandList* commands) {
    Always checked: token phase, required pointer, identity, bounds, and safe lowering.
    @param commands : "Live recording token."
    @param desc : "Borrowed exact source and destination ranges."
-   @return "Success, or a recoverable command, validation, ownership, bounds, or device fault." *>
+   @return "Success, or a recoverable command, validation, bounds, or device fault." *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -1927,7 +1927,7 @@ fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
    @param commands : "Live recording token."
    @param dst : "Destination GPU span."
    @param value : "Repeated 32-bit fill pattern."
-   @return "Success, or a recoverable command, validation, ownership, bounds, alignment, or device fault." *>
+   @return "Success, or a recoverable command, validation, bounds, alignment, or device fault." *>
 fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -1941,7 +1941,7 @@ fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
    dimension/subresource/extent bounds, byte-size overflow, and safe lowering.
    @param commands : "Live recording token."
    @param desc : "Borrowed source-span and destination-texture region."
-   @return "Success, or a recoverable command, validation, ownership, bounds, alignment, support, or device fault." *>
+   @return "Success, or a recoverable command, validation, bounds, alignment, support, or device fault." *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -1956,7 +1956,7 @@ fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc
    dimension/subresource/extent bounds, byte-size overflow, and safe lowering.
    @param commands : "Live recording token."
    @param desc : "Borrowed source-texture and destination-span region."
-   @return "Success, or a recoverable command, validation, ownership, bounds, alignment, support, or device fault." *>
+   @return "Success, or a recoverable command, validation, bounds, alignment, support, or device fault." *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -1973,7 +1973,7 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
    lowering.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed source and destination region."
-   @return "Success, or a recoverable command, validation, ownership, bounds, alignment, support, or device fault." *>
+   @return "Success, or a recoverable command, validation, bounds, alignment, support, or device fault." *>
 fn void? cmd_copy_texture(CommandList* commands, TextureCopyDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -1985,7 +1985,7 @@ fn void? cmd_copy_texture(CommandList* commands, TextureCopyDesc* desc) {
    spans. The command inserts no barrier.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, dynamic inputs, and build scratch."
-   @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
+   @return "Success, or a recoverable command, validation, range, capacity, support, or device fault." *>
 fn void? cmd_build_acceleration_structure(CommandList* commands, AccelerationStructureBuildDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record =
@@ -1999,7 +1999,7 @@ fn void? cmd_build_acceleration_structure(CommandList* commands, AccelerationStr
    build before execution; recording needs no host wait and inserts no barrier.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, matching dynamic inputs, and update scratch."
-   @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
+   @return "Success, or a recoverable command, validation, range, capacity, support, or device fault." *>
 fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationStructureBuildDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record =
@@ -2024,7 +2024,7 @@ fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationSt
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, maximum-count inputs, and build scratch."
    @param ranges : "Caller-owned GPU-authored fixed-stride range records."
-   @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
+   @return "Success, or a recoverable command, validation, range, capacity, support, or device fault." *>
 fn void? cmd_build_acceleration_structure_indirect(
     CommandList* commands,
     AccelerationStructureBuildDesc* desc,
@@ -2053,7 +2053,7 @@ fn void? cmd_build_acceleration_structure_indirect(
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, maximum-count inputs, and update scratch."
    @param ranges : "Caller-owned GPU-authored fixed-stride range records."
-   @return "Success, or a recoverable command, validation, ownership, range, capacity, support, or device fault." *>
+   @return "Success, or a recoverable command, validation, range, capacity, support, or device fault." *>
 fn void? cmd_update_acceleration_structure_indirect(
     CommandList* commands,
     AccelerationStructureBuildDesc* desc,
@@ -2075,7 +2075,7 @@ fn void? cmd_update_acceleration_structure_indirect(
    @param commands : "Live recording token outside a render pass."
    @param source : "Source constructed before clone execution and kept live through completion."
    @param destination : "Compatible destination with sufficient storage, kept live through completion."
-   @return "Success, or a recoverable command, validation, ownership, capacity, support, or device fault." *>
+   @return "Success, or a recoverable command, validation, capacity, support, or device fault." *>
 fn void? cmd_clone_acceleration_structure(
     CommandList* commands,
     AccelerationStructureHandle source,
@@ -2097,7 +2097,7 @@ fn void? cmd_clone_acceleration_structure(
    binding prerequisites, and a safe native snapshot.
    @param commands : "Live recording token."
    @param pipeline : "Compute, graphics, or ray-tracing pipeline to bind."
-   @return "Success, or a recoverable command, ownership, compatibility, invalid-handle, or device fault." *>
+   @return "Success, or a recoverable command, compatibility, or device fault." *>
 fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2139,7 +2139,7 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups, char
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param args : "Non-owning span containing one GPU-written dispatch record."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, ownership, bounds, pipeline, or device fault." *>
+   @return "Success, or a recoverable command, bounds, pipeline, or device fault." *>
 fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2159,7 +2159,7 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
    @param records : "Non-owning GPU-written generated-dispatch record range."
    @param count_span : "Non-owning span containing the GPU-written dispatch count."
    @param max_dispatch_count : "Maximum generated records to execute."
-   @return "Success, or a recoverable command, ownership, bounds, support, scratch-capacity, or device fault." *>
+   @return "Success, or a recoverable command, bounds, support, scratch-capacity, or device fault." *>
 fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2180,7 +2180,7 @@ fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan 
    @param shader_binding_table : "Borrowed caller-owned SBT regions."
    @param dimensions : "Nonzero direct trace width, height, and depth within the selected device limits."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, pipeline, SBT, range, limit, ownership, or device fault." *>
+   @return "Success, or a recoverable command, pipeline, SBT, range, limit, or device fault." *>
 fn void? cmd_trace_rays(
     CommandList* commands,
     GpuAddress root,
@@ -2209,7 +2209,7 @@ fn void? cmd_trace_rays(
    @param shader_binding_table : "Borrowed caller-owned direct shader binding table regions."
    @param args : "Caller-owned span beginning with one GPU-written TraceRaysIndirectCommand, valid through completion."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, ownership, range, pipeline, support, or device fault." *>
+   @return "Success, or a recoverable command, range, pipeline, support, or device fault." *>
 fn void? cmd_trace_rays_indirect(
     CommandList* commands,
     GpuAddress root,
@@ -2238,7 +2238,7 @@ fn void? cmd_trace_rays_indirect(
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param args : "Caller-owned span beginning with one GPU-written TraceRaysIndirectCommand2; the packet and every shader binding table allocation it addresses must remain valid through completion."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, ownership, range, pipeline, support, or device fault." *>
+   @return "Success, or a recoverable command, range, pipeline, support, or device fault." *>
 fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record =
@@ -2266,7 +2266,7 @@ fn void? cmd_set_ray_tracing_pipeline_stack_size(CommandList* commands, ulong pi
    before recording. The returned handle retains its texture.
    @param device : "Live device that owns the texture."
    @param desc : "Borrowed texture subresource description."
-   @return "An owning attachment-view handle, or a recoverable validation, ownership, capacity, allocation, or device fault." *>
+   @return "An owning attachment-view handle, or a recoverable validation, capacity, allocation, or device fault." *>
 fn AttachmentViewHandle? create_attachment_view(Device* device, AttachmentViewDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -2291,7 +2291,7 @@ fn AttachmentViewHandle? create_attachment_view(Device* device, AttachmentViewDe
    Runtime failures: faults preserve the view.
    @param device : "Live device that owns the attachment view."
    @param view : "Owning attachment-view handle to destroy. The zero handle is a no-op."
-   @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, or device fault." *>
+   @return "Success, or a recoverable in-use, busy, or device fault." *>
 fn void? destroy_attachment_view(Device* device, AttachmentViewHandle view) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (view == (AttachmentViewHandle){}) return;
@@ -2357,7 +2357,7 @@ fn GraphicsState? render_geometry_state(uint width, uint height) {
    exactly one dimension, identities, and safe lowering.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed attachment and render-area description copied into the command stream; a zero extent selects the first attachment's extent."
-   @return "Success, or a recoverable command, validation, ownership, compatibility, or device fault." *>
+   @return "Success, or a recoverable command, validation, compatibility, or device fault." *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2446,7 +2446,7 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    @param instance_count : "Instances to draw."
    @param index_type : "Index element width; defaults to U32."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, ownership, bounds, pipeline, state, or device fault." *>
+   @return "Success, or a recoverable command, bounds, pipeline, state, or device fault." *>
 fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2492,7 +2492,7 @@ fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAdd
    @param args : "Non-owning record array kept alive by the caller through completion."
    @param draw_count : "Number of records to execute."
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
-   @return "Success, or a recoverable command, ownership, bounds, support, pipeline, or device fault." *>
+   @return "Success, or a recoverable command, bounds, support, pipeline, or device fault." *>
 fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2515,7 +2515,7 @@ fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_roo
    @param count_span : "Non-owning span holding the GPU-written draw count."
    @param max_draw_count : "Maximum records the GPU count may select."
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
-   @return "Success, or a recoverable command, ownership, bounds, support, pipeline, or device fault." *>
+   @return "Success, or a recoverable command, bounds, support, pipeline, or device fault." *>
 fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, char[] inline_root = {}) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2541,7 +2541,7 @@ fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress me
    @param args : "Non-owning array of indirect draw records kept alive by the caller through completion."
    @param draw_count : "Number of indirect records to execute."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, ownership, bounds, pipeline, state, or device fault." *>
+   @return "Success, or a recoverable command, bounds, pipeline, state, or device fault." *>
 fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2568,7 +2568,7 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, ownership, bounds, pipeline, state, or device fault." *>
+   @return "Success, or a recoverable command, bounds, pipeline, state, or device fault." *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2599,7 +2599,7 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, ownership, bounds, support, pipeline, state, or device fault." *>
+   @return "Success, or a recoverable command, bounds, support, pipeline, state, or device fault." *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2628,7 +2628,7 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    @param records : "Non-owning GPU-written generated-draw record range."
    @param count_span : "Non-owning span containing the GPU-written draw count."
    @param max_draw_count : "Maximum generated records to execute."
-   @return "Success, or a recoverable command, ownership, bounds, support, scratch-capacity, or device fault." *>
+   @return "Success, or a recoverable command, bounds, support, scratch-capacity, or device fault." *>
 fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2654,7 +2654,7 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
    @param max_draw_count : "Maximum generated records to execute."
    @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
-   @return "Success, or a recoverable command, ownership, bounds, support, scratch-capacity, or device fault." *>
+   @return "Success, or a recoverable command, bounds, support, scratch-capacity, or device fault." *>
 fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2767,7 +2767,7 @@ fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
    Always checked: token phase, required pointer, texture identity, range, and safe lowering.
    @param commands : "Live recording token."
    @param barrier : "Borrowed texture, subresource range, and semantic states."
-   @return "Success, or a recoverable command, validation, ownership, range, support, or device fault." *>
+   @return "Success, or a recoverable command, validation, range, support, or device fault." *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
@@ -2798,7 +2798,7 @@ fn TimestampPoolHandle? create_timestamp_pool(Device* device, TimestampPoolDesc*
 <* Destroy a pool after all recorded and submitted uses have retired.
    @param device : "Live device that owns the pool."
    @param pool : "Owning pool handle to destroy. The zero handle is a no-op."
-   @return "Success, or a recoverable ownership, in-use, invalid-handle, or device fault." *>
+   @return "Success, or a recoverable in-use or device fault." *>
 fn void? destroy_timestamp_pool(Device* device, TimestampPoolHandle pool) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (pool == (TimestampPoolHandle){}) return;
@@ -2819,7 +2819,7 @@ fn void? destroy_timestamp_pool(Device* device, TimestampPoolHandle pool) {
    @param pool : "Pool whose slots will be reset."
    @param first : "First slot in the reset range."
    @param count : "Number of slots to reset."
-   @return "Success, or a recoverable command, ownership, range, or device fault." *>
+   @return "Success, or a recoverable command, range, or device fault." *>
 fn void? cmd_reset_timestamps(
     CommandList* commands,
     TimestampPoolHandle pool,
@@ -2842,7 +2842,7 @@ fn void? cmd_reset_timestamps(
    @param pool : "Pool that receives the timestamp."
    @param index : "Destination slot index."
    @param stage : "Single executable stage to timestamp."
-   @return "Success, or a recoverable command, ownership, range, stage, or device fault." *>
+   @return "Success, or a recoverable command, range, stage, or device fault." *>
 fn void? cmd_write_timestamp(
     CommandList* commands,
     TimestampPoolHandle pool,
@@ -2868,7 +2868,7 @@ fn void? cmd_write_timestamp(
    @param first : "First slot to resolve."
    @param count : "Number of slots to resolve."
    @param dst : "Destination GPU span, large and aligned enough for packed ulong values."
-   @return "Success, or a recoverable command, ownership, range, alignment, or device fault." *>
+   @return "Success, or a recoverable command, range, alignment, or device fault." *>
 fn void? cmd_resolve_timestamps(
     CommandList* commands,
     TimestampPoolHandle pool,
@@ -2897,7 +2897,7 @@ fn void? cmd_resolve_timestamps(
    @param first : "First slot to read."
    @param count : "Number of slots to read."
    @param out : "Caller-owned output slice with at least count elements."
-   @return "Success, or a recoverable invalid-argument, ownership, range, busy, invalid-handle, or device fault." *>
+   @return "Success, or a recoverable invalid-argument, range, busy, or device fault." *>
 fn void? read_timestamps(
     Device* device,
     TimestampPoolHandle pool,
@@ -2981,7 +2981,7 @@ fn double? timestamp_delta_ns(
    same native queue, including aliased roles.
    @param queue : "Exact selected queue that executes the submission."
    @param desc : "Borrowed waits and mutable executable-token batch; success clears command tokens and invalidates valid readiness."
-   @return "A reusable completion point, or a recoverable validation, ownership, capacity, busy, device-loss, or backend fault." *>
+   @return "A reusable completion point, or a recoverable validation, capacity, busy, device-loss, or backend fault." *>
 fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     Device device = queue.device;
@@ -3031,7 +3031,7 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
    Runtime failures: device loss or backend failure preserves the point. This
    operation never waits and does not consume the point.
    @param point : "Reusable queue completion point."
-   @return "Whether completion has occurred, or a recoverable ownership, invalid-handle, device-loss, or backend fault." *>
+   @return "Whether completion has occurred, or a recoverable device-loss or backend fault." *>
 fn bool? poll_completion(CompletionPoint point) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     Device device = point.device;
@@ -3052,7 +3052,7 @@ fn bool? poll_completion(CompletionPoint point) {
    The wait does not consume the point.
    @param point : "Reusable queue completion point."
    @param timeout_ns : "Maximum host wait in nanoseconds; TIMEOUT_INFINITE waits without a deadline."
-   @return "Success, or a recoverable timeout, ownership, invalid-handle, device-loss, or backend fault." *>
+   @return "Success, or a recoverable timeout, device-loss, or backend fault." *>
 fn void? wait_completion(CompletionPoint point, ulong timeout_ns = TIMEOUT_INFINITE) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     Device device = point.device;
@@ -3084,7 +3084,7 @@ fn bool SwapchainReadiness.equals(self, SwapchainReadiness other) @operator(==) 
    Always checked: live identity, runtime ownership, and dependent count.
    Runtime failures: RESOURCE_IN_USE preserves the surface for retry.
    @param surface : "Owning token to destroy; success replaces it with the invalid value. The zero handle is a no-op."
-   @return "Success, or a recoverable invalid-handle or resource-in-use fault." *>
+   @return "Success, or a recoverable resource-in-use fault." *>
 fn void? destroy_surface(Surface* surface) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (surface != null && !surface.is_valid()) return;
@@ -3111,7 +3111,7 @@ fn void? destroy_surface(Surface* surface) {
    @param device : "Live presentation-enabled device."
    @param surface : "Borrowed matching runtime-owned surface."
    @param desc : "Borrowed requested extent, format, image count, usage, and present mode."
-   @return "An owning swapchain handle, or a recoverable validation, ownership, support, capacity, allocation, surface, or device fault." *>
+   @return "An owning swapchain handle, or a recoverable validation, support, capacity, allocation, surface, or device fault." *>
 fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, SwapchainDesc* desc) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (surface == null) {
@@ -3143,7 +3143,7 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
    swapchain. Dormant swapchains return the dormant sentinel snapshot.
    @param device : "Live device that owns the swapchain."
    @param swapchain : "Swapchain to query."
-   @return "The current immutable configuration snapshot, or a recoverable ownership, invalid-handle, or device fault." *>
+   @return "The current immutable configuration snapshot, or a recoverable device fault." *>
 fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -3158,7 +3158,7 @@ fn SwapchainInfo? get_swapchain_info(Device* device, SwapchainHandle swapchain) 
    modes fall back to FIFO at creation; query this to pick deliberately.
    @param device : "Live device that owns the swapchain."
    @param swapchain : "Swapchain whose surface modes are queried."
-   @return "Supported present modes, or a recoverable ownership, invalid-handle, surface, or device fault." *>
+   @return "Supported present modes, or a recoverable surface or device fault." *>
 fn PresentModeSupport? get_present_mode_support(Device* device, SwapchainHandle swapchain) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -3179,7 +3179,7 @@ fn PresentModeSupport? get_present_mode_support(Device* device, SwapchainHandle 
    @param swapchain : "Quiescent swapchain to recreate."
    @param width : "Requested surface width."
    @param height : "Requested surface height."
-   @return "Success, including a dormant zero extent, or a recoverable ownership, in-use, surface, allocation, or device fault." *>
+   @return "Success, including a dormant zero extent, or a recoverable in-use, surface, allocation, or device fault." *>
 fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -3200,7 +3200,7 @@ fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width,
    @param device : "Live device that owns the swapchain."
    @param swapchain : "Externally synchronized swapchain to acquire from."
    @param timeout_ns : "Maximum host wait in nanoseconds; zero is nonblocking."
-   @return "A one-shot acquired image, or a recoverable timeout, ownership, lifecycle, surface, or device fault." *>
+   @return "A one-shot acquired image, or a recoverable timeout, lifecycle, surface, or device fault." *>
 fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain, ulong timeout_ns = 0) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -3222,7 +3222,7 @@ fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain, 
    @param device : "Live device that owns the acquired image."
    @param image : "Externally synchronized acquired image; consumed results replace it with the zero value."
    @param render_completion : "Completion point returned by the readiness-consuming render submission."
-   @return "Success, or a recoverable timeout, ownership, lifecycle, surface, device-loss, or backend fault." *>
+   @return "Success, or a recoverable timeout, lifecycle, surface, device-loss, or backend fault." *>
 fn void? present(Device* device, AcquiredImage* image, CompletionPoint render_completion) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (image == null) return INVALID_ARGUMENT~;
@@ -3253,7 +3253,7 @@ fn void? present(Device* device, AcquiredImage* image, CompletionPoint render_co
    @param device : "Live device that owns the swapchain."
    @param swapchain : "Borrowed swapchain handle whose presentations are waited."
    @param timeout_ns : "Maximum host wait in nanoseconds; TIMEOUT_INFINITE waits without a deadline and zero is nonblocking."
-   @return "Success, or a recoverable timeout, ownership, invalid-handle, busy, allocation, device-loss, or backend fault." *>
+   @return "Success, or a recoverable timeout, busy, allocation, device-loss, or backend fault." *>
 fn void? wait_swapchain_presentations(Device* device, SwapchainHandle swapchain, ulong timeout_ns = TIMEOUT_INFINITE) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
@@ -3271,7 +3271,7 @@ fn void? wait_swapchain_presentations(Device* device, SwapchainHandle swapchain,
    Runtime failures: detected use faults without consuming the handle.
    @param device : "Live device that owns the swapchain."
    @param swapchain : "Owning swapchain handle to destroy. The zero handle is a no-op."
-   @return "Success, or a recoverable ownership, in-use, invalid-handle, busy, surface, or device fault." *>
+   @return "Success, or a recoverable in-use, busy, surface, or device fault." *>
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (swapchain == (SwapchainHandle){}) return;

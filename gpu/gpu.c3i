@@ -199,9 +199,6 @@ faultdef
     // Always checked for required host-safety, safe-lowering, and cold-path
     // configuration causes.
     INVALID_ARGUMENT,
-    // Always checked: a bounded public identity is zero, stale, consumed,
-    // foreign, malformed, or was never live.
-    INVALID_HANDLE,
     // Always checked lifecycle/safe-snapshot cause, or runtime backend result:
     // a transition is incompatible with authoritative state, command execution
     // lacks a usable pipeline snapshot, or native surface ownership conflicts.

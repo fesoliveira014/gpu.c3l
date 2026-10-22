@@ -11,7 +11,7 @@ import gpu::internal::vk;
    @param runtime : "Live runtime that will own the surface."
    @param display : "Borrowed non-null native display handle."
    @param surface : "Borrowed non-null native surface handle."
-   @return "A runtime-owned surface token, or a recoverable invalid-argument, invalid-handle, capacity, allocation, or platform fault." *>
+   @return "A runtime-owned surface token, or a recoverable invalid-argument, capacity, allocation, or platform fault." *>
 fn gpu::Surface? create_surface(
     gpu::Runtime* runtime,
     DisplayHandle display,
