@@ -76,9 +76,9 @@ fn void explicit_device_loss_marks_only_its_owner() @test {
         )) == gpu::BACKEND_ERROR,
         "an unknown native result remains a backend error"
     );
-    assert(!gpu::get_device_caps(&first)!!.presentation_enabled,
+    assert(!gpu::get_device_caps(&first).presentation_enabled,
         "an unknown result leaves its owner usable");
-    assert(!gpu::get_device_caps(&second)!!.presentation_enabled,
+    assert(!gpu::get_device_caps(&second).presentation_enabled,
         "an unknown result leaves a peer usable");
 
     assert(
@@ -90,10 +90,10 @@ fn void explicit_device_loss_marks_only_its_owner() @test {
         "native loss reaching a fault route is a backend error"
     );
     assert(gpu::is_device_lost(&first), "the reporting device is lost");
-    assert(!gpu::get_device_caps(&first)!!.presentation_enabled,
+    assert(!gpu::get_device_caps(&first).presentation_enabled,
         "a lost device still answers queries");
     assert(!gpu::is_device_lost(&second), "a peer device is not lost");
-    assert(!gpu::get_device_caps(&second)!!.presentation_enabled,
+    assert(!gpu::get_device_caps(&second).presentation_enabled,
         "a peer device remains usable");
 
     gpu::destroy_device(&first)!!;

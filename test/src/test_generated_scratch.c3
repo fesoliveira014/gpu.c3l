@@ -48,7 +48,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
     defer destroy_test_device(&device)!!;
-    if (!gpu::get_device_caps(&device)!!.generated_work) {
+    if (!gpu::get_device_caps(&device).generated_work) {
         io::printfn(
             "generated-scratch-reservation: NOT EXERCISED (generated work unavailable)",
         );
@@ -187,7 +187,7 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
     defer destroy_test_device(&device)!!;
-    if (!gpu::get_device_caps(&device)!!.generated_work) {
+    if (!gpu::get_device_caps(&device).generated_work) {
         io::printfn(
             "generated-scratch-ownership: NOT EXERCISED (generated work unavailable)",
         );
@@ -368,7 +368,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
     defer destroy_test_device(&device)!!;
-    if (!gpu::get_device_caps(&device)!!.generated_work) return;
+    if (!gpu::get_device_caps(&device).generated_work) return;
 
     gpu::ShaderDesc shader_desc = {
         .spirv       = GENERATED_SCRATCH_SPIRV[..],

@@ -374,7 +374,7 @@ fn void three_dimensional_texture_lifecycle_and_views() @test {
     )) == gpu::INVALID_ARGUMENT,
         "three-dimensional views reject multiple layers");
 
-    gpu::destroy_texture_view(&device, view)!!;
+    gpu::destroy_texture_view(&device, view);
     gpu::destroy_texture(&device, texture)!!;
 
     gpu::TextureDesc transfer_only = desc;
@@ -730,7 +730,7 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
 fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
-    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
+    if (gpu::get_device_caps(&device).unified_layouts) return;
     gpu::TextureDesc desc = {
         .access       = { .graphics },
         .width        = 16,
@@ -811,7 +811,7 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
 fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
-    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
+    if (gpu::get_device_caps(&device).unified_layouts) return;
     gpu::TextureDesc desc = {
         .access    = { .graphics, .compute },
         .width     = 16,
@@ -949,7 +949,7 @@ fn void assert_present_barrier_emission(
 ) {
     gpu::Device device = make_texture_command_device();
     defer destroy_test_device(&device)!!;
-    if (gpu::get_device_caps(&device)!!.unified_layouts) return;
+    if (gpu::get_device_caps(&device).unified_layouts) return;
     gpu::TextureDesc desc = {
         .access = { .graphics },
         .width  = 16,
@@ -1591,7 +1591,7 @@ fn void placed_texture_requirements_validate_and_release_storage() @test {
     gpu::GpuAllocation allocation =
         gpu::allocate_memory(&device, &allocation_desc)!!;
     gpu::AllocationInfo info =
-        gpu::get_allocation_info(&device, allocation)!!;
+        gpu::get_allocation_info(&device, allocation);
     assert(info.memory_class == gpu::MemoryClass.TEXTURE
         && !info.mapped && !info.coherent && !info.addressable,
         "texture memory exposes no generic mapping or address");

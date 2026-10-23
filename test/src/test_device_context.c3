@@ -53,7 +53,7 @@ fn Adapter? context_adapter_selector(Runtime* runtime, DeviceDesc* requirements,
     capture.requirements = *requirements;
     if (capture.callback_fault) return capture.callback_fault~;
     if (capture.return_selected) return capture.selected;
-    capture.selected = gpu::enumerate_adapters(runtime)!!.get(0)!!;
+    capture.selected = gpu::enumerate_adapters(runtime).get(0)!!;
     return capture.selected;
 }
 
@@ -254,7 +254,7 @@ fn void context_custom_selector_receives_effective_private_requirements() @test 
     assert(desc.device.enable_ray_queries);
     assert(context.adapter == capture.selected);
     assert(context.adapter.adapter_index == 0);
-    assert(gpu::get_device_caps(&context.device)!!.ray_queries.enabled);
+    assert(gpu::get_device_caps(&context.device).ray_queries.enabled);
     util::destroy_device_context(&context);
 }
 
@@ -263,7 +263,7 @@ fn void context_custom_selector_rejects_foreign_stale_and_zero_adapters() @test 
     RuntimeDesc runtime_desc;
     Runtime foreign = gpu::create_runtime(&runtime_desc)!!;
     ContextCallbackCapture capture = {
-        .selected = gpu::enumerate_adapters(&foreign)!!.get(0)!!,
+        .selected = gpu::enumerate_adapters(&foreign).get(0)!!,
         .return_selected = true,
     };
     util::DeviceContextDesc desc = util::default_device_context_desc();
@@ -272,7 +272,7 @@ fn void context_custom_selector_rejects_foreign_stale_and_zero_adapters() @test 
     @assert_panics("gpu::create_device_context: foreign Adapter") {
         (void)util::create_device_context(&desc);
     };
-    assert(gpu::enumerate_adapters(&foreign)!!.count == 1);
+    assert(gpu::enumerate_adapters(&foreign).count == 1);
     gpu::destroy_runtime(&foreign)!!;
     @assert_panics("gpu::create_device_context: foreign Adapter") {
         (void)util::create_device_context(&desc);
@@ -357,7 +357,7 @@ fn void context_caches_actual_swapchain_configuration() @test {
         height: 1080,
     )!!;
     assert(context.swapchain_info.width == 1280);
-    context.swapchain_info = gpu::get_swapchain_info(&context.device, context.swapchain)!!;
+    context.swapchain_info = gpu::get_swapchain_info(&context.device, context.swapchain);
     assert(context.swapchain_info.width == 1920 && context.swapchain_info.height == 1080);
 }
 
@@ -376,22 +376,6 @@ fn void context_caches_dormant_swapchain_configuration() @test {
     assert(context.swapchain_info.format == Format.UNDEFINED);
     assert(context.swapchain_info.width == 0 && context.swapchain_info.height == 0);
     assert(context.swapchain_info.image_count == 0);
-}
-
-fn void context_swapchain_info_fault_rolls_back_every_owner() @test {
-    reset_context_stub();
-    vk::stub_set_context_swapchain_info({}, gpu::BACKEND_ERROR);
-    ContextCallbackCapture capture;
-    util::DeviceContextDesc desc = util::default_device_context_desc();
-    desc.create_surface = &context_surface_factory;
-    desc.surface_user_data = &capture;
-
-    assert(@catch(util::create_device_context(&desc)) == gpu::BACKEND_ERROR);
-    assert(vk::stub_swapchain_destroy_attempt_count() == 1);
-    assert(vk::stub_allocator_destroy_attempt_count() == 1);
-    assert(vk::stub_device_temporary_destroy_count() == 1);
-    assert(vk::stub_surface_destroy_count() == 1);
-    assert(vk::stub_runtime_destroy_count() == 1);
 }
 
 fn void context_empty_adapter_list_never_calls_surface_factory() @test {
@@ -434,7 +418,7 @@ fn void context_rejects_foreign_surface_without_destroying_it() @test {
     };
     assert(message == "gpu::create_device_context: mismatched Surface");
     assert(vk::stub_surface_destroy_count() == 0);
-    Adapter adapter = gpu::enumerate_adapters(&foreign)!!.get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(&foreign).get(0)!!;
     assert(gpu::supports_presentation(&adapter, &capture.surface)!!);
     assert(vk::stub_runtime_destroy_count() == 1);
 }
@@ -500,7 +484,7 @@ fn void context_rejects_stale_surface_without_destroying_replacement() @test {
     assert(message == "gpu::create_device_context: stale Surface");
     assert(vk::stub_surface_destroy_count() == 1);
     assert(vk::stub_runtime_destroy_count() == 1, "the context runtime rolls back before termination");
-    Adapter adapter = gpu::enumerate_adapters(&foreign)!!.get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(&foreign).get(0)!!;
     assert(gpu::supports_presentation(&adapter, &replacement)!!);
 }
 

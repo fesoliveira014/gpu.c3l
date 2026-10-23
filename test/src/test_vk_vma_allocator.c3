@@ -7,7 +7,7 @@ import std::core::mem;
 
 // Headless (lavapipe): the device's VMA allocator + memory stats.
 
-fn void memory_queries_reject_uninitialized_allocator() @test {
+fn void memory_queries_terminate_on_uninitialized_allocator() @test {
     gpu::internal::vk::VkDeviceState* state =
         mem::new(gpu::internal::vk::VkDeviceState);
     gpu::Device device = gpu::internal::register_device(
@@ -15,11 +15,12 @@ fn void memory_queries_reject_uninitialized_allocator() @test {
         caps:   {},
     )!!;
 
-    assert(@catch(gpu::get_memory_stats(&device)) == gpu::INVALID_ARGUMENT,
-        "stats reject an uninitialized allocator before native work");
-    assert(@catch(gpu::build_memory_report(&device, false))
-        == gpu::INVALID_ARGUMENT,
-        "reports reject an uninitialized allocator before native work");
+    @assert_panics("gpu::get_memory_stats: corrupt Device") {
+        (void)gpu::get_memory_stats(&device);
+    };
+    @assert_panics("gpu::build_memory_report: corrupt Device") {
+        (void)gpu::build_memory_report(&device, false);
+    };
 
     gpu::destroy_device(&device)!!;
 }
@@ -32,7 +33,7 @@ fn void allocator_stats_and_report() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::MemoryStats stats = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats stats = gpu::get_memory_stats(&device);
     assert(stats.heap_count >= 1, "device reports at least one memory heap");
 
     bool any_budget = false;
@@ -41,7 +42,7 @@ fn void allocator_stats_and_report() @test {
     }
     assert(any_budget, "at least one heap reports a budget > 0");
 
-    String report = gpu::build_memory_report(&device, false)!!;
+    String report = gpu::build_memory_report(&device, false);
     defer report.free(mem);
     assert(report.len > 0, "memory report is non-empty");
 }

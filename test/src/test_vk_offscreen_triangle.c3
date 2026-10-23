@@ -245,7 +245,7 @@ fn void render_textured_triangle(char[] frag_spirv, char[] inline_root, char[3] 
     defer gpu::destroy_texture(&device, pattern)!!;
     gpu::TextureView tex_index_view = gpu::create_texture_view(&device, pattern, null)!!;
     gpu::TextureIndex tex_index = tex_index_view.index;
-    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
+    defer gpu::destroy_texture_view(&device, tex_index_view);
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
         .mag_filter = gpu::Filter.NEAREST,

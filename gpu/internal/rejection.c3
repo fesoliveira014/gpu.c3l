@@ -96,13 +96,22 @@ macro void @terminate_rejected_handle(fault err) {
     terminate_rejected_handle(err, $$FUNC);
 }
 
+<* Terminate for a fault that a public function returning no optional cannot
+   report. A rejected handle keeps its message; any other fault is a library
+   bug. *>
+fn void terminate_required(fault err, String operation) @private @noreturn {
+    terminate_rejected_handle(err, operation);
+    abort("gpu::%s: unexpected fault %s", operation, err);
+}
+
 <* Unwrap an internal result in a public function that returns no optional.
    Only a rejected handle is expected; any other fault is a library bug. *>
 macro @require_valid(#expr) {
-    var value = #expr;
-    if (catch err = value) {
-        terminate_rejected_handle(err, $$FUNC);
-        abort("gpu::%s: unexpected fault %s", $$FUNC, err);
-    }
-    return value;
+    $if $Typeof(#expr!!)::typeid == void::typeid:
+        if (catch err = #expr) terminate_required(err, $$FUNC);
+    $else
+        var value = #expr;
+        if (catch err = value) terminate_required(err, $$FUNC);
+        return value;
+    $endif
 }

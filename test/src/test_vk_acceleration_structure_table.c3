@@ -1837,6 +1837,23 @@ fn void acceleration_structure_views_are_transactional_and_generation_checked() 
     assert(state.acceleration_structures.get(top_level)!!
             .live_view_count == 0,
         "view destruction releases exactly one TLAS relationship");
+
+    gpu::AccelerationStructureView third =
+        create_acceleration_structure_descriptor_view_with_ops(
+            &state,
+            top_level,
+            &ops,
+        )!!;
+    state.acceleration_structures.get(top_level)!!.live_view_count = 0;
+    assert(@catch(destroy_acceleration_structure_descriptor_view(
+        &state,
+        third,
+    )) == gpu::internal::HANDLE_REJECTED,
+        "a live view whose owner count is zero is a corrupt handle");
+    assert(descriptor_cells[0].used,
+        "the owner-count invariant preserves the descriptor");
+    state.acceleration_structures.get(top_level)!!.live_view_count = 1;
+    destroy_acceleration_structure_descriptor_view(&state, third)!!;
 }
 
 fn void acceleration_structure_model_keeps_capacity_and_state_backend_free() @test {

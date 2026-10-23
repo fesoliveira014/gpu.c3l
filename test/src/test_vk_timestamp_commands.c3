@@ -116,7 +116,7 @@ fn TimestampCommandFixture? create_timestamp_command_fixture(
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
 
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::Device device;
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!;

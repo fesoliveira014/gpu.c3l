@@ -65,7 +65,7 @@ fn void device_create_destroy() @test {
     gpu::Device device = create_test_device(&desc)!!;
 
     assert(gpu::internal::device_slots[device.index].data.state != null, "backend state allocated");
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     assert(
         caps.generated_work == (caps.max_generated_work_count > 0),
         "generated-work support and its device limit are coherent"
@@ -77,11 +77,11 @@ fn void device_create_destroy() @test {
         "selected device supports independent blend");
     assert(features.depth_bias_clamp != 0,
         "selected device supports depth-bias clamp");
-    assert(gpu::get_device_caps(&device)!!.line_polygon_mode == (features.fill_mode_non_solid != 0),
+    assert(gpu::get_device_caps(&device).line_polygon_mode == (features.fill_mode_non_solid != 0),
         "line polygon cap matches the selected physical device");
-    assert(gpu::get_device_caps(&device)!!.clip_distance == (features.shader_clip_distance != 0),
+    assert(gpu::get_device_caps(&device).clip_distance == (features.shader_clip_distance != 0),
         "clip distance cap matches the selected physical device");
-    assert(gpu::get_device_caps(&device)!!.sample_rate_shading == (features.sample_rate_shading != 0),
+    assert(gpu::get_device_caps(&device).sample_rate_shading == (features.sample_rate_shading != 0),
         "sample rate shading cap matches the selected physical device");
     vk::PhysicalDeviceProperties props;
     vk::get_physical_device_properties(state.physical_device, &props);
@@ -111,12 +111,12 @@ fn void device_create_destroy() @test {
     );
     uint expected_color_attachments = props.limits.max_color_attachments < gpu::MAX_COLOR_ATTACHMENTS
         ? props.limits.max_color_attachments : gpu::MAX_COLOR_ATTACHMENTS;
-    assert(gpu::get_device_caps(&device)!!.max_color_attachments == expected_color_attachments, "effective color attachment limit matches the selected device");
+    assert(gpu::get_device_caps(&device).max_color_attachments == expected_color_attachments, "effective color attachment limit matches the selected device");
     assert(
-        gpu::get_device_caps(&device)!!.max_push_constant_size == props.limits.max_push_constants_size,
+        gpu::get_device_caps(&device).max_push_constant_size == props.limits.max_push_constants_size,
         "reported push-constant limit matches the selected physical device"
     );
-    gpu::Vec3u compute_count_limit = gpu::get_device_caps(&device)!!.max_compute_work_group_count;
+    gpu::Vec3u compute_count_limit = gpu::get_device_caps(&device).max_compute_work_group_count;
     assert(
         compute_count_limit.x == props.limits.max_compute_work_group_count[0]
             && compute_count_limit.y == props.limits.max_compute_work_group_count[1]
@@ -124,11 +124,11 @@ fn void device_create_destroy() @test {
         "reported dispatch-count limits match the selected physical device"
     );
     assert(
-        gpu::get_device_caps(&device)!!.max_draw_indirect_count
+        gpu::get_device_caps(&device).max_draw_indirect_count
             == props.limits.max_draw_indirect_count,
         "reported indirect draw-count limit matches the selected physical device"
     );
-    assert(gpu::get_device_caps(&device)!!.max_push_constant_size >= gpu::RootPush::size, "push-constant limit contains RootPush");
+    assert(gpu::get_device_caps(&device).max_push_constant_size >= gpu::RootPush::size, "push-constant limit contains RootPush");
     uint device_index = device.index;
     destroy_test_device(&device)!!;
     assert(gpu::internal::device_slots[device_index].data.state == null,
@@ -149,7 +149,7 @@ fn void device_heap_capacities() @test {
     };
 
     gpu::Device device = create_test_device(&desc)!!;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     assert(caps.texture_heap_capacity == 64, "texture capacity reflects the desc");
     assert(caps.sampler_heap_capacity == 8, "sampler capacity reflects the desc");
     destroy_test_device(&device)!!;

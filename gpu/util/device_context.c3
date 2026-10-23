@@ -95,7 +95,7 @@ fn DeviceContext? create_device_context(DeviceContextDesc* desc) {
     gpu::Runtime runtime = gpu::create_runtime(&settings.runtime)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
 
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     if (adapters.count == 0) return gpu::UNSUPPORTED_FEATURE~;
 
     gpu::Surface surface;
@@ -127,8 +127,7 @@ fn DeviceContext? create_device_context(DeviceContextDesc* desc) {
     gpu::SwapchainInfo swapchain_info;
     if (surface.is_valid()) {
         swapchain = gpu::create_swapchain(&device, &surface, &settings.swapchain)!;
-        defer catch (void)gpu::destroy_swapchain(&device, swapchain);
-        swapchain_info = gpu::get_swapchain_info(&device, swapchain)!;
+        swapchain_info = gpu::get_swapchain_info(&device, swapchain);
     }
 
     return {
@@ -250,7 +249,7 @@ fn gpu::Adapter? select_context_adapter(
     for (uint index = 0; index < adapters.count; index++) {
         gpu::Adapter candidate = adapters.get(index)!;
         if (!gpu::supports_device_desc(&candidate, requirements)!.supported) continue;
-        gpu::AdapterInfo info = gpu::get_adapter_info(&candidate)!;
+        gpu::AdapterInfo info = gpu::get_adapter_info(&candidate);
         uint rank = adapter_rank(info.device_class);
         if (rank <= best_rank) continue;
         best = candidate;

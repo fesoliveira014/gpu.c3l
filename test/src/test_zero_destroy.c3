@@ -21,16 +21,16 @@ fn void zero_handles_destroy_without_effect() @test {
     gpu::destroy_surface(&surface)!!;
     gpu::free_allocation(&device, &allocation)!!;
     gpu::destroy_texture(&device, (gpu::TextureHandle){})!!;
-    gpu::destroy_texture_view(&device, (gpu::TextureView){})!!;
+    gpu::destroy_texture_view(&device, (gpu::TextureView){});
     gpu::release_texture_indices(&device, (gpu::TextureIndexRange){})!!;
     gpu::destroy_acceleration_structure(&device, gpu::ACCELERATION_STRUCTURE_HANDLE_INVALID)!!;
-    gpu::destroy_acceleration_structure_view(&device, gpu::ACCELERATION_STRUCTURE_VIEW_INVALID)!!;
+    gpu::destroy_acceleration_structure_view(&device, gpu::ACCELERATION_STRUCTURE_VIEW_INVALID);
     gpu::destroy_pipeline(&device, (gpu::PipelineHandle){})!!;
     gpu::destroy_command_allocator(&allocator)!!;
     gpu::discard_commands(&commands)!!;
     gpu::discard_executable_commands(&executable)!!;
     gpu::destroy_attachment_view(&device, (gpu::AttachmentViewHandle){})!!;
-    gpu::destroy_timestamp_pool(&device, (gpu::TimestampPoolHandle){})!!;
+    gpu::destroy_timestamp_pool(&device, (gpu::TimestampPoolHandle){});
     gpu::destroy_swapchain(&device, (gpu::SwapchainHandle){})!!;
 
     assert(slot.control.load(AtomicOrdering.ACQUIRE) == control_before,

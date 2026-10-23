@@ -26,7 +26,7 @@ fn void? run() {
     runtime_desc.application_name = "hello_gpu";
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer (void)gpu::destroy_runtime(&runtime);
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::Adapter adapter = adapters.get(0)!;
     gpu::Device device = gpu::create_device(&adapter)!;
     defer (void)gpu::destroy_device(&device);

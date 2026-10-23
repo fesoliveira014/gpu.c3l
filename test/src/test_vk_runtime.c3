@@ -10,16 +10,16 @@ fn void runtimes_enumerate_vulkan_adapters_independently() @test {
     gpu::Runtime first = gpu::create_runtime(&desc)!!;
     gpu::Runtime second = gpu::create_runtime(&desc)!!;
 
-    gpu::AdapterList first_adapters = gpu::enumerate_adapters(&first)!!;
-    gpu::AdapterList second_adapters = gpu::enumerate_adapters(&second)!!;
+    gpu::AdapterList first_adapters = gpu::enumerate_adapters(&first);
+    gpu::AdapterList second_adapters = gpu::enumerate_adapters(&second);
     assert(first_adapters.count > 0, "the configured Vulkan ICD exposes an adapter");
     assert(second_adapters.count == first_adapters.count, "each runtime sees the same native adapters");
 
     gpu::Adapter first_adapter = first_adapters.get(0)!!;
     gpu::Adapter second_adapter = second_adapters.get(0)!!;
-    gpu::AdapterInfo first_info = gpu::get_adapter_info(&first_adapter)!!;
-    gpu::AdapterInfo second_info = gpu::get_adapter_info(&second_adapter)!!;
-    gpu::AdapterDiagnostics diagnostics = gpu::get_adapter_diagnostics(&first_adapter)!!;
+    gpu::AdapterInfo first_info = gpu::get_adapter_info(&first_adapter);
+    gpu::AdapterInfo second_info = gpu::get_adapter_info(&second_adapter);
+    gpu::AdapterDiagnostics diagnostics = gpu::get_adapter_diagnostics(&first_adapter);
     assert(first_info.name.len > 0, "adapter names are populated");
     assert(second_info.name == first_info.name, "both runtimes report the same adapter");
     assert(first_info.queues.available.graphics, "graphics queue availability is semantic");
@@ -39,7 +39,7 @@ fn void runtimes_enumerate_vulkan_adapters_independently() @test {
     assert(message == "gpu::get_adapter_info: stale Adapter",
         "destroying one runtime invalidates only its borrowed adapters");
     assert(
-        gpu::get_adapter_info(&second_adapter)!!.name.len > 0,
+        gpu::get_adapter_info(&second_adapter).name.len > 0,
         "the second runtime remains valid after the first is destroyed"
     );
 

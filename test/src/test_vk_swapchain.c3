@@ -2512,7 +2512,7 @@ fn void resize_after_loss_goes_dormant() @test {
     gpu::internal::mark_device_lost(&device);
 
     gpu::resize_swapchain(&device, fixture.swapchain, 8, 8)!!;
-    assert(gpu::get_swapchain_info(&device, fixture.swapchain)!!.dormant,
+    assert(gpu::get_swapchain_info(&device, fixture.swapchain).dormant,
         "resize after loss leaves the swapchain dormant");
     assert(borrowed_view_swapchain_creates == creates_before,
         "resize after loss builds no native swapchain");

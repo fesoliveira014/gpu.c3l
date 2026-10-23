@@ -916,7 +916,7 @@ fn bool exercise_real_sparse_three_dimensional_lifecycle(
         assert(requirements.aspect_count > 0);
         gpu::TextureView view =
             gpu::create_texture_view(device, texture, null)!!;
-        gpu::destroy_texture_view(device, view)!!;
+        gpu::destroy_texture_view(device, view);
         gpu::destroy_texture(device, texture)!!;
         return true;
     }
@@ -938,7 +938,7 @@ fn void sparse_texture_real_lifecycle_when_supported() @test {
     }
     gpu::Runtime runtime = maybe_runtime;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::DeviceDesc device_desc = {
         .enable_sparse_textures = true,
     };
@@ -961,7 +961,7 @@ fn void sparse_texture_real_lifecycle_when_supported() @test {
             &adapter,
             &device_desc,
         )!!;
-        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device);
         gpu::QueueKind queue_kind;
         gpu::QueueRoles access;
         if (caps.queues.graphics) {
@@ -1055,9 +1055,9 @@ fn void sparse_texture_real_lifecycle_when_supported() @test {
             )!!;
             assert(@catch(gpu::destroy_texture(&device, texture))
                 == gpu::RESOURCE_IN_USE);
-            gpu::destroy_texture_view(&device, view)!!;
+            gpu::destroy_texture_view(&device, view);
             gpu::destroy_texture(&device, texture)!!;
-            assert(gpu::get_allocation_info(&device, pages)!!.size
+            assert(gpu::get_allocation_info(&device, pages).size
                 == page_desc.size);
             gpu::free_allocation(&device, &pages)!!;
 

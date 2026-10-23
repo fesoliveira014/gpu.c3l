@@ -538,7 +538,7 @@ fn void? destroy_acceleration_structure_descriptor_view(
     VkDeviceState* state,
     gpu::AccelerationStructureView view,
 ) {
-    if (state == null) return gpu::INVALID_ARGUMENT~;
+    if (state == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.ACCELERATION_STRUCTURE_VIEW, gpu::internal::HandleCause.INVARIANT)~;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
@@ -546,7 +546,7 @@ fn void? destroy_acceleration_structure_descriptor_view(
         acceleration_structure_descriptor_cell_get(state, view)!;
     AccelerationStructureSlot* owner =
         state.acceleration_structures.get(cell.owner)!;
-    if (owner.live_view_count == 0) return gpu::BACKEND_ERROR~;
+    if (owner.live_view_count == 0) return gpu::internal::reject_handle(gpu::internal::HandleKind.ACCELERATION_STRUCTURE_VIEW, gpu::internal::HandleCause.INVARIANT)~;
 
     cell.used = false;
     owner.live_view_count--;
@@ -638,18 +638,6 @@ fn void? validate_texture_view_increment(
             "texture view owner count exceeds descriptor heap capacity",
         );
     }
-}
-
-fn void? validate_texture_view_decrement(
-    VkDeviceState* state,
-    TextureSlot* owner,
-) @private {
-    if (owner.live_descriptor_views != 0) return;
-    return report_texture_view_owner_invariant_failure(
-        state,
-        "destroy_texture_view",
-        "texture view owner count is zero for a live descriptor",
-    );
 }
 
 fn void recycle_texture_descriptor_slot(
@@ -1179,16 +1167,13 @@ fn void? vk_destroy_texture_view(
         )~;
     }
     TextureDescriptorCell* cell = resolved;
-    TextureSlot*? resolved_owner = state.textures.get(cell.owner);
-    if (catch resolved_owner) {
-        return report_texture_view_owner_invariant_failure(
-            state,
-            "destroy_texture_view",
-            "live texture descriptor owner is missing",
-        );
+    TextureSlot*? owner = state.textures.get(cell.owner);
+    if (catch owner) {
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.TEXTURE_VIEW, gpu::internal::HandleCause.INVARIANT)~;
     }
-    TextureSlot* owner = resolved_owner;
-    validate_texture_view_decrement(state, owner)!;
+    if (owner.live_descriptor_views == 0) {
+        return gpu::internal::reject_handle(gpu::internal::HandleKind.TEXTURE_VIEW, gpu::internal::HandleCause.INVARIANT)~;
+    }
     cell.used = false;
     owner.live_descriptor_views--;
     state.shader_heap.descriptors.texture_view_count--;

@@ -1161,7 +1161,7 @@ fn gpu::AllocationDesc native_allocation_desc(
 fn void native_allocation_classes_map_and_release() @test {
     gpu::Device device = create_allocation_test_device("gpu_allocation_test");
     defer (void)destroy_test_device(&device);
-    gpu::MemoryStats baseline = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats baseline = gpu::get_memory_stats(&device);
 
     gpu::AllocationDesc write_desc = native_allocation_desc(
         gpu::MemoryClass.CPU_WRITE,
@@ -1192,7 +1192,7 @@ fn void native_allocation_classes_map_and_release() @test {
         gpu::AllocationInfo info = gpu::get_allocation_info(
             &device,
             allocation,
-        )!!;
+        );
         gpu::GpuSpan span = gpu::get_allocation_span(&device, allocation)!!;
         assert(info.size == 256
             && info.alignment >= 128
@@ -1236,7 +1236,7 @@ fn void native_allocation_classes_map_and_release() @test {
     char[] local_mapping = gpu::get_span_mapping(&device, local_span)!!;
     local_mapping[0] = 0x5D;
     assert(local_mapping.len == 256 && local_mapping[0] == 0x5D
-        && gpu::get_allocation_info(&device, local)!!.mapped,
+        && gpu::get_allocation_info(&device, local).mapped,
         "CPU_WRITE_GPU_LOCAL exposes a writable host mapping");
 
     gpu::GpuSpan read_span = gpu::get_allocation_span(&device, read)!!;
@@ -1249,7 +1249,7 @@ fn void native_allocation_classes_map_and_release() @test {
     assert(@catch(gpu::get_span_mapping(&device, private_span))
         == gpu::INVALID_ARGUMENT,
         "GPU_PRIVATE never exposes a host mapping");
-    gpu::MemoryStats live = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats live = gpu::get_memory_stats(&device);
     assert(live.live_allocation_count >= baseline.live_allocation_count + 4,
         "independent allocations contribute to VMA allocation statistics");
     assert(live.heap_count == baseline.heap_count
@@ -1268,13 +1268,13 @@ fn void native_allocation_classes_map_and_release() @test {
     };
     assert(double_free == stale_write,
         "failed double free preserves the caller token");
-    assert(gpu::get_allocation_info(&device, private)!!.size == 256,
+    assert(gpu::get_allocation_info(&device, private).size == 256,
         "freeing one allocation preserves its peers");
 
     gpu::free_allocation(&device, &private)!!;
     gpu::free_allocation(&device, &read)!!;
     gpu::free_allocation(&device, &local)!!;
-    gpu::MemoryStats released = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats released = gpu::get_memory_stats(&device);
     assert(released.live_allocation_count == baseline.live_allocation_count,
         "immediate release returns VMA allocation statistics to baseline");
 }
@@ -1283,7 +1283,7 @@ fn void memory_stats_report_the_allocation_table_capacity() @test {
     gpu::Device device = create_allocation_test_device("gpu_memory_stats_allocation_capacity_test");
     defer (void)destroy_test_device(&device);
 
-    gpu::MemoryStats stats = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats stats = gpu::get_memory_stats(&device);
     assert(stats.allocation_capacity == vk::ALLOCATION_CAPACITY,
         "capacity is the allocation table size");
     assert(stats.acceleration_structure_capacity == 0,
@@ -1295,7 +1295,7 @@ fn void memory_stats_report_the_allocation_table_capacity() @test {
     );
     gpu::GpuAllocation allocation = gpu::allocate_memory(&device, &desc)!!;
 
-    assert(gpu::get_memory_stats(&device)!!.allocation_capacity == stats.allocation_capacity,
+    assert(gpu::get_memory_stats(&device).allocation_capacity == stats.allocation_capacity,
         "capacity does not change with use");
 
     gpu::free_allocation(&device, &allocation)!!;

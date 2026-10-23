@@ -36,7 +36,7 @@ fn void unified_layouts_caps_and_general_rejection() @test {
     };
     gpu::Device explicit_device = create_test_device(&runtime_desc)!!;
     defer destroy_test_device(&explicit_device)!!;
-    gpu::DeviceCaps explicit_caps = gpu::get_device_caps(&explicit_device)!!;
+    gpu::DeviceCaps explicit_caps = gpu::get_device_caps(&explicit_device);
     assert(explicit_caps.unified_layouts || !explicit_caps.unified_layouts_optimal,
         "the optimal cap needs the mode");
     gpu::TextureHandle texture = make_unified_heap_texture(&explicit_device, "explicit_general");
@@ -55,7 +55,7 @@ fn void unified_layouts_caps_and_general_rejection() @test {
 
     gpu::Device unified = make_unified_device();
     defer destroy_test_device(&unified)!!;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&unified)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&unified);
     assert(caps.unified_layouts, "the mode is active when requested");
     assert(!caps.unified_layouts_optimal || caps.unified_layouts,
         "the optimal cap implies the mode");
@@ -130,7 +130,7 @@ fn void unified_storage_write_then_sampled_read() @test {
     gpu::TextureHandle texture = make_unified_heap_texture(&device, "unified_heap_target");
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureView view = gpu::create_texture_view(&device, texture, null)!!;
-    defer gpu::destroy_texture_view(&device, view)!!;
+    defer gpu::destroy_texture_view(&device, view);
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
         .mag_filter = gpu::Filter.NEAREST,
@@ -273,7 +273,7 @@ fn void unified_textures_initialize_at_submit() @test {
     gpu::SubmitDesc second_submit = { .command_lists = second_lists[..], .completion_waits = waits[..] };
     gpu::CompletionPoint second_done = gpu::submit(compute, &second_submit)!!;
     assert(state.pending_init_count == 0, "the submit drained the pending list");
-    gpu::destroy_texture_view(&device, view)!!;
+    gpu::destroy_texture_view(&device, view);
     assert(@catch(gpu::destroy_texture(&device, texture)) == gpu::RESOURCE_IN_USE,
         "the pending initialization retains the texture until it retires");
     gpu::wait_completion(second_done)!!;

@@ -633,8 +633,8 @@ fn void leak_reporters_count_leaks() @test {
     vk::TextureSlot* tex_slot = &state.textures.slots[texture.index].value;
     assert(tex_slot.allocation_size > 0, "texture leak line carries the allocation size");
 
-    gpu::destroy_texture_view(&device, texture_index_view)!!;
-    gpu::destroy_timestamp_pool(&device, timestamp_pool)!!;
+    gpu::destroy_texture_view(&device, texture_index_view);
+    gpu::destroy_timestamp_pool(&device, timestamp_pool);
     gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::destroy_pipeline(&device, first_alias)!!;
     gpu::destroy_pipeline(&device, second_alias)!!;
@@ -785,7 +785,7 @@ fn void stats_cover_public_allocations_textures_and_budgets() @test {
     gpu::Device device = make_dbg_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::MemoryStats baseline = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats baseline = gpu::get_memory_stats(&device);
     gpu::GpuAllocation[3] allocations;
     for (uint i = 0; i < 3; i++) {
         gpu::AllocationDesc desc = {
@@ -796,7 +796,7 @@ fn void stats_cover_public_allocations_textures_and_budgets() @test {
         };
         allocations[i] = gpu::allocate_memory(&device, &desc)!!;
     }
-    gpu::MemoryStats allocated = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats allocated = gpu::get_memory_stats(&device);
     assert(allocated.live_allocation_count
         >= baseline.live_allocation_count + (ulong)allocations.len,
         "public allocations contribute to live allocation statistics");
@@ -813,7 +813,7 @@ fn void stats_cover_public_allocations_textures_and_budgets() @test {
         textures[i] = gpu::create_texture(&device, &desc)!!;
     }
 
-    gpu::MemoryStats stats = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats stats = gpu::get_memory_stats(&device);
     assert(stats.texture_count == baseline.texture_count + (ulong)textures.len,
         "public texture count reflects live textures");
     assert(stats.heap_count > 0 && stats.heaps[0].budget > 0,
@@ -823,7 +823,7 @@ fn void stats_cover_public_allocations_textures_and_budgets() @test {
     for (uint i = 0; i < allocations.len; i++) {
         gpu::free_allocation(&device, &allocations[i])!!;
     }
-    stats = gpu::get_memory_stats(&device)!!;
+    stats = gpu::get_memory_stats(&device);
     assert(stats.texture_count == baseline.texture_count,
         "destroyed public textures leave no live texture count");
 }

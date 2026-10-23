@@ -91,7 +91,7 @@ fn void allocation_ownership_queries_and_consumption() @test {
         && second_state.allocation_free_calls == 0,
         "wrong-device free does not dispatch");
 
-    AllocationInfo info = gpu::get_allocation_info(&first, allocation)!!;
+    AllocationInfo info = gpu::get_allocation_info(&first, allocation);
     assert(info.size == desc.size, "immutable size round-trips");
     assert(info.alignment == 16, "normalized alignment round-trips");
     GpuSpan span = gpu::get_allocation_span(&first, allocation)!!;
@@ -154,7 +154,7 @@ fn void device_local_cpu_write_class_is_mapped() @test {
     AllocationDesc desc = allocation_stub_desc(MemoryClass.CPU_WRITE_GPU_LOCAL);
     GpuAllocation allocation = gpu::allocate_memory(&device, &desc)!!;
 
-    AllocationInfo info = gpu::get_allocation_info(&device, allocation)!!;
+    AllocationInfo info = gpu::get_allocation_info(&device, allocation);
     assert(info.memory_class == MemoryClass.CPU_WRITE_GPU_LOCAL
         && info.mapped
         && info.device_local

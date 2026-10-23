@@ -126,7 +126,7 @@ fn int creation_storm_worker(void* arg) {
             || !sampler.is_valid()) {
             args.failed = true;
         }
-        gpu::destroy_texture_view(args.device, view)!!;
+        gpu::destroy_texture_view(args.device, view);
         gpu::destroy_texture(args.device, texture)!!;
         free_owned_span(args.device, &buffer)!!;
     }
@@ -206,7 +206,7 @@ fn void texture_view_cache_uses_device_allocator_across_threads() @test {
         "worker publishes through a thread-local allocator that rejects allocations");
     assert(args.published.is_valid(),
         "texture-view cache storage comes from the device allocator");
-    gpu::destroy_texture_view(&device, args.published)!!;
+    gpu::destroy_texture_view(&device, args.published);
 }
 
 struct RenderViewGateArgs {
@@ -817,7 +817,7 @@ fn void sequential_worker_churn_reuses_allocator_table_capacity() @test {
 fn void generated_scratch_reservations_are_allocator_local() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
-    if (!gpu::get_device_caps(&device)!!.generated_work) return;
+    if (!gpu::get_device_caps(&device).generated_work) return;
     gpu::ShaderDesc shader_desc = {
         .spirv       = THR_COMP_SPIRV[..],
         .entry_point = "main",
@@ -1379,7 +1379,7 @@ fn void tlas_view_creation_serializes_with_destruction() @test {
     if (args.succeeded) {
         assert(!destroyed && destroy_fault == gpu::RESOURCE_IN_USE,
             "a published view wins atomically and blocks TLAS destruction");
-        gpu::destroy_acceleration_structure_view(&device, args.view)!!;
+        gpu::destroy_acceleration_structure_view(&device, args.view);
         gpu::destroy_acceleration_structure(&device, tlas)!!;
     } else {
         assert(destroyed && args.terminated,

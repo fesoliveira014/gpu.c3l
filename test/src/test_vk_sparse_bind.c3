@@ -2022,7 +2022,7 @@ fn void real_sparse_bind_use_and_unbind_when_supported() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::DeviceDesc device_desc = {
         .enable_sparse_textures = true,
     };
@@ -2035,7 +2035,7 @@ fn void real_sparse_bind_use_and_unbind_when_supported() @test {
             &device_desc,
         )!!.supported) continue;
         gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
-        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device);
         if (!ran_2d) {
             ran_2d = run_real_sparse_bind_dimension(
                 &device,

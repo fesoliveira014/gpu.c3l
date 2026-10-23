@@ -637,7 +637,7 @@ fn void simultaneous_devices_submit_independently() @test {
     gpu::destroy_command_allocator(&first_allocator)!!;
     destroy_test_device(&first)!!;
 
-    assert(!gpu::get_device_caps(&second)!!.presentation_enabled,
+    assert(!gpu::get_device_caps(&second).presentation_enabled,
         "destroying one device leaves the other live");
     gpu::Queue second_queue = gpu::get_queue(&second, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator second_allocator = gpu::create_command_allocator(&second, second_queue)!!;

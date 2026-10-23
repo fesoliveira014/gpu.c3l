@@ -47,7 +47,6 @@ struct DestroyWorkerArgs {
 
 struct DeviceOperationWorkerArgs {
     gpu::Device device;
-    bool        failed;
 }
 
 struct RuntimeRetainWorkerArgs {
@@ -97,11 +96,8 @@ fn int destroy_device_worker(void* raw_args) {
 
 fn int device_operation_worker(void* raw_args) {
     DeviceOperationWorkerArgs* args = (DeviceOperationWorkerArgs*)raw_args;
-    if (catch operation_fault = gpu::get_memory_stats(&args.device)) {
-        (void)operation_fault;
-        args.failed = true;
-    }
-    return args.failed ? 1 : 0;
+    (void)gpu::get_memory_stats(&args.device);
+    return 0;
 }
 
 fn int stale_command_worker(void* raw_args) {
@@ -816,15 +812,15 @@ fn void device_loss_isolated_to_marked_slot() @test {
 
     assert(gpu::is_device_lost(&first), "the affected device stays lost");
     assert(!gpu::is_device_lost(&second), "a peer device is unaffected");
-    (void)gpu::get_device_caps(&first)!!;
-    (void)gpu::get_device_caps(&second)!!;
+    (void)gpu::get_device_caps(&first);
+    (void)gpu::get_device_caps(&second);
 
     gpu::Device stale = first;
     gpu::destroy_device(&first)!!;
     DeviceFixture replacement_fixture;
     gpu::Device replacement = fixture_device(&replacement_fixture);
     gpu::internal::mark_device_lost(&stale);
-    (void)gpu::get_device_caps(&replacement)!!;
+    (void)gpu::get_device_caps(&replacement);
 
     gpu::destroy_device(&second)!!;
     gpu::destroy_device(&replacement)!!;
@@ -968,7 +964,7 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
         (void)gpu::get_device_caps(&stale);
     };
     if (survivor_created) {
-        (void)gpu::get_device_caps(&survivor)!!;
+        (void)gpu::get_device_caps(&survivor);
         gpu::destroy_device(&survivor)!!;
     }
 }
@@ -1011,7 +1007,7 @@ fn void destruction_during_an_operation_terminates() @test {
         "destroying a device during another thread's operation terminates");
     assert(handle_preserved, "the overlapping destruction preserves the device token");
     assert(calls_before_retry == 0, "the overlapping destruction does not tear down the backend");
-    assert(operation_result == 0 && !operation_args.failed, "the pinned operation completes normally");
+    assert(operation_result == 0, "the pinned operation completes normally");
     assert(retry_succeeded, "destruction succeeds after the active operation releases its pin");
     assert(fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1, "only the successful retry tears down the backend");
 }
@@ -1041,7 +1037,7 @@ fn void live_children_take_precedence_over_active_operations() @test {
 
     assert(destroy_fault == gpu::RESOURCE_IN_USE,
         "live children take precedence over active operation pins");
-    assert(operation_result == 0 && !operation_args.failed,
+    assert(operation_result == 0,
         "the active operation completes after child rejection");
 }
 
@@ -1187,16 +1183,12 @@ fn void runtime_device_retains_are_atomic() @test {
 struct CapsWorkerArgs {
     gpu::Device device;
     uint        iterations;
-    uint        failures;
 }
 
 fn int caps_worker(void* raw_args) {
     CapsWorkerArgs* args = (CapsWorkerArgs*)raw_args;
     for (uint i = 0; i < args.iterations; i++) {
-        if (catch caps_fault = gpu::get_device_caps(&args.device)) {
-            (void)caps_fault;
-            args.failures++;
-        }
+        (void)gpu::get_device_caps(&args.device);
     }
     return 0;
 }
@@ -1228,7 +1220,7 @@ fn void reused_slot_device_terminates() @test {
     };
     assert(message == "gpu::get_device_caps: stale Device",
         "a handle from the previous device in a reused slot terminates");
-    (void)gpu::get_device_caps(&second)!!;
+    (void)gpu::get_device_caps(&second);
 }
 
 fn void closing_device_terminates() @test {
@@ -1283,7 +1275,7 @@ fn void destroy_device_stale_recovers_registry_lock() @test {
     gpu::destroy_device(&next)!!;
 }
 
-fn void concurrent_pins_never_fail() @test {
+fn void concurrent_pins_never_terminate() @test {
     DeviceFixture fixture;
     gpu::Device device = fixture_device(&fixture);
     defer gpu::destroy_device(&device)!!;
@@ -1293,10 +1285,7 @@ fn void concurrent_pins_never_fail() @test {
         *arg = { .device = device, .iterations = 100_000 };
         threads[i].create(&caps_worker, arg)!!;
     }
-    uint failures;
-    foreach (i, &worker : threads) {
-        (void)worker.join()!!;
-        failures += args[i].failures;
+    foreach (&worker : threads) {
+        assert(worker.join()!! == 0, "concurrent device operations complete");
     }
-    assert(failures == 0, "concurrent device operations never fail for contention");
 }

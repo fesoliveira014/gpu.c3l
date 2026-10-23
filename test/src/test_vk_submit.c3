@@ -274,7 +274,7 @@ fn void distinct_selected_queues_reach_native_submit_concurrently() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::QueueRequest request = {
         .required = { .graphics, .compute },
         .distinct_roles = { .compute },
@@ -417,7 +417,7 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::QueueRequest request = {
         .required = { .graphics, .compute },
         .distinct_roles = { .compute },
@@ -874,7 +874,7 @@ fn vk::Result accept_swapchain_submit(
 fn void native_submit_failure_preserves_swapchain_readiness() @test {
     gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
-    reject_swapchain_submit_unified = gpu::get_device_caps(&device)!!.unified_layouts;
+    reject_swapchain_submit_unified = gpu::get_device_caps(&device).unified_layouts;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::SwapchainCell[gpu::MAX_SWAPCHAINS] cells;
@@ -921,7 +921,7 @@ fn void native_submit_failure_preserves_swapchain_readiness() @test {
 fn void swapchain_submit_path_guards_precede_native_mutation() @test {
     gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
-    reject_swapchain_submit_unified = gpu::get_device_caps(&device)!!.unified_layouts;
+    reject_swapchain_submit_unified = gpu::get_device_caps(&device).unified_layouts;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::SwapchainCell[gpu::MAX_SWAPCHAINS] cells;
@@ -1436,7 +1436,7 @@ fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::QueueRequest request = {
         .required = { .graphics, .compute },
         .distinct_roles = { .compute },
@@ -1450,7 +1450,7 @@ fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
         }
         gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
         defer gpu::destroy_device(&device)!!;
-        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device);
         gpu::Queue compute = gpu::get_queue(
             &device,
             gpu::QueueKind.COMPUTE,

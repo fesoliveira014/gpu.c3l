@@ -70,7 +70,7 @@ fn void allocate_mapped_memory_returns_consistent_views_and_frees_through_span()
     gpu::RuntimeDesc desc = { .application_name = "gpu_allocate_mapped_test" };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::MemoryStats baseline = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats baseline = gpu::get_memory_stats(&device);
 
     gpu::AllocationDesc alloc_desc = {
         .size         = 64,
@@ -83,16 +83,16 @@ fn void allocate_mapped_memory_returns_consistent_views_and_frees_through_span()
         "the mapping covers the whole allocation");
     assert(mapped.address == gpu::get_span_address(&device, mapped.span)!!,
         "the address matches the public query");
-    assert(gpu::get_memory_stats(&device)!!.live_allocation_count == baseline.live_allocation_count + 1,
+    assert(gpu::get_memory_stats(&device).live_allocation_count == baseline.live_allocation_count + 1,
         "one allocation is live");
-    gpu::AllocationInfo info = gpu::get_allocation_info(&device, mapped.span.allocation())!!;
+    gpu::AllocationInfo info = gpu::get_allocation_info(&device, mapped.span.allocation());
     assert(info.mapped && info.size == 64, "the span names a live mapped allocation");
     gpu::flush_mapped_span(&device, mapped.span)!!;
     gpu::invalidate_mapped_span(&device, mapped.span)!!;
 
     gpu::GpuAllocation allocation = mapped.span.allocation();
     gpu::free_allocation(&device, &allocation)!!;
-    assert(gpu::get_memory_stats(&device)!!.live_allocation_count == baseline.live_allocation_count,
+    assert(gpu::get_memory_stats(&device).live_allocation_count == baseline.live_allocation_count,
         "freeing through the span accessor releases the allocation");
 }
 
@@ -100,7 +100,7 @@ fn void allocate_mapped_memory_rejects_unmapped_classes_without_allocating() @te
     gpu::RuntimeDesc desc = { .application_name = "gpu_allocate_unmapped_test" };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::MemoryStats baseline = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats baseline = gpu::get_memory_stats(&device);
 
     gpu::AllocationDesc private_desc = {
         .size         = 64,
@@ -111,6 +111,6 @@ fn void allocate_mapped_memory_rejects_unmapped_classes_without_allocating() @te
         "GPU_PRIVATE faults INVALID_ARGUMENT");
     assert(@catch(gpu::allocate_mapped_memory(&device, null)) == gpu::INVALID_ARGUMENT,
         "a null descriptor faults INVALID_ARGUMENT");
-    assert(gpu::get_memory_stats(&device)!!.live_allocation_count == baseline.live_allocation_count,
+    assert(gpu::get_memory_stats(&device).live_allocation_count == baseline.live_allocation_count,
         "nothing is left allocated");
 }

@@ -312,7 +312,7 @@ fn ValDrawCtx make_val_draw_ctx(gpu::Device* device) {
 }
 
 fn void destroy_val_draw_ctx(gpu::Device* device, ValDrawCtx* ctx) {
-    gpu::destroy_texture_view(device, ctx.tex_view)!!;
+    gpu::destroy_texture_view(device, ctx.tex_view);
     gpu::destroy_texture(device, ctx.pattern)!!;
     gpu::destroy_pipeline(device, ctx.graphics)!!;
 }
@@ -931,7 +931,7 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
 fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    if (!gpu::get_device_caps(&device)!!.draw_indirect_count) return;
+    if (!gpu::get_device_caps(&device).draw_indirect_count) return;
     ValDrawCtx ctx = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);
@@ -1000,7 +1000,7 @@ fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
 fn void indirect_draw_count_limits_follow_command_contract() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
-    if (!gpu::get_device_caps(&device)!!.draw_indirect_count) return;
+    if (!gpu::get_device_caps(&device).draw_indirect_count) return;
     ValDrawCtx ctx = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &ctx);
     gpu::TextureHandle target = make_val_target(&device);

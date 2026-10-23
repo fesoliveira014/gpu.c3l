@@ -247,7 +247,7 @@ fn void partial_creation_rolls_back_before_publication() @test {
             capture:         &capture,
         );
         gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
-        gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+        gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
         bool exercised;
         for (uint i = 0; i < adapters.count; i++) {
             gpu::Adapter adapter = adapters.get(i)!!;

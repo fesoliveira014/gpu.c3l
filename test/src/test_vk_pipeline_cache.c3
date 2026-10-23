@@ -1173,7 +1173,7 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
     defer gpu::destroy_texture(&device, pattern)!!;
     gpu::TextureView tex_index_view = gpu::create_texture_view(&device, pattern, null)!!;
     gpu::TextureIndex tex_index = tex_index_view.index;
-    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
+    defer gpu::destroy_texture_view(&device, tex_index_view);
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
         .mag_filter = gpu::Filter.NEAREST,
@@ -1809,7 +1809,7 @@ fn void compute_layout_exists_before_pipeline_creation() @test {
 fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test {
     gpu::Device device = make_generated_work_cache_test_device();
     defer destroy_test_device(&device)!!;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     if (!caps.generated_work) return;
 
     gpu::ShaderDesc shader_desc = {

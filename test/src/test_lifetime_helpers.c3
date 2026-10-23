@@ -20,7 +20,7 @@ fn gpu::Device? create_test_device(
     $endif
     gpu::Runtime runtime = gpu::create_runtime(desc)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!;
         gpu::DeviceSupport support =
@@ -161,7 +161,7 @@ fn void? destroy_test_device(gpu::Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     if (operation.data.runtime_retained) runtime = operation.data.runtime;
     gpu::internal::end_device_operation(&operation);
-    gpu::QueueRoles queues = gpu::get_device_caps(device)!.queues;
+    gpu::QueueRoles queues = gpu::get_device_caps(device).queues;
     if (queues.graphics) {
         wait_test_queue(device, gpu::QueueKind.GRAPHICS)!;
     }

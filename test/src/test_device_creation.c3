@@ -11,7 +11,7 @@ fn RuntimeDesc device_creation_runtime_desc() {
 }
 
 fn Adapter device_creation_adapter(Runtime* runtime, uint index = 0) {
-    return gpu::enumerate_adapters(runtime)!!.get(index)!!;
+    return gpu::enumerate_adapters(runtime).get(index)!!;
 }
 
 fn void public_device_desc_defaults_are_equivalent_and_reusable() @test {
@@ -42,7 +42,7 @@ fn void public_device_desc_defaults_are_equivalent_and_reusable() @test {
         second_zero,
     };
     foreach (device : devices) {
-        QueueRoles queues = gpu::get_device_caps(&device)!!.queues;
+        QueueRoles queues = gpu::get_device_caps(&device).queues;
         assert(queues.graphics);
         assert(queues.compute);
         assert(queues.transfer);
