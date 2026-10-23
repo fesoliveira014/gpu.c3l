@@ -301,11 +301,36 @@ fn vk::Result real_swapchain_fence_wait(
     );
 }
 
+<* Once the device is lost no presentation fence signals, so every pending
+   fence counts as signaled. Returns whether the device is lost. *>
+fn bool retire_present_fences_if_lost(
+    VkDeviceState* state,
+    SwapchainSlot* slot,
+) {
+    if (!device_lost(state)) return false;
+    slot.present_fence_pending = {};
+    return true;
+}
+
+<* Report whether a fence result is device loss; if so, every pending fence
+   counts as signaled. *>
+fn bool absorb_present_fence_loss(
+    VkDeviceState* state,
+    SwapchainSlot* slot,
+    ZString operation,
+    vk::Result result,
+) {
+    if (!absorb_device_loss(state, operation, result)) return false;
+    slot.present_fence_pending = {};
+    return true;
+}
+
 fn bool? poll_present_fences_with(
     VkDeviceState* state,
     SwapchainSlot* slot,
     SwapchainFenceStatusFn status_fn,
 ) {
+    if (retire_present_fences_if_lost(state, slot)) return true;
     bool ready = true;
     for (uint i = 0; i < slot.image_count; i++) {
         if (!slot.present_fence_pending[i]) continue;
@@ -313,6 +338,14 @@ fn bool? poll_present_fences_with(
             state.device,
             slot.present_fences[i],
         );
+        if (absorb_present_fence_loss(
+            state:     state,
+            slot:      slot,
+            operation: "poll swapchain presentation retirement",
+            result:    result,
+        )) {
+            return true;
+        }
         if (result == vk::Result.SUCCESS) {
             slot.present_fence_pending[i] = false;
         } else if (result == vk::Result.NOT_READY) {
@@ -345,26 +378,45 @@ fn void? wait_present_fences_with(
         fence_count++;
     }
     if (fence_count == 0) return;
+    if (retire_present_fences_if_lost(state, slot)) return;
 
+    vk::Result wait_result = wait_fn(
+        state.device,
+        fence_count,
+        &fences[0],
+        vk::TRUE,
+        timeout_ns,
+    );
+    if (absorb_present_fence_loss(
+        state:     state,
+        slot:      slot,
+        operation: "wait_swapchain_presentations",
+        result:    wait_result,
+    )) {
+        return;
+    }
     check_wait_backend_result(
         state:     state,
         operation: "wait_swapchain_presentations",
-        result:    wait_fn(
-            state.device,
-            fence_count,
-            &fences[0],
-            vk::TRUE,
-            timeout_ns,
-        ),
+        result:    wait_result,
     )!;
+    vk::Result reset_result = reset_fn(
+        state.device,
+        fence_count,
+        &fences[0],
+    );
+    if (absorb_present_fence_loss(
+        state:     state,
+        slot:      slot,
+        operation: "reset_swapchain_presentations",
+        result:    reset_result,
+    )) {
+        return;
+    }
     check_backend_result(
         state:     state,
         operation: "reset_swapchain_presentations",
-        result:    reset_fn(
-            state.device,
-            fence_count,
-            &fences[0],
-        ),
+        result:    reset_result,
     )!;
     for (uint i = 0; i < fence_count; i++) {
         slot.present_fence_pending[indices[i]] = false;
@@ -397,19 +449,37 @@ fn void? prepare_present_fence_with(
         return gpu::BACKEND_ERROR~;
     }
     if (!slot.present_fence_pending[image_index]) return;
+    if (retire_present_fences_if_lost(state, slot)) return;
 
     vk::Fence fence = slot.present_fences[image_index];
     vk::Result status = status_fn(state.device, fence);
+    if (absorb_present_fence_loss(
+        state:     state,
+        slot:      slot,
+        operation: "present",
+        result:    status,
+    )) {
+        return;
+    }
     if (status == vk::Result.NOT_READY) return gpu::WAIT_TIMEOUT~;
     check_backend_result(
         state,
         "poll swapchain presentation fence",
         status,
     )!;
+    vk::Result reset = reset_fn(state.device, 1, &fence);
+    if (absorb_present_fence_loss(
+        state:     state,
+        slot:      slot,
+        operation: "present",
+        result:    reset,
+    )) {
+        return;
+    }
     check_backend_result(
         state,
         "reset swapchain presentation fence",
-        reset_fn(state.device, 1, &fence),
+        reset,
     )!;
     slot.present_fence_pending[image_index] = false;
 }
@@ -548,6 +618,24 @@ fn void commit_present_result(
     if (!present_result_consumes_acquisition(result)) return;
     clear_swapchain_acquisition(slot);
     *image = {};
+}
+
+<* Consume an acquisition whose native present was skipped or reported loss.
+   No presentation fence is pending for it. *>
+fn void commit_present_after_loss(
+    SwapchainSlot* slot,
+    TextureSlot* image_slot,
+    gpu::AcquiredImage* image,
+) {
+    mark_texture_presented(image_slot);
+    commit_present_result(slot, image, vk::Result.SUCCESS);
+}
+
+<* Once the device is lost no image is in use, so acquisition rotates through
+   the images without the driver. *>
+fn uint image_index_after_loss(SwapchainSlot* slot) {
+    if (slot.image_count == 0) return 0;
+    return (slot.pending_image + 1) % slot.image_count;
 }
 
 fn void publish_active_swapchain_info(
@@ -1169,14 +1257,18 @@ fn void? vk_resize_swapchain(
     vk::SwapchainKHR old = slot.swapchain;
     slot.swapchain = (vk::SwapchainKHR)null;
 
-    fault build_fault = @catch(build_swapchain(
-        state:   state,
-        slot:    slot,
-        width:   width,
-        height:  height,
-        old:     old,
-        context: &context,
-    ));
+    bool lost = device_lost(state);
+    fault build_fault;
+    if (!lost) {
+        build_fault = @catch(build_swapchain(
+            state:   state,
+            slot:    slot,
+            width:   width,
+            height:  height,
+            old:     old,
+            context: &context,
+        ));
+    }
     if (old != null) {
         state.device_dispatch.presentation.destroy_swapchain(
             state.device,
@@ -1184,8 +1276,9 @@ fn void? vk_resize_swapchain(
             null,
         );
     }
-    if (build_fault) {
-        // A failed rebuild remains dormant and queryable.
+    if (lost || build_fault) {
+        // A failed rebuild remains dormant and queryable. After device loss
+        // the dormant swapchain is the successful result.
         release_swapchain_images(state, slot);
         if (slot.swapchain != null) {
             state.device_dispatch.presentation.destroy_swapchain(
@@ -1196,6 +1289,7 @@ fn void? vk_resize_swapchain(
             slot.swapchain = (vk::SwapchainKHR)null;
         }
         publish_dormant_swapchain_info(slot);
+        if (lost || device_lost(state)) return;
         return build_fault~;
     }
 }
@@ -1333,26 +1427,36 @@ fn gpu::AcquiredImage? vk_acquire_next_image_with(
         poll_fn:  poll_fn,
     )!;
     uint image_index = 0;
-    vk::Result result = acquire_fn(
-        state.device,
-        slot.swapchain,
-        timeout_ns,
-        candidate.semaphore,
-        (vk::Fence)null,
-        &image_index,
-    );
-    check_wsi_backend_result(
-        context: &context,
-        kind:    WsiResultKind.ACQUIRE,
-        result:  result,
-    )!;
+    bool suboptimal = false;
+    if (device_lost(state)) {
+        image_index = image_index_after_loss(slot);
+    } else {
+        vk::Result result = acquire_fn(
+            state.device,
+            slot.swapchain,
+            timeout_ns,
+            candidate.semaphore,
+            (vk::Fence)null,
+            &image_index,
+        );
+        if (absorb_device_loss(state, "acquire_next_image", result)) {
+            image_index = image_index_after_loss(slot);
+        } else {
+            check_wsi_backend_result(
+                context: &context,
+                kind:    WsiResultKind.ACQUIRE,
+                result:  result,
+            )!;
+            suboptimal = result == vk::Result.SUBOPTIMAL_KHR;
+        }
+    }
     return commit_acquired_image(
         context:     &context,
         slot:        slot,
         handle:      handle,
         candidate:   candidate,
         image_index: image_index,
-        suboptimal:  result == vk::Result.SUBOPTIMAL_KHR,
+        suboptimal:  suboptimal,
     );
 }
 
@@ -1384,6 +1488,10 @@ fn void? vk_present_with(
     )!;
     uint image_index = slot.pending_image;
     prepare_present_fence(state, slot, image_index)!;
+    if (device_lost(state)) {
+        commit_present_after_loss(slot, image_slot, image);
+        return;
+    }
     vk::Fence present_fence = slot.present_fences[image_index];
     vk::SwapchainPresentFenceInfoEXT fence_info =
         vk::swapchain_present_fence_info_ext()
@@ -1402,6 +1510,10 @@ fn void? vk_present_with(
     queue_mutex.lock()!!;
     vk::Result result = present_fn(state.presentation.queue, &info);
     queue_mutex.unlock();
+    if (absorb_device_loss(state, "present", result)) {
+        commit_present_after_loss(slot, image_slot, image);
+        return;
+    }
     if (present_result_consumes_acquisition(result)) {
         slot.present_fence_pending[image_index] = true;
         mark_texture_presented(image_slot);

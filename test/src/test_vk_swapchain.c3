@@ -1040,11 +1040,6 @@ fn void mapped_acquire_errors_preserve_transaction_state() @test {
         vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
         gpu::OUT_OF_DEVICE_MEMORY,
     );
-    assert_mapped_acquire_failure_preserves_state(
-        &fixture,
-        vk::Result.ERROR_DEVICE_LOST,
-        gpu::BACKEND_ERROR,
-    );
 }
 
 fn void exhausted_acquisition_identity_precedes_native_acquire() @test {
@@ -2284,7 +2279,7 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
     gpu::AcquiredImage acquired = gpu::internal::vk::vk_acquire_next_image(
         state,
         fixture.swapchain,
-        0,
+        gpu::TIMEOUT_INFINITE,
     )!!;
     assert(acquired.prior_state.layout == gpu::TextureLayout.GENERAL,
         "unified mode reports the image in GENERAL");
@@ -2342,7 +2337,7 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
     gpu::AcquiredImage second = gpu::internal::vk::vk_acquire_next_image(
         state,
         fixture.swapchain,
-        0,
+        gpu::TIMEOUT_INFINITE,
     )!!;
     gpu::CommandList again = gpu::begin_commands(&allocator)!!;
     gpu::cmd_begin_render_pass(&again, &pass)!!;
@@ -2360,4 +2355,256 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
     gpu::wait_completion(second_point)!!;
     consume_simulated_present(&fixture, queue, &second);
     gpu::internal::vk::vk_destroy_swapchain(state, fixture.swapchain)!!;
+}
+
+// Presentation after device loss. Borrowed swapchains run on a real device;
+// native acquire and present are injected and count their calls.
+
+fn vk::Result lose_present(vk::Queue queue, vk::PresentInfoKHR* info) {
+    (void)queue;
+    (void)info;
+    captured_present_calls++;
+    return vk::Result.ERROR_DEVICE_LOST;
+}
+
+fn void acquire_present_after_loss() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_swapchain_loss_frame_test",
+    };
+    gpu::Device device = create_test_device(&runtime_desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::internal::vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    state.presentation.queue_mutex.init()!!;
+    BorrowedSwapchainFixture fixture;
+    install_borrowed_swapchain(state, &fixture);
+    defer restore_borrowed_swapchain(&fixture);
+    state.device_dispatch.presentation.queue_present = &capture_present;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(
+        &device,
+        queue,
+    )!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    captured_present_calls = 0;
+    borrowed_view_acquires = 0;
+    gpu::internal::mark_device_lost(&device);
+
+    for (uint frame = 0; frame < 3; frame++) {
+        gpu::AcquiredImage image = gpu::acquire_next_image(
+            &device,
+            fixture.swapchain,
+        )!!;
+        gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+        gpu::TextureBarrier to_present = {
+            .texture = image.texture,
+            .before  = image.prior_state,
+            .after   = { .layout = gpu::TextureLayout.PRESENT },
+        };
+        gpu::cmd_texture_barrier(&commands, &to_present)!!;
+        gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)!! };
+        gpu::SubmitDesc submit = {
+            .command_lists    = lists[..],
+            .readiness        = image.readiness,
+            .readiness_before = { .color_output },
+        };
+        gpu::CompletionPoint rendered = gpu::submit(queue, &submit)!!;
+        gpu::present(&device, &image, rendered)!!;
+        assert(!image.readiness.is_valid(), "present after loss consumes the image");
+    }
+    assert(borrowed_view_acquires == 0, "acquire after loss reaches no native acquire");
+    assert(captured_present_calls == 0, "present after loss reaches no native present");
+
+    gpu::wait_swapchain_presentations(&device, fixture.swapchain)!!;
+    gpu::internal::vk::vk_destroy_swapchain(state, fixture.swapchain)!!;
+}
+
+fn void pending_present_fence_at_loss() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_swapchain_loss_fence_test",
+    };
+    gpu::Device device = create_test_device(&runtime_desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::internal::vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    BorrowedSwapchainFixture fixture;
+    install_borrowed_swapchain(state, &fixture);
+    defer restore_borrowed_swapchain(&fixture);
+    // An enqueued presentation whose private fence never signals.
+    fixture.live_slot.present_fence_pending[0] = true;
+    gpu::internal::mark_device_lost(&device);
+
+    gpu::wait_swapchain_presentations(
+        &device,
+        fixture.swapchain,
+        gpu::TIMEOUT_INFINITE,
+    )!!;
+    gpu::internal::vk::vk_destroy_swapchain(state, fixture.swapchain)!!;
+}
+
+fn void present_fences_count_as_signaled_after_loss() @test {
+    AcquisitionFixture* fixture = mem::new(AcquisitionFixture);
+    gpu::Device device = gpu::internal::register_device(
+        state:  &fixture.state,
+        caps:   {},
+        owner:  &fixture.state.owner,
+    )!!;
+    fixture.device = device;
+    initialize_acquisition_fixture(fixture);
+    defer {
+        fixture.state.device = (vk::Device)null;
+        gpu::destroy_device(&device)!!;
+    }
+    gpu::internal::vk::SwapchainSlot* slot =
+        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+    slot.present_fences[0] = (vk::Fence)17;
+    gpu::internal::mark_device_lost(&device);
+    captured_fence_status_calls = 0;
+    captured_fence_reset_calls = 0;
+    reset_present_wait_capture(vk::Result.TIMEOUT);
+
+    slot.present_fence_pending[0] = true;
+    assert(gpu::internal::vk::poll_present_fences_with(
+        &fixture.state,
+        slot,
+        &capture_fence_pending,
+    )!!, "a pending fence polls as signaled after loss");
+    assert(!slot.present_fence_pending[0], "polling retires the pending fence");
+
+    slot.present_fence_pending[0] = true;
+    gpu::internal::vk::prepare_present_fence_with(
+        state:       &fixture.state,
+        slot:        slot,
+        image_index: 0,
+        status_fn:   &capture_fence_pending,
+        reset_fn:    &capture_fence_reset,
+    )!!;
+    assert(!slot.present_fence_pending[0], "fence reuse after loss does not wait");
+
+    slot.present_fence_pending[0] = true;
+    gpu::internal::vk::wait_present_fences_with(
+        state:      &fixture.state,
+        slot:       slot,
+        timeout_ns: gpu::TIMEOUT_INFINITE,
+        wait_fn:    &capture_fence_wait,
+        reset_fn:   &capture_fence_reset_all,
+    )!!;
+    assert(!slot.present_fence_pending[0], "waiting after loss retires the fence");
+    assert(captured_fence_status_calls == 0
+            && captured_fence_reset_calls == 0
+            && captured_fence_wait_calls == 0
+            && captured_batch_reset_calls == 0,
+        "presentation fences after loss perform no native work");
+}
+
+fn void resize_after_loss_goes_dormant() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_swapchain_loss_resize_test",
+    };
+    gpu::Device device = create_test_device(&runtime_desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::internal::vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    BorrowedSwapchainFixture fixture;
+    install_borrowed_swapchain(state, &fixture);
+    defer restore_borrowed_swapchain(&fixture);
+    uint creates_before = borrowed_view_swapchain_creates;
+    gpu::internal::mark_device_lost(&device);
+
+    gpu::resize_swapchain(&device, fixture.swapchain, 8, 8)!!;
+    assert(gpu::get_swapchain_info(&device, fixture.swapchain)!!.dormant,
+        "resize after loss leaves the swapchain dormant");
+    assert(borrowed_view_swapchain_creates == creates_before,
+        "resize after loss builds no native swapchain");
+    assert(@catch(gpu::acquire_next_image(&device, fixture.swapchain))
+            == gpu::SWAPCHAIN_OUT_OF_DATE,
+        "a dormant swapchain reports out of date after loss");
+    gpu::internal::vk::vk_destroy_swapchain(state, fixture.swapchain)!!;
+}
+
+fn void absorbed_present_loss() @test {
+    gpu::RuntimeDesc runtime_desc = {
+        .application_name = "gpu_swapchain_absorbed_present_test",
+    };
+    gpu::Device device = create_test_device(&runtime_desc)!!;
+    defer destroy_test_device(&device)!!;
+    gpu::internal::vk::VkDeviceState* state =
+        gpu::internal::device_slots[device.index].data.state;
+    state.presentation.queue_mutex.init()!!;
+
+    gpu::internal::vk::SwapchainCell[gpu::MAX_SWAPCHAINS] cells;
+    state.presentation.swapchains.owner = gpu::internal::resource_owner_tag(
+        state.resource_owner,
+        gpu::internal::ResourceOwnerKind.SWAPCHAIN,
+    );
+    state.presentation.swapchains.slots = cells[..];
+    defer state.presentation.swapchains.slots = {};
+
+    gpu::internal::vk::TextureSlot texture;
+    gpu::internal::vk::mark_texture_presented(&texture);
+    gpu::TextureHandle texture_handle = state.textures.alloc(texture)!!;
+    defer state.textures.free(texture_handle)!!;
+
+    gpu::CompletionPoint rendered = {
+        .device  = device,
+        .payload = 1ull << gpu::internal::COMPLETION_QUEUE_BITS,
+    };
+    gpu::internal::vk::SwapchainSlot pending = {
+        .swapchain          = (vk::SwapchainKHR)1,
+        .image_count        = 1,
+        .acquire_pending    = true,
+        .readiness_consumed = true,
+        .acquisition        = 7,
+        .pending_image      = 0,
+        .render_completion  = rendered,
+    };
+    pending.textures[0] = texture_handle;
+    pending.present_semaphores[0] = (vk::Semaphore)2;
+    pending.present_fences[0] = (vk::Fence)3;
+    gpu::SwapchainHandle handle =
+        state.presentation.swapchains.alloc(pending)!!;
+    gpu::AcquiredImage image = {
+        .texture   = texture_handle,
+        .readiness = gpu::internal::vk::make_swapchain_readiness(
+            device,
+            handle,
+            7,
+        )!!,
+        .index     = 0,
+    };
+    captured_present_calls = 0;
+
+    gpu::internal::vk::vk_present_with(
+        state:             state,
+        image:             &image,
+        render_completion: rendered,
+        present_fn:        &lose_present,
+    )!!;
+    gpu::internal::vk::SwapchainSlot* slot =
+        state.presentation.swapchains.get(handle)!!;
+    assert(captured_present_calls == 1, "the native present observed the loss");
+    assert(!image.readiness.is_valid() && !slot.acquire_pending,
+        "an absorbed present loss consumes the acquisition");
+    assert(!slot.present_fence_pending[0],
+        "an absorbed present loss leaves no fence pending");
+    assert(gpu::is_device_lost(&device), "the present marked the device lost");
+}
+
+fn void absorbed_acquire_loss_returns_an_image() @test {
+    AcquisitionFixture fixture = {};
+    initialize_acquisition_fixture(&fixture);
+    reset_acquisition_state(&fixture);
+    gpu::internal::vk::SwapchainSlot* slot =
+        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+    uint expected_index = (slot.pending_image + 1) % slot.image_count;
+
+    reset_acquire_capture(vk::Result.ERROR_DEVICE_LOST);
+    gpu::AcquiredImage image = run_captured_acquire(&fixture, 0)!!;
+    assert(captured_acquire_calls == 1, "the native acquire observed the loss");
+    assert(image.readiness.is_valid()
+            && !image.suboptimal
+            && image.index == expected_index,
+        "an absorbed acquire loss returns the next image");
+    assert(slot.acquire_pending && slot.pending_image == expected_index,
+        "an absorbed acquire loss commits the acquisition");
 }
