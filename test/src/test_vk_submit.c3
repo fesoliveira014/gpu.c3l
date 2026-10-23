@@ -1288,6 +1288,44 @@ fn void completion_sequence_exhaustion_precedes_native_submit() @test {
     gpu::wait_completion(point, 1_000_000_000)!!;
 }
 
+fn void deferred_discards_survive_a_successful_submit() @test {
+    gpu::Device device = make_submit_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CompletionPoint done;
+    {
+        gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+        defer (void)gpu::discard_commands(&commands);
+        gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)!! };
+        defer (void)gpu::discard_executable_commands(&lists[0]);
+        gpu::SubmitDesc submit = { .command_lists = lists[..] };
+        done = gpu::submit(queue, &submit)!!;
+        assert(!commands.is_valid() && !lists[0].is_valid(),
+            "end and submit zero the token storage they consume");
+    }
+    gpu::wait_completion(done)!!;
+}
+
+fn void discarding_a_submitted_copy_terminates() @test {
+    gpu::Device device = make_submit_test_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
+    gpu::ExecutableCommandList[1] lists = { executable };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::CompletionPoint done = gpu::submit(queue, &submit)!!;
+
+    @assert_panics("gpu::discard_executable_commands: consumed ExecutableCommandList") {
+        (void)gpu::discard_executable_commands(&executable);
+    };
+    gpu::wait_completion(done)!!;
+}
+
 fn void native_device_loss_publishes_complete_point() @test {
     gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;

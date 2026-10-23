@@ -277,10 +277,9 @@ gpu::Barrier to_host = {
     .after  = { .host },
 };
 gpu::cmd_barrier(&commands, &to_host)!;
-gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
-defer (void)gpu::discard_executable_commands(&executable);
+gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)! };
+defer (void)gpu::discard_executable_commands(&lists[0]);
 
-gpu::ExecutableCommandList[1] lists = { executable };
 gpu::SubmitDesc submit = { .command_lists = lists[..] };
 gpu::CompletionPoint completion = gpu::submit(queue, &submit)!;
 gpu::wait_completion(completion)!;
@@ -288,18 +287,25 @@ gpu::wait_completion(completion)!;
 
 The compute-to-host barrier makes the output visible to the CPU. `submit`
 consumes the executable list and returns the point that every later reuse
-waits on. The deferred discards are no-ops after a successful end and
-submit; they only run on an early fault.
+waits on. `end_commands` and `submit` zero the tokens they consume, so the
+deferred discards are no-ops after a successful end and submit; they only run
+on an early fault. Defer the discard on the array entry that the submit
+descriptor references: `submit` zeroes that entry, not other copies.
 
 ### Read back
 
 ```c3
+if (gpu::is_device_lost(&device)) return LOST_DEVICE~;
 gpu::invalidate_mapped_span(&device, output.span)!;
 float* out_data = (float*)output.bytes.ptr;
 for (uint i = 0; i < COUNT; i++) {
     if (out_data[i] != (float)i * 2.0f) return gpu::INVALID_ARGUMENT~;
 }
 ```
+
+If the device was lost, the wait still returned but the output is undefined,
+so the program checks `is_device_lost` before trusting it. `LOST_DEVICE` is
+the program's own fault, declared with `faultdef LOST_DEVICE;`.
 
 ### Run
 

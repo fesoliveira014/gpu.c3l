@@ -174,7 +174,7 @@ fn bool Adapter.is_valid(self) => (ulong)self != 0;
 
 <* Return one borrowed adapter from this runtime-owned view.
    @param index : "Zero-based index within the view."
-   @return "A borrowed adapter valid until runtime destruction, or a recoverable range or handle fault." *>
+   @return "A borrowed adapter valid until runtime destruction, or a recoverable range fault." *>
 fn Adapter? AdapterList.get(&self, uint index) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::RuntimeData* data = gpu::internal::require_runtime(&self.runtime)!;
@@ -379,6 +379,8 @@ fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
 
 <* Destroy a quiescent device.
    Preconditions: no live children, host operations, or incomplete queue work.
+   Externally synchronize against every other call on the device; a call that
+   overlaps destruction terminates.
    Always checked: device identity, children, pins, closing state, and progress.
    Runtime failures: RESOURCE_IN_USE or DEVICE_BUSY preserves the token.
    @param device : "Owning device token; success replaces it with the invalid value. The zero handle is a no-op."
@@ -953,7 +955,7 @@ fn DedicatedTexture? create_dedicated_texture(Device* device, TextureDesc* desc,
    Runtime failures: faults preserve the handle; placed storage stays caller-owned.
    @param device : "Live device that owns the texture."
    @param texture : "Owning texture handle to destroy. The zero handle is a no-op."
-   @return "Success, or a recoverable in-use fault." *>
+   @return "Success, or a recoverable in-use, invalid-argument (swapchain-owned texture), or backend fault." *>
 fn void? destroy_texture(Device* device, TextureHandle texture) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (texture == (TextureHandle){}) return;
@@ -1133,7 +1135,7 @@ fn TextureHandle? create_sparse_texture(Device* device, TextureDesc* desc) {
 <* Return the immutable requirements cached for a live sparse texture.
    @param device : "Live device that owns the texture."
    @param texture : "Live sparse texture handle."
-   @return "The cached requirements, or a recoverable argument or handle fault." *>
+   @return "The cached requirements, or a recoverable argument fault." *>
 fn SparseTextureRequirements? get_sparse_texture_requirements(Device* device, TextureHandle texture) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation =
@@ -1312,7 +1314,7 @@ fn void? destroy_acceleration_structure(Device* device, AccelerationStructureHan
    structure. Top-level structures are not address inputs to instances.
    @param device : "Live device that owns the BLAS."
    @param acceleration_structure : "Live bottom-level structure handle."
-   @return "A nonzero BLAS address, or a recoverable argument or handle fault." *>
+   @return "A nonzero BLAS address, or a recoverable argument fault." *>
 fn GpuAddress? get_acceleration_structure_address(Device* device, AccelerationStructureHandle acceleration_structure) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     gpu::internal::DeviceOperation operation =
@@ -1332,7 +1334,7 @@ fn GpuAddress? get_acceleration_structure_address(Device* device, AccelerationSt
 <* Validate a bottom-level structure and pack one exact 64-byte TLAS instance.
    @param device : "Live device that owns the referenced BLAS."
    @param desc : "Borrowed transform, BLAS, mask, index, and flag values."
-   @return "A packed instance, or a recoverable argument or handle fault." *>
+   @return "A packed instance, or a recoverable argument fault." *>
 fn AccelerationStructureInstance? make_acceleration_structure_instance(
     Device* device,
     AccelerationStructureInstanceDesc* desc,
@@ -2325,7 +2327,7 @@ fn AttachmentViewHandle? create_attachment_view(Device* device, AttachmentViewDe
    Runtime failures: faults preserve the view.
    @param device : "Live device that owns the attachment view."
    @param view : "Owning attachment-view handle to destroy. The zero handle is a no-op."
-   @return "Success, or a recoverable in-use fault." *>
+   @return "Success, or a recoverable resource-state fault for a swapchain-owned view." *>
 fn void? destroy_attachment_view(Device* device, AttachmentViewHandle view) {
     defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     if (view == (AttachmentViewHandle){}) return;

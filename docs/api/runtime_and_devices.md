@@ -197,7 +197,7 @@ No call returns a fault because its device is lost. After loss:
 |---|---|
 | `submit`, `bind_sparse_texture_memory` | consume their inputs and return a completion point that is already complete |
 | `poll_completion`, `wait_completion` | report completion; waits return immediately |
-| `begin_commands` | succeeds; submitted command units are free again |
+| `begin_commands` | submitted command units are free again; units held by unsubmitted lists still count against capacity |
 | `acquire_next_image`, `present` | return an image and consume it without presenting; a dormant swapchain still returns `SWAPCHAIN_OUT_OF_DATE` |
 | `wait_swapchain_presentations` | returns; pending presentations count as complete |
 | `resize_swapchain` | leaves the swapchain dormant and succeeds |

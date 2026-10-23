@@ -1792,6 +1792,27 @@ fn void discarded_command_list_copy_terminates() @test {
     };
 }
 
+fn void discarded_copy_terminates_after_its_record_is_reused() @test {
+    gpu::Device device = make_val_device();
+    defer destroy_test_device(&device)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    gpu::CommandList copy = commands;
+    gpu::discard_commands(&commands)!!;
+    gpu::CommandList fresh = gpu::begin_commands(&allocator)!!;
+    defer discard_test_commands(&fresh)!!;
+    assert(fresh.record == copy.record,
+        "the next recording reuses the discarded record");
+    gpu::Barrier barrier = { .before = { .compute }, .after = { .compute } };
+
+    @assert_panics("gpu::cmd_barrier: stale CommandList") {
+        (void)gpu::cmd_barrier(&copy, &barrier);
+    };
+    gpu::cmd_barrier(&fresh, &barrier)!!;
+}
+
 fn void pipeline_destroyed_twice_through_copy_terminates() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;

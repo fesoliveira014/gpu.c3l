@@ -158,9 +158,9 @@ Ignore this field when `swapchain` is invalid.
 The factory runs synchronously once, after successful adapter enumeration and
 before selection. It must return one fresh surface owned by the supplied runtime,
 clean its own partial work on failure, create no unrelated GPU children, and
-retain no bootstrap handles. Its user data is borrowed during the call. A foreign
-surface is rejected without being destroyed. Empty enumeration fails before the
-factory runs. Do not supply `device.surface` yourself.
+retain no bootstrap handles. Its user data is borrowed during the call. A
+surface that is zero, stale, or owned by another runtime terminates the process.
+Empty enumeration fails before the factory runs. Do not supply `device.surface` yourself.
 
 ## Adapter selection and creation faults
 
@@ -185,9 +185,9 @@ validation, allocation, capacity, and device faults also propagate.
 Creation performs no submissions, acquisitions, waits, or background work. If a
 stage fails, it attempts reverse cleanup of acquired objects, discards secondary
 cleanup faults, and returns the original fault without publishing a context.
-This includes destroying the new swapchain if its initial info query faults.
 Treat creation failure as fatal at application level: report it and terminate.
-The utility itself does not abort, exit, retry, or retain recovery state.
+The utility does not exit, retry, or retain recovery state; it terminates only
+for the callback handle errors described above.
 
 ## Shutdown
 
@@ -214,7 +214,9 @@ operation, and its fault. Callback payloads are synchronous and call-scoped;
 callbacks must not reenter GPU operations. Saved callback user data must remain
 valid until teardown returns, including reporting a final runtime release fault.
 
-After all attempts, the supplied struct is cleared. A zero context is harmless.
+After all attempts, the supplied struct is cleared. A zero context is harmless,
+and a zero field is skipped. A field the application destroyed itself must be
+zeroed first; teardown terminates on its stale handle.
 Release failures can leave objects unreleased, but the context and its copies
 must never be reused after teardown; there is no partial-context recovery.
 

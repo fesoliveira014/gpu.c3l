@@ -348,10 +348,9 @@ fn gpu::CompletionPoint? commands(
     defer (void)gpu::discard_commands(&list);
     gpu::cmd_bind_pipeline(&list, pipeline)!;
     gpu::cmd_dispatch(&list, root, { 1, 1, 1 })!;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&list)!;
-    defer (void)gpu::discard_executable_commands(&executable);
+    gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&list)! };
+    defer (void)gpu::discard_executable_commands(&lists[0]);
 
-    gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit_desc = { .command_lists = lists[..] };
     return gpu::submit(queue, &submit_desc);
 }

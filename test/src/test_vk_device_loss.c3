@@ -14,6 +14,7 @@ struct LossDiagnosticCapture {
 }
 
 struct LossReportArgs {
+    gpu::Device        device;
     vk::VkDeviceState* state;
     Atomic{bool}*      start;
 }
@@ -33,7 +34,7 @@ fn int report_loss_worker(void* raw_args) {
     LossReportArgs* args = (LossReportArgs*)raw_args;
     while (!args.start.load(AtomicOrdering.ACQUIRE)) thread::yield();
     (void)vk::absorb_device_loss(args.state, "loss_test", vk::Result.ERROR_DEVICE_LOST);
-    return 0;
+    return gpu::is_device_lost(&args.device) ? 0 : 1;
 }
 
 fn vk::Result lose_loss_test_submit(
@@ -255,11 +256,17 @@ fn void concurrent_loss_reports_once() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     Atomic{bool} start;
-    LossReportArgs args = { .state = loss_test_state(&device), .start = &start };
+    LossReportArgs args = {
+        .device = device,
+        .state  = loss_test_state(&device),
+        .start  = &start,
+    };
     Thread[2] workers;
     foreach (&worker : workers) worker.create(&report_loss_worker, &args)!!;
     start.store(true, AtomicOrdering.RELEASE);
-    foreach (&worker : workers) (void)worker.join()!!;
+    foreach (&worker : workers) {
+        assert(worker.join()!! == 0, "each observing thread sees the device lost");
+    }
 
     assert(capture.loss_messages.load(AtomicOrdering.ACQUIRE) == 1,
         "concurrent loss observations deliver one diagnostic");
