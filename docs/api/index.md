@@ -36,9 +36,26 @@ select documented defaults. Some calls accept `null` for an all-default
 descriptor.
 
 **Failure.** Creation publishes nothing on failure. Destruction leaves the
-handle valid on `RESOURCE_IN_USE` or `DEVICE_BUSY`. One-shot tokens
+handle valid on `RESOURCE_IN_USE` or `DEVICE_BUSY`. Destroying, freeing,
+discarding or releasing the zero handle is a no-op. One-shot tokens
 (`CommandList`, `ExecutableCommandList`, `SwapchainReadiness`,
 `AcquiredImage`) are consumed only by the documented successful call.
+
+**Programming errors terminate.** The process terminates when a call
+receives a handle or token that is zero (where zero does not mean "none"),
+stale, malformed, from another device or runtime, or already consumed; a null
+object pointer; or two handles that do not belong together. The panic message
+names the call and the handle type, for example `gpu::create_texture_view:
+stale TextureHandle`. These checks are not compiled out. When a debug callback
+is installed, diagnostics that describe the rejected handle are delivered
+first, with `has_fault` false.
+
+**Device loss.** Calls on a lost device keep succeeding without GPU effect:
+submissions complete immediately, waits return, and presentation consumes
+images. Results the GPU would have produced are undefined. Check
+`is_device_lost` once per frame and before trusting a readback, then tear the
+device down in the normal order. See
+[device loss](runtime_and_devices.md#device-loss).
 
 The optional [device context utility](../util/device_context.md#shutdown)
 groups these lifecycle calls with best-effort cleanup: teardown reports faults
@@ -60,15 +77,13 @@ lifetimes. Enable Vulkan validation explicitly for development diagnostics.
 | `UNSUPPORTED_BACKEND` | No Vulkan 1.3 driver or backend creation failed | no |
 | `UNSUPPORTED_FEATURE` | Capability, layer, format, or capacity unavailable | no |
 | `INVALID_ARGUMENT` | Descriptor or parameter rejected | fix input |
-| `INVALID_HANDLE` | Zero, stale, consumed, or foreign handle | fix input |
 | `INVALID_RESOURCE_STATE` | Transition or command state contradicts prior state | fix order |
 | `OUT_OF_HOST_MEMORY`, `OUT_OF_DEVICE_MEMORY` | Allocation failed | release memory |
-| `DEVICE_LOST` | Driver reported loss; the device rejects further work | recreate device |
-| `DEVICE_BUSY` | Work still running or contention | wait, retry |
+| `DEVICE_BUSY` | GPU work the call depends on has not finished | wait on an older completion point, retry |
 | `RESOURCE_IN_USE` | A live child or backend operation blocks destruction | release child or establish completion, retry |
 | `SLOT_TABLE_FULL` | Fixed public table full | destroy something |
 | `DESCRIPTOR_HEAP_FULL` | No free heap slot | destroy a view |
-| `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` | Fixed per-allocator bookkeeping exhausted | larger allocator |
+| `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` | Fixed per-allocator bookkeeping exhausted, or every command unit is held by unsubmitted lists | submit or discard a held list, or use a larger allocator |
 | `GENERATED_SCRATCH_EXHAUSTED` | Reservation too small for the generated call | larger reservation |
 | `PIPELINE_CREATE_FAILED` | Driver rejected the pipeline | no |
 | `SHADER_INVALID` | SPIR-V or ABI mismatch | fix shader |
@@ -76,10 +91,10 @@ lifetimes. Enable Vulkan validation explicitly for development diagnostics.
 | `SWAPCHAIN_OUT_OF_DATE` | Surface changed | resize |
 | `COMMAND_RECORDING_ERROR` | Token phase or command misuse | fix order |
 | `WAIT_TIMEOUT` | Bounded wait elapsed; nothing consumed | retry |
-| `BACKEND_ERROR` | Unclassified backend failure; not device loss | no |
+| `BACKEND_ERROR` | Unclassified backend failure | no |
 
-Faults that guard host safety, handle identity, command phase, and
-lifecycle are checked. Recording also reports actual capacity, capability,
+Host safety, command phase, and lifecycle are checked and reported as
+faults; handle identity is checked and terminates. Recording also reports actual capacity, capability,
 and native failures; it does not diagnose all GPU misuse. Acceleration-structure
 construction history and update compatibility are application preconditions;
 see [AS ordering](synchronization_and_submission.md#global-barriers).
@@ -115,8 +130,8 @@ Methods: `Device.is_valid`, `Runtime.is_valid`, `Adapter.is_valid`,
 Functions: `create_runtime`,
 `destroy_runtime`, `enumerate_adapters`, `get_adapter_info`,
 `get_adapter_diagnostics`, `supports_presentation`, `supports_device_desc`,
-`create_device`, `destroy_device`, `get_device_caps`, `get_queue`,
-`get_queue_info`.
+`create_device`, `destroy_device`, `is_device_lost`, `get_device_caps`,
+`get_queue`, `get_queue_info`.
 
 ### [Memory and resources](memory_and_resources.md)
 

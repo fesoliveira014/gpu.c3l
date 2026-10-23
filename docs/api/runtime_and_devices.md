@@ -56,11 +56,11 @@ synchronized process-wide.
 ## Adapters
 
 ```c3
-gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
 for (uint i = 0; i < adapters.count; i++) {
     gpu::Adapter adapter = adapters.get(i)!;
-    gpu::AdapterInfo info = gpu::get_adapter_info(&adapter)!;
-    gpu::AdapterDiagnostics diag = gpu::get_adapter_diagnostics(&adapter)!;
+    gpu::AdapterInfo info = gpu::get_adapter_info(&adapter);
+    gpu::AdapterDiagnostics diag = gpu::get_adapter_diagnostics(&adapter);
     io::printfn("%s (%s) driver %s", info.name, info.device_class, diag.driver_name);
 }
 ```
@@ -126,13 +126,15 @@ Creation is transactional and externally synchronized per runtime. Faults:
 `OUT_OF_DEVICE_MEMORY`, `SLOT_TABLE_FULL`, `BACKEND_ERROR`.
 
 `destroy_device` never waits. It returns `RESOURCE_IN_USE` while any child
-is live and `DEVICE_BUSY` while work is running. Destroy children first,
-wait on the last completion point, then retry.
+is live and `DEVICE_BUSY` while submitted work is running. Destroy children
+first, wait on the last completion point, then retry. No other call on the
+device may run while `destroy_device` runs; overlapping it with another call
+terminates. Destroying the zero device is a no-op.
 
 ## Capabilities
 
 ```c3
-gpu::DeviceCaps caps = gpu::get_device_caps(&device)!;
+gpu::DeviceCaps caps = gpu::get_device_caps(&device);
 if (caps.async_compute) { /* compute is its own queue */ }
 if (caps.draw_indirect_count) { /* cmd_draw_indexed_indirect_count works */ }
 uint max_targets = caps.max_color_attachments;
@@ -172,7 +174,7 @@ keep GPU operations within the reported limits.
 gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
 gpu::Queue compute  = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!;
 if (graphics == compute) { /* roles alias one native queue */ }
-gpu::QueueInfo info = gpu::get_queue_info(&device, compute)!;
+gpu::QueueInfo info = gpu::get_queue_info(&device, compute);
 ```
 
 `Queue` is a borrowed value: copy it freely, compare it with `==`. A
@@ -181,6 +183,42 @@ alias graphics; transfer may alias either.
 
 Submission, presentation, and sparse binding are externally synchronized on
 the native queue. Two aliased roles share that boundary.
+
+## Device loss
+
+When the driver reports that a device is lost, the library marks that device
+lost; other devices are unaffected. `is_device_lost` reports it. The query is
+thread-safe, never calls the driver, and stays true until the device is
+destroyed.
+
+No call returns a fault because its device is lost. After loss:
+
+| Operation | Behavior |
+|---|---|
+| `submit`, `bind_sparse_texture_memory` | consume their inputs and return a completion point that is already complete |
+| `poll_completion`, `wait_completion` | report completion; waits return immediately |
+| `begin_commands` | succeeds; submitted command units are free again |
+| `acquire_next_image`, `present` | return an image and consume it without presenting; a dormant swapchain still returns `SWAPCHAIN_OUT_OF_DATE` |
+| `wait_swapchain_presentations` | returns; pending presentations count as complete |
+| `resize_swapchain` | leaves the swapchain dormant and succeeds |
+| `read_timestamps` | succeeds with unspecified values |
+| recording, mapped-memory access, destruction | behave as on a live device |
+| object creation | proceeds; a driver refusal is an ordinary creation fault such as `BACKEND_ERROR` |
+
+Contents the GPU would have produced after loss are unspecified, including
+buffers written by GPU work. Check once per frame and before trusting a
+readback:
+
+```c3
+if (gpu::is_device_lost(&device)) {
+    // Stop issuing frames, tear the device down, and create a new one.
+    return;
+}
+```
+
+Teardown follows the normal order: wait on the last completion point, wait
+for swapchain presentations, destroy the children, then destroy the device.
+`destroy_device` still returns `RESOURCE_IN_USE` while a child is live.
 
 ## Surfaces
 
@@ -197,7 +235,7 @@ swapchain creation. See
 | adapter enumeration and queries | thread-safe | borrows the runtime |
 | `supports_device_desc`, `supports_presentation` | externally synchronized when a surface is involved | |
 | `create_device` | externally synchronized per runtime | descriptor borrowed for the call |
-| `get_device_caps`, `get_queue`, `get_queue_info` | thread-safe | |
-| `destroy_device` | thread-safe | never waits; retry on busy |
+| `is_device_lost`, `get_device_caps`, `get_queue`, `get_queue_info` | thread-safe | |
+| `destroy_device` | externally synchronized with every call on the device | never waits; retry on busy |
 
-`DEVICE_LOST` from any operation marks that device; other devices continue.
+Device loss marks only that device; see [device loss](#device-loss).

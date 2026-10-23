@@ -161,7 +161,7 @@ runtime_desc.application_name = "hello_gpu";
 gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
 defer (void)gpu::destroy_runtime(&runtime);
 
-gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
 gpu::Adapter adapter = adapters.get(0)!;
 gpu::Device device = gpu::create_device(&adapter)!;
 defer (void)gpu::destroy_device(&device);
@@ -401,7 +401,7 @@ the first adapter that supports it:
 ```c3
 fn gpu::Device? create_presentation_device(gpu::Runtime* runtime, gpu::Surface* surface) {
     gpu::DeviceDesc desc = { .surface = *surface };
-    gpu::AdapterList adapters = gpu::enumerate_adapters(runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(runtime);
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!;
         if (!gpu::supports_device_desc(&adapter, &desc)!.supported) continue;
@@ -423,7 +423,7 @@ gpu::SwapchainDesc swapchain_desc = {
 };
 gpu::SwapchainHandle swapchain =
     gpu::create_swapchain(&device, &surface, &swapchain_desc)!;
-gpu::SwapchainInfo swapchain_info = gpu::get_swapchain_info(&device, swapchain)!;
+gpu::SwapchainInfo swapchain_info = gpu::get_swapchain_info(&device, swapchain);
 ```
 
 `width` and `height` come from `sdl::get_window_size_in_pixels`. The backend
@@ -449,6 +449,7 @@ culling, depth, and blending are set per pass with `GraphicsState`.
 ### Frame: acquire
 
 ```c3
+if (gpu::is_device_lost(&device)) break;
 gpu::AcquiredImage? acquired = gpu::acquire_next_image(
     device:     &device,
     swapchain:  swapchain,
@@ -465,7 +466,10 @@ if (catch err = acquired) {
 ```
 
 `WAIT_TIMEOUT` means no image was free within the budget. Skip the frame and
-pump events. `SWAPCHAIN_OUT_OF_DATE` means the window changed.
+pump events. `SWAPCHAIN_OUT_OF_DATE` means the window changed. A lost device
+keeps accepting calls without drawing anything, so the loop checks
+`is_device_lost` and leaves for [teardown](#resize-and-teardown); see
+[device loss](api/runtime_and_devices.md#device-loss).
 
 ### Frame: record
 

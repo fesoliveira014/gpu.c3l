@@ -173,9 +173,9 @@ An `AdapterSelector` receives the new runtime and a private effective device
 description, including the created surface when present. Select an adapter from
 that runtime's adapter list. Treat requirements as borrowed input; do not modify
 them, retain the pointer, create owners, or publish bootstrap state. The utility
-checks adapter provenance and support before device creation. Zero, foreign,
-and stale adapter results return
-`INVALID_HANDLE`. Callback faults propagate unchanged. Device creation is attempted
+checks adapter provenance and support before device creation. An adapter
+result that is zero, foreign, or stale terminates the process. Callback
+faults propagate unchanged. Device creation is attempted
 once and remains authoritative; a creation fault does not trigger reselection.
 
 A null description, supplied `device.surface`, user data without its callback,

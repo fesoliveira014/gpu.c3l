@@ -27,7 +27,7 @@ Samples use their own module names. Shipped convenience helpers go in
 | Variables, fields, parameters | `snake_case` | `queue_index`, `debug_name` |
 | Functions | `snake_case` | `allocate_memory`, `cmd_dispatch` |
 | Structs, enums, typedefs, aliases | `PascalCase` | `RuntimeDesc`, `GpuSpan` |
-| Constants and enum values | `SCREAMING_SNAKE_CASE` | `MAX_SHADER_HEAP_CAPACITY`, `DEVICE_LOST` |
+| Constants and enum values | `SCREAMING_SNAKE_CASE` | `MAX_SHADER_HEAP_CAPACITY`, `DEVICE_BUSY` |
 | Modules | lowercase, `::`-separated | `gpu::internal::vk` |
 | Files | `snake_case.c3` | `descriptor_heap.c3` |
 
@@ -60,12 +60,20 @@ Fallible operations return `T?` or `void?` and fail with a named fault:
 
 ```c3
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc);
-return INVALID_HANDLE~;
+return INVALID_ARGUMENT~;
 ```
 
 Do not use bool out-parameters, null returns, `-1` sentinels, or global
 error state. Use the most specific fault that fits; add a catch-all only
 when no category applies.
+
+Faults are for conditions an application can act on. A rejected handle,
+null object pointer, or broken internal invariant is a programming error:
+return `gpu::internal::reject_handle(kind, cause)~` from internal code, and
+let the public boundary terminate with a message naming the call and the
+handle type. A public function with no remaining fault returns `T` or
+`void` and unwraps its single internal call with
+`gpu::internal::@require_valid`.
 
 ## 7. Handles
 
@@ -93,9 +101,9 @@ Calls with three or fewer arguments may stay positional.
 K&R:
 
 ```c3
-fn void? free_allocation(Device* device, GpuAllocation* allocation) {
-    if (allocation == null || !allocation.is_valid()) {
-        return INVALID_HANDLE~;
+fn void? allocate_texture_storage(Device* device, TextureDesc* desc) {
+    if (desc == null || desc.width == 0) {
+        return INVALID_ARGUMENT~;
     }
 }
 ```

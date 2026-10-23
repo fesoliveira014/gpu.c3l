@@ -46,7 +46,7 @@ hazard as on the general path.
 `update_texture_view` resolves the new texture's cached native view, writes
 the descriptor at the existing slot, moves the live-view count between the
 textures, and advances the cell generation. The caller's token is rewritten;
-older copies fault `INVALID_HANDLE`. The old native view stays in its
+using an older copy terminates as a stale handle. The old native view stays in its
 texture's cache, which is released with the texture.
 
 ## What was rejected
