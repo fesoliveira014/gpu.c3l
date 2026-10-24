@@ -27,7 +27,7 @@ fn Runtime sampler_test_runtime() {
 }
 
 fn Device sampler_test_device(Runtime* runtime) {
-    Adapter adapter = gpu::enumerate_adapters(runtime)!!.get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(runtime).get(0)!!;
     return gpu::create_device(&adapter)!!;
 }
 
@@ -71,7 +71,7 @@ fn void sampler_interning_pins_public_contract() @test {
     assert(gpu::internal::vk::stub_sampler_intern_attempt_count(&device) == 0,
         "null descriptions stop before backend mutation");
 
-    DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    DeviceCaps caps = gpu::get_device_caps(&device);
     assert(caps.max_sampler_lod_bias == 16.0f,
         "caps expose the backend-neutral sampler LOD bias limit");
     SamplerDesc invalid_bias = sampler_test_desc();
@@ -119,7 +119,7 @@ fn void sampler_interning_pins_public_contract() @test {
 fn void sampler_anisotropy_contract_is_exact_and_transactional() @test {
     Runtime runtime = sampler_test_runtime();
     Device device = sampler_test_device(&runtime);
-    DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    DeviceCaps caps = gpu::get_device_caps(&device);
     assert(caps.max_sampler_anisotropy == 16.0f,
         "the stub exposes its exact anisotropy capability");
 

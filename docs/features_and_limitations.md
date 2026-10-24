@@ -85,7 +85,12 @@ by CPU tests but has not run on hardware that reports the capability.
 - Commands do not retain application resources.
   Keep resources alive and unmodified as required through their last GPU use.
 - Creation is transactional; destruction never waits and may return
-  `RESOURCE_IN_USE` or `DEVICE_BUSY`.
+  `RESOURCE_IN_USE`, or `DEVICE_BUSY` for a device whose submitted work is
+  still running.
+- A zero, stale, foreign, or consumed handle terminates the process; it is a
+  programming error, not a fault.
+- A lost device keeps accepting calls without GPU effect; `is_device_lost`
+  reports the loss.
 - Texture layout history is application state. Each transition names the
   exact prior state.
 - Timestamp slot reset, write, and read history is application state.

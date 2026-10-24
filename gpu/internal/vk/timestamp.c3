@@ -130,19 +130,19 @@ fn gpu::TimestampPoolHandle? TimestampPoolTable.alloc(
     };
 }
 
-fn TimestampPoolSlot*? TimestampPoolTable.get(
-    &self,
-    gpu::TimestampPoolHandle handle,
-) {
-    if (handle.owner != self.owner) return gpu::INVALID_HANDLE~;
-    uint index = handle.index;
-    if (index >= self.slots.len || !self.slots[index].used) {
-        return gpu::INVALID_HANDLE~;
-    }
-    if (self.slots[index].generation != handle.generation) {
-        return gpu::INVALID_HANDLE~;
-    }
-    return &self.slots[index].value;
+<* Look up a slot without terminating: null unless `handle` is live. *>
+fn TimestampPoolSlot* TimestampPoolTable.find(&self, gpu::TimestampPoolHandle handle) {
+    if (handle.owner != self.owner || handle.index >= self.slots.len) return null;
+    if (!self.slots[handle.index].used
+        || self.slots[handle.index].generation != handle.generation) return null;
+    return &self.slots[handle.index].value;
+}
+
+fn TimestampPoolSlot*? TimestampPoolTable.get(&self, gpu::TimestampPoolHandle handle) {
+    if (handle.owner != self.owner) abort("gpu: foreign TimestampPoolHandle");
+    TimestampPoolSlot* slot = self.find(handle);
+    if (slot == null) abort("gpu: stale TimestampPoolHandle");
+    return slot;
 }
 
 fn void? TimestampPoolTable.free(
@@ -385,6 +385,10 @@ fn void? vk_read_timestamps(
     TimestampPoolSlot* slot = state.timestamp_pools.get(pool)!;
     validate_timestamp_range(slot.capacity, first, count)!;
     usz required = timestamp_result_bytes(count)!;
+    if (device_lost(state)) {
+        out[:count] = 0;
+        return;
+    }
     vk::Result result = vk::get_query_pool_results(
         device:      state.device,
         query_pool:  slot.pool,
@@ -396,6 +400,10 @@ fn void? vk_read_timestamps(
         flags:       (vk::QueryResultFlags)
             vk::QueryResultFlagBits.RESULT_64_BIT,
     );
+    if (absorb_device_loss(state, "read_timestamps", result)) {
+        out[:count] = 0;
+        return;
+    }
     if (result == vk::Result.NOT_READY) return gpu::DEVICE_BUSY~;
     check_device_result(state, result)!;
 }

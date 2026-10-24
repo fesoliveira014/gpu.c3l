@@ -34,7 +34,7 @@ fn gpu::Device? create_ray_query_test_device(
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::DeviceDesc device_desc = {
         .enable_ray_queries = true,
     };
@@ -61,7 +61,7 @@ fn void lavapipe_ray_query_device_path_is_actionable() @test {
         destroy_test_device(&device)!!;
         runtime = {};
     }
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     assert(caps.ray_queries.enabled
             && caps.acceleration_structures.heap_capacity == 32
             && caps.acceleration_structures.max_geometry_count > 0
@@ -78,7 +78,7 @@ fn void memory_stats_report_the_acceleration_structure_table_capacity() @test {
         runtime = {};
     }
 
-    gpu::MemoryStats stats = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats stats = gpu::get_memory_stats(&device);
     assert(stats.acceleration_structure_capacity == (uint)vk::MAX_ACCELERATION_STRUCTURES,
         "capacity is the acceleration structure table size");
     assert(stats.allocation_capacity == vk::ALLOCATION_CAPACITY,
@@ -100,7 +100,7 @@ fn void lavapipe_acceleration_structure_storage_models_are_explicit() @test {
     gpu::AccelerationStructureRequirements requirements =
         gpu::get_acceleration_structure_requirements(&device, &desc)!!;
 
-    gpu::MemoryStats baseline = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats baseline = gpu::get_memory_stats(&device);
     gpu::AccelerationStructureHandle hidden =
         gpu::create_acceleration_structure(&device, &desc)!!;
     gpu::internal::vk::VkDeviceState* state =
@@ -110,10 +110,10 @@ fn void lavapipe_acceleration_structure_storage_models_are_explicit() @test {
     assert(owned.backing_buffer != null && owned.backing_allocation != null
         && !owned.placement.is_valid(),
         "an ordinary structure directly owns its native backing");
-    assert(gpu::get_memory_stats(&device)!!.live_allocation_count
+    assert(gpu::get_memory_stats(&device).live_allocation_count
         == baseline.live_allocation_count + 1);
     gpu::destroy_acceleration_structure(&device, hidden)!!;
-    assert(gpu::get_memory_stats(&device)!!.live_allocation_count
+    assert(gpu::get_memory_stats(&device).live_allocation_count
         == baseline.live_allocation_count,
         "destroying an owned structure releases its backing exactly once");
 
@@ -124,7 +124,7 @@ fn void lavapipe_acceleration_structure_storage_models_are_explicit() @test {
         assert(@catch(gpu::create_acceleration_structure(&device, &desc))
             == gpu::SLOT_TABLE_FULL,
             "failed publication rejects the completed native structure");
-        assert(gpu::get_memory_stats(&device)!!.live_allocation_count
+        assert(gpu::get_memory_stats(&device).live_allocation_count
             == baseline.live_allocation_count,
             "failed publication releases unpublished backing without a registry");
     }
@@ -487,7 +487,7 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
 
     gpu::AccelerationStructureView tlas_view =
         gpu::create_acceleration_structure_view(&device, tlas_clone)!!;
-    defer gpu::destroy_acceleration_structure_view(&device, tlas_view)!!;
+    defer gpu::destroy_acceleration_structure_view(&device, tlas_view);
     OwnedSpan output = allocate_ray_query_span(
         device:       &device,
         size:         5 * RayQueryResult::size,
@@ -859,7 +859,7 @@ fn void lavapipe_aabb_candidates_require_explicit_confirmation() @test {
 
     gpu::AccelerationStructureView tlas_view =
         gpu::create_acceleration_structure_view(&device, tlas)!!;
-    defer gpu::destroy_acceleration_structure_view(&device, tlas_view)!!;
+    defer gpu::destroy_acceleration_structure_view(&device, tlas_view);
     OwnedSpan output = allocate_ray_query_span(
         device:       &device,
         size:         3 * RayQueryResult::size,

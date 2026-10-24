@@ -2,6 +2,7 @@ module gpu;
 
 import gpu::internal @public;
 import gpu::internal::vk @public;
+import gpu_test;
 
 struct CompletionFixture {
     gpu::internal::vk::VkDeviceState state;
@@ -83,9 +84,6 @@ fn void completion_points_reject_reserved_values() @test {
         "the zero completion point is invalid");
     assert(@catch(gpu::internal::make_completion_point(queue, 0)) == INVALID_ARGUMENT,
         "sequence zero remains reserved");
-    queue.id = gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES;
-    assert(@catch(gpu::internal::make_completion_point(queue, 1)) == INVALID_HANDLE,
-        "an unencodable queue identity is rejected");
 }
 
 fn void completion_sequences_are_monotonic_and_stop_before_wrap() @test {
@@ -149,44 +147,6 @@ fn void completion_points_poll_and_wait_without_consumption() @test {
         "the default host wait has no timeout");
 
     destroy_device(&device)!!;
-}
-
-fn void completion_points_reject_stale_and_foreign_ownership() @test {
-    CompletionFixture first_fixture;
-    CompletionFixture second_fixture;
-    Device first = gpu::internal::register_device(
-        state:  &first_fixture.state,
-        caps:   {},
-    )!!;
-    Device second = gpu::internal::register_device(
-        state:  &second_fixture.state,
-        caps:   {},
-    )!!;
-    Queue first_queue = get_queue(&first, QueueKind.GRAPHICS)!!;
-    CompletionPoint point = gpu::internal::make_completion_point(first_queue, 1)!!;
-
-    gpu::internal::DeviceOperation second_operation = gpu::internal::begin_device_operation(&second)!!;
-    assert(
-        @catch(gpu::internal::validate_completion_point(&second_operation, &second, point))
-            == INVALID_HANDLE,
-        "a point cannot be used with another device"
-    );
-    gpu::internal::end_device_operation(&second_operation);
-
-    CompletionPoint malformed = gpu::internal::make_completion_point({
-        .device = first,
-        .id     = 1,
-        .roles  = { .graphics },
-    }, 1)!!;
-    assert(@catch(poll_completion(malformed)) == INVALID_HANDLE,
-        "an unselected queue identity faults before backend work");
-    assert(first_fixture.state.completion_poll_calls == 0,
-        "malformed points do not reach the backend");
-
-    destroy_device(&first)!!;
-    assert(@catch(poll_completion(point)) == INVALID_HANDLE,
-        "a point becomes stale with its device");
-    destroy_device(&second)!!;
 }
 
 fn void completion_point_creation_allocates_no_public_object() @test {

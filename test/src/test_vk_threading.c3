@@ -126,7 +126,7 @@ fn int creation_storm_worker(void* arg) {
             || !sampler.is_valid()) {
             args.failed = true;
         }
-        gpu::destroy_texture_view(args.device, view)!!;
+        gpu::destroy_texture_view(args.device, view);
         gpu::destroy_texture(args.device, texture)!!;
         free_owned_span(args.device, &buffer)!!;
     }
@@ -206,7 +206,7 @@ fn void texture_view_cache_uses_device_allocator_across_threads() @test {
         "worker publishes through a thread-local allocator that rejects allocations");
     assert(args.published.is_valid(),
         "texture-view cache storage comes from the device allocator");
-    gpu::destroy_texture_view(&device, args.published)!!;
+    gpu::destroy_texture_view(&device, args.published);
 }
 
 struct RenderViewGateArgs {
@@ -817,7 +817,7 @@ fn void sequential_worker_churn_reuses_allocator_table_capacity() @test {
 fn void generated_scratch_reservations_are_allocator_local() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
-    if (!gpu::get_device_caps(&device)!!.generated_work) return;
+    if (!gpu::get_device_caps(&device).generated_work) return;
     gpu::ShaderDesc shader_desc = {
         .spirv       = THR_COMP_SPIRV[..],
         .entry_point = "main",
@@ -1316,75 +1316,6 @@ fn void acceleration_structure_lifecycle_churn_is_thread_safe() @test {
     foreach (i, &worker : workers) {
         assert(worker.join()!! == 0 && !args[i].failed,
             "distinct acceleration-structure lifecycle operations complete concurrently");
-    }
-}
-
-struct AccelerationStructureViewRaceArgs {
-    gpu::Device*                     device;
-    gpu::AccelerationStructureHandle acceleration_structure;
-    Atomic{bool}*                    start;
-    gpu::AccelerationStructureView   view;
-    fault                            result;
-    bool                             succeeded;
-}
-
-fn int acceleration_structure_view_race_worker(void* raw_args) {
-    AccelerationStructureViewRaceArgs* args =
-        (AccelerationStructureViewRaceArgs*)raw_args;
-    while (!args.start.load(AtomicOrdering.ACQUIRE)) thread::yield();
-    gpu::AccelerationStructureView? view =
-        gpu::create_acceleration_structure_view(
-            args.device,
-            args.acceleration_structure,
-        );
-    if (catch create_fault = view) {
-        args.result = create_fault;
-        return 0;
-    }
-    args.view = view;
-    args.succeeded = true;
-    return 0;
-}
-
-fn void tlas_view_creation_serializes_with_destruction() @test {
-    gpu::Runtime runtime;
-    gpu::Device device = create_ray_query_test_device(&runtime)!!;
-    defer {
-        destroy_test_device(&device)!!;
-        runtime = {};
-    }
-    gpu::AccelerationStructureDesc desc = {
-        .kind = gpu::AccelerationStructureKind.TOP_LEVEL,
-        .max_instance_count = 1,
-    };
-    gpu::AccelerationStructureHandle tlas =
-        gpu::create_acceleration_structure(&device, &desc)!!;
-    Atomic{bool} start;
-    AccelerationStructureViewRaceArgs args = {
-        .device = &device,
-        .acceleration_structure = tlas,
-        .start = &start,
-    };
-    Thread worker;
-    worker.create(&acceleration_structure_view_race_worker, &args)!!;
-    start.store(true, AtomicOrdering.RELEASE);
-    fault destroy_fault;
-    bool destroyed;
-    if (catch f = gpu::destroy_acceleration_structure(&device, tlas)) {
-        destroy_fault = f;
-    } else {
-        destroyed = true;
-    }
-    worker.join()!!;
-
-    if (args.succeeded) {
-        assert(!destroyed && destroy_fault == gpu::RESOURCE_IN_USE,
-            "a published view wins atomically and blocks TLAS destruction");
-        gpu::destroy_acceleration_structure_view(&device, args.view)!!;
-        gpu::destroy_acceleration_structure(&device, tlas)!!;
-    } else {
-        assert(destroyed && args.result == gpu::INVALID_HANDLE,
-            "TLAS destruction wins atomically before view publication");
     }
 }
 

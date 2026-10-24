@@ -180,7 +180,7 @@ is: write, flush, submit; then wait, invalidate, read.
 ```c3
 gpu::TimestampPoolDesc pool_desc = { .capacity = 64 };
 gpu::TimestampPoolHandle pool = gpu::create_timestamp_pool(&device, &pool_desc)!;
-defer (void)gpu::destroy_timestamp_pool(&device, pool);
+defer gpu::destroy_timestamp_pool(&device, pool);
 
 gpu::cmd_reset_timestamps(&commands, pool, 0, 2)!;
 gpu::cmd_write_timestamp(&commands, pool, 0, { .all })!;
@@ -208,9 +208,11 @@ timestamps.
 |---|---|
 | invalid submission wait stage, descriptor, or host-lowering range | `INVALID_ARGUMENT` |
 | incompatible library-owned state | `INVALID_RESOURCE_STATE` |
-| stale, foreign, or consumed token | `INVALID_HANDLE`, `COMMAND_RECORDING_ERROR` |
+| list already being submitted by another call | `COMMAND_RECORDING_ERROR` |
 | wait elapsed | `WAIT_TIMEOUT` |
-| values not ready | `DEVICE_BUSY` |
-| device loss | `DEVICE_LOST` |
+| timestamp values not ready, or too many points in flight on the queue | `DEVICE_BUSY` |
+
+A zero, stale, foreign, or consumed handle terminates instead of returning a
+fault; see [conventions](index.md#conventions).
 
 No call here destroys a resource or idles the device.

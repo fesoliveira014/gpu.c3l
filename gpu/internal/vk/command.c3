@@ -209,18 +209,19 @@ fn gpu::CommandAllocatorHandle? CommandAllocatorTable.alloc(
     };
 }
 
-fn CommandAllocatorSlot*? CommandAllocatorTable.get(
-    &self,
-    gpu::CommandAllocatorHandle handle,
-) {
-    if (handle.owner != self.owner || handle.index >= self.next_new) {
-        return gpu::INVALID_HANDLE~;
-    }
-    CommandAllocatorCell* cell = &self.slots[handle.index];
-    if (!cell.used || cell.generation != handle.generation) {
-        return gpu::INVALID_HANDLE~;
-    }
-    return &cell.value;
+<* Look up a slot without terminating: null unless `handle` is live. *>
+fn CommandAllocatorSlot* CommandAllocatorTable.find(&self, gpu::CommandAllocatorHandle handle) {
+    if (handle.owner != self.owner || handle.index >= self.next_new) return null;
+    if (!self.slots[handle.index].used
+        || self.slots[handle.index].generation != handle.generation) return null;
+    return &self.slots[handle.index].value;
+}
+
+fn CommandAllocatorSlot*? CommandAllocatorTable.get(&self, gpu::CommandAllocatorHandle handle) {
+    if (handle.owner != self.owner) abort("gpu: foreign CommandAllocator");
+    CommandAllocatorSlot* slot = self.find(handle);
+    if (slot == null) abort("gpu: stale CommandAllocator");
+    return slot;
 }
 
 fn void? CommandAllocatorTable.free(
@@ -531,12 +532,12 @@ fn CommandAllocatorSlot*? resolve_command_allocator(
     gpu::CommandAllocator* allocator,
 ) {
     if (allocator == null || allocator.device != state.owner) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: foreign CommandAllocator");
     }
     CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
     )!;
-    if (slot.queue != allocator.queue) return gpu::INVALID_HANDLE~;
+    if (slot.queue != allocator.queue) abort("gpu: mismatched CommandAllocator");
     return slot;
 }
 
@@ -999,7 +1000,12 @@ fn CommandRecord*? begin_commands_locked(
         )) {
         return gpu::RESOURCE_IN_USE~;
     }
-    if (slot.available_count == 0) return gpu::DEVICE_BUSY~;
+    if (slot.available_count == 0) {
+        // Waiting frees a unit only while one is in flight; otherwise every
+        // unit is held by the application.
+        if (slot.in_flight_buffers > 0) return gpu::DEVICE_BUSY~;
+        return gpu::COMMAND_ALLOCATOR_CAPACITY_EXCEEDED~;
+    }
     uint buffer_index = slot.available[--slot.available_count];
     CommandScratch* scratch = &slot.scratch[buffer_index];
     scratch.in_use = true;
@@ -1183,8 +1189,8 @@ fn void record_texture_init_barriers(
     vk::ImageMemoryBarrier2[BATCH] barriers;
     uint count = 0;
     foreach (handle : textures) {
-        TextureSlot*? slot = state.textures.get(handle);
-        if (catch slot) continue;
+        TextureSlot* slot = state.textures.find(handle);
+        if (slot == null) continue;
         barriers[count++] = texture_init_barrier(slot.image, slot.format);
         if (count == BATCH) {
             emit_image_barriers(record, barriers[:count]);
@@ -1203,8 +1209,8 @@ fn void record_swapchain_transition(
     bool acquire,
     BarrierEmitOps* ops,
 ) {
-    TextureSlot*? slot = state.textures.get(texture);
-    if (catch slot) return;
+    TextureSlot* slot = state.textures.find(texture);
+    if (slot == null) return;
     vk::ImageMemoryBarrier2 barrier = acquire
         ? texture_init_barrier(slot.image, slot.format)
         : vk::image_memory_barrier2()
@@ -1296,7 +1302,7 @@ fn void? vk_end_commands_with_ops(
     if (commands.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    if (commands.device_state != state) return gpu::INVALID_HANDLE~;
+    if (commands.device_state != state) abort("gpu: corrupt CommandList");
     CommandAllocatorSlot* slot = lock_command_allocator_handle(
         state,
         record.allocator,
@@ -1360,7 +1366,7 @@ fn void? end_commands_with_injected_ops(
 ) @feat(TESTING) {
     if (record == null
         || record.device_state != state) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: corrupt CommandList");
     }
     return vk_end_commands_with_ops(state, record, ops);
 }
@@ -1370,7 +1376,7 @@ fn void? vk_discard_commands(
     CommandRecord* command,
     bool executable,
 ) {
-    if (command.device_state != state) return gpu::INVALID_HANDLE~;
+    if (command.device_state != state) abort("gpu: corrupt CommandList");
     gpu::internal::CommandListHandle handle = command.identity;
     gpu::CommandAllocatorHandle allocator_handle;
     {

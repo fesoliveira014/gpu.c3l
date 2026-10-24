@@ -29,6 +29,7 @@
     "../../gpu/internal/render_pass.c3",
     "../../gpu/internal/sync.c3",
     "../../gpu/internal/queue.c3",
+    "../../gpu/internal/handle_kind.c3",
     "../../gpu/internal/vk/internal.c3",
     "vk_stub.c3"
   ],
@@ -73,7 +74,8 @@
         "../src/test_device_fixture.c3",
         "../src/test_device_registry.c3",
         "../src/test_diagnostics.c3",
-        "../src/test_argument_bytes.c3"
+        "../src/test_argument_bytes.c3",
+        "../src/test_zero_destroy.c3"
       ]
     },
     "shader_abi": {

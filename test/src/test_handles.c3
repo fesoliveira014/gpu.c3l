@@ -2,6 +2,8 @@ module gpu_test;
 
 import gpu @public;
 
+faultdef STALE_SLOT;
+
 struct SlotHandle {
     ulong owner;
     uint  index;
@@ -94,10 +96,10 @@ fn SlotHandle? IntTable.alloc(&self, int value) {
 }
 
 fn int*? IntTable.get(&self, SlotHandle h) {
-    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
+    if (h.owner != self.owner) return STALE_SLOT~;
     uint idx = h.index;
-    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
-    if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
+    if (idx >= self.slots.len || !self.slots[idx].used) return STALE_SLOT~;
+    if (self.slots[idx].generation != h.generation) return STALE_SLOT~;
     return &self.slots[idx].value;
 }
 
@@ -120,7 +122,7 @@ fn void slot_alloc_get_free() @test {
 
     t.free(a)!!;
     fault freed_fault = @catch(t.get(a));
-    assert(freed_fault == gpu::INVALID_HANDLE, "freed handle returns INVALID_HANDLE");
+    assert(freed_fault == STALE_SLOT, "a freed handle is stale");
 }
 
 fn void generation_mismatch_rejected() @test {
@@ -135,7 +137,7 @@ fn void generation_mismatch_rejected() @test {
     assert(fresh.generation > stale.generation, "reused slot bumps generation");
 
     fault stale_fault = @catch(t.get(stale));
-    assert(stale_fault == gpu::INVALID_HANDLE, "stale handle to reused slot returns INVALID_HANDLE");
+    assert(stale_fault == STALE_SLOT, "a stale handle to a reused slot is rejected");
     assert(*t.get(fresh)!! == 2, "fresh handle resolves");
 }
 

@@ -10,7 +10,6 @@ import std::core::mem;
 const uint MAX_DEVICES @private = 64;
 const uint MAX_DEVICE_GENERATION @private = 0x00FF_FFFF;
 const uint MAX_DEVICE_OPERATION_PINS @private = 0x3FFF_FFFF;
-const uint MAX_DEVICE_OPERATION_PIN_ATTEMPTS @private = 64;
 const uint MAX_DEVICE_COMMANDS @private = 4096;
 const uint COMMAND_TOKEN_DEVICE_INDEX_BITS @private = 6;
 const uint COMMAND_TOKEN_DEVICE_GENERATION_BITS @private = 24;
@@ -148,21 +147,36 @@ fn ulong? allocate_device_resource_owner() @private {
     }
 }
 
-fn DeviceOperation? begin_device_operation(
-    Device* device,
-    bool allow_lost = false,
-) @private {
-    if (device == null || !device.is_valid()) return gpu::INVALID_HANDLE~;
-    if (device.reserved != 0 || device.index >= MAX_DEVICES) return gpu::INVALID_HANDLE~;
+<* Reject a device token whose bits can never name a live device. *>
+fn void? validate_device_token(Device* device) @private {
+    if (device == null) abort("gpu: null Device");
+    if (!device.is_valid()) abort("gpu: zero Device");
+    if (device.reserved != 0 || device.index >= MAX_DEVICES || device.generation == 0) {
+        abort("gpu: malformed Device");
+    }
+}
+
+<* Pin a live device. A failed CAS means another thread's CAS succeeded, so
+   the loop always makes progress; contention never fails the operation. *>
+fn DeviceOperation? begin_device_operation(Device* device) @private {
+    validate_device_token(device)!;
 
     DeviceSlot* slot = &device_slots[device.index];
     ulong packed = slot.control.load(AtomicOrdering.ACQUIRE);
-    for (uint attempt = 0; attempt < MAX_DEVICE_OPERATION_PIN_ATTEMPTS; attempt++) {
+    while (true) {
         DeviceSlotControl control = (DeviceSlotControl)packed;
-        if (control.generation != device.generation) return gpu::INVALID_HANDLE~;
-        if (control.state == DEVICE_SLOT_CLOSING) return gpu::DEVICE_BUSY~;
-        if (control.state != DEVICE_SLOT_LIVE) return gpu::INVALID_HANDLE~;
-        if (control.pins == MAX_DEVICE_OPERATION_PINS) return gpu::DEVICE_BUSY~;
+        if (control.generation != device.generation) {
+            abort("gpu: stale Device");
+        }
+        if (control.state == DEVICE_SLOT_CLOSING) {
+            abort("gpu: Device used concurrently with destroy_device");
+        }
+        if (control.state != DEVICE_SLOT_LIVE) {
+            abort("gpu: stale Device");
+        }
+        if (control.pins == MAX_DEVICE_OPERATION_PINS) {
+            abort("gpu: corrupt Device");
+        }
 
         DeviceSlotControl pinned = control;
         pinned.pins++;
@@ -177,11 +191,6 @@ fn DeviceOperation? begin_device_operation(
             packed = seen;
             continue;
         }
-        if (!allow_lost && slot.lost.load(AtomicOrdering.ACQUIRE)) {
-            DeviceSlotControl pin = { .pins = 1 };
-            (void)slot.control.sub((ulong)pin, AtomicOrdering.RELEASE);
-            return gpu::DEVICE_LOST~;
-        }
         return {
             .slot     = slot,
             .data     = &slot.data,
@@ -190,27 +199,24 @@ fn DeviceOperation? begin_device_operation(
             .owns_pin = true,
         };
     }
-    return gpu::DEVICE_BUSY~;
 }
 
-fn DeviceOperation? borrow_retained_device_operation(
-    Device* device,
-    bool allow_lost = false,
-) @private {
-    if (device == null || !device.is_valid()) return gpu::INVALID_HANDLE~;
-    if (device.reserved != 0 || device.index >= MAX_DEVICES) return gpu::INVALID_HANDLE~;
+fn DeviceOperation? borrow_retained_device_operation(Device* device) @private {
+    validate_device_token(device)!;
 
     DeviceSlot* slot = &device_slots[device.index];
     DeviceSlotControl control =
         (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-    if (control.generation != device.generation) return gpu::INVALID_HANDLE~;
-    if (control.state == DEVICE_SLOT_CLOSING) return gpu::DEVICE_BUSY~;
-    if (control.state != DEVICE_SLOT_LIVE || control.pins == 0) {
-        return gpu::INVALID_HANDLE~;
+    if (control.generation != device.generation) {
+        abort("gpu: stale Device");
     }
-    if (!allow_lost && slot.lost.load(AtomicOrdering.ACQUIRE)) {
-        return gpu::DEVICE_LOST~;
+    if (control.state == DEVICE_SLOT_CLOSING) {
+        abort("gpu: Device used concurrently with destroy_device");
     }
+    if (control.state != DEVICE_SLOT_LIVE) {
+        abort("gpu: stale Device");
+    }
+    if (control.pins == 0) abort("gpu: corrupt Device");
     return {
         .slot   = slot,
         .data   = &slot.data,
@@ -316,27 +322,75 @@ fn fault report_device_contract_failure(
     return public_fault;
 }
 
+fn HandleKind resource_owner_handle_kind(ResourceOwnerKind kind) @private {
+    switch (kind) {
+        case ResourceOwnerKind.ALLOCATION: return HandleKind.ALLOCATION;
+        case ResourceOwnerKind.TEXTURE: return HandleKind.TEXTURE;
+        case ResourceOwnerKind.ATTACHMENT_VIEW: return HandleKind.ATTACHMENT_VIEW;
+        case ResourceOwnerKind.TEXTURE_VIEW: return HandleKind.TEXTURE_VIEW;
+        case ResourceOwnerKind.PIPELINE: return HandleKind.PIPELINE;
+        case ResourceOwnerKind.SWAPCHAIN: return HandleKind.SWAPCHAIN;
+        case ResourceOwnerKind.COMMAND_ALLOCATOR: return HandleKind.COMMAND_ALLOCATOR;
+        case ResourceOwnerKind.COMMAND: return HandleKind.COMMAND_LIST;
+        case ResourceOwnerKind.COMPLETION_POINT: return HandleKind.COMPLETION_POINT;
+        case ResourceOwnerKind.TIMESTAMP_POOL: return HandleKind.TIMESTAMP_POOL;
+        case ResourceOwnerKind.ACCELERATION_STRUCTURE: return HandleKind.ACCELERATION_STRUCTURE;
+        case ResourceOwnerKind.ACCELERATION_STRUCTURE_VIEW: return HandleKind.ACCELERATION_STRUCTURE_VIEW;
+        default: return HandleKind.DEVICE;
+    }
+}
+
 fn void? validate_resource_owner(
     DeviceOperation* operation,
     ulong owner,
     ResourceOwnerKind kind,
 ) @private {
-    if (operation == null || !operation.active) return gpu::INVALID_HANDLE~;
+    return validate_reported_resource_owner(
+        operation:   operation,
+        owner:       owner,
+        kind:        kind,
+        handle_kind: resource_owner_handle_kind(kind),
+    );
+}
+
+fn void? validate_reported_resource_owner(
+    DeviceOperation* operation,
+    ulong owner,
+    ResourceOwnerKind kind,
+    HandleKind handle_kind,
+) @private {
+    if (operation == null || !operation.active) {
+        abort("gpu: corrupt %s", handle_kind.type_name);
+    }
     if (owner != resource_owner_tag(operation.data.resource_owner, kind)) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: foreign %s", handle_kind.type_name);
     }
 }
 
-<* Caller must hold an operation pin or be this device's destroying thread. *>
-fn void mark_device_lost(Device* device) @private {
-    if (device == null || !device.is_valid()) return;
-    if (device.reserved != 0 || device.index >= MAX_DEVICES) return;
+fn DeviceSlot* live_device_slot(Device* device) @private {
+    if (device == null || !device.is_valid()) return null;
+    if (device.reserved != 0 || device.index >= MAX_DEVICES) return null;
 
     DeviceSlot* slot = &device_slots[device.index];
     DeviceSlotControl control = (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-    if (control.generation != device.generation) return;
-    if (control.state != DEVICE_SLOT_LIVE && control.state != DEVICE_SLOT_CLOSING) return;
-    slot.lost.store(true, AtomicOrdering.RELEASE);
+    if (control.generation != device.generation) return null;
+    if (control.state != DEVICE_SLOT_LIVE && control.state != DEVICE_SLOT_CLOSING) return null;
+    return slot;
+}
+
+<* Record observed device loss. Caller must hold an operation pin or be this
+   device's destroying thread.
+   @return "True only for the call that first marked the device lost." *>
+fn bool mark_device_lost(Device* device) @private {
+    DeviceSlot* slot = live_device_slot(device);
+    if (slot == null) return false;
+    return !slot.lost.set(AtomicOrdering.ACQUIRE_RELEASE);
+}
+
+<* Caller must hold an operation pin or be this device's destroying thread. *>
+fn bool device_marked_lost(Device* device) @private {
+    DeviceSlot* slot = live_device_slot(device);
+    return slot != null && slot.lost.load(AtomicOrdering.ACQUIRE);
 }
 
 <* Caller must hold an operation pin for this device. *>
@@ -381,10 +435,10 @@ fn Device? register_device(
     Adapter registered_adapter;
     RuntimeData* runtime_data;
     if (has_runtime) {
-        runtime_data = resolve_runtime(retained_runtime);
-        RuntimeData* adapter_data = resolve_adapter(adapter);
-        if (runtime_data == null || adapter_data != runtime_data) {
-            return gpu::INVALID_HANDLE~;
+        runtime_data = require_runtime(retained_runtime)!;
+        RuntimeData* adapter_data = require_adapter(adapter)!;
+        if (adapter_data != runtime_data) {
+            abort("gpu: mismatched Adapter");
         }
         if (runtime_data.live_device_count.load(AtomicOrdering.ACQUIRE) == 0) return gpu::INVALID_RESOURCE_STATE~;
         runtime = *retained_runtime;
@@ -394,10 +448,11 @@ fn Device? register_device(
     Surface registered_surface;
     if (presentation_surface != null) {
         if (!has_runtime) return gpu::INVALID_ARGUMENT~;
-        SurfaceData* surface_data = resolve_surface(presentation_surface);
-        if (surface_data == null) return gpu::INVALID_HANDLE~;
+        SurfaceData* surface_data = require_surface(presentation_surface)!;
         RuntimeData* surface_runtime = resolve_runtime(&surface_data.runtime);
-        if (surface_runtime != runtime_data) return gpu::INVALID_HANDLE~;
+        if (surface_runtime != runtime_data) {
+            abort("gpu: mismatched Surface");
+        }
         registered_surface = *presentation_surface;
     }
     caps.presentation_enabled = registered_surface.is_valid();

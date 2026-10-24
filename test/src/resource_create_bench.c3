@@ -160,7 +160,7 @@ fn void run_descriptor_churn(gpu::Device* device) {
     for (uint i = 0; i < DESCRIPTOR_ITERATIONS; i++) {
         gpu::TextureView view =
             gpu::create_texture_view(device, texture, null)!!;
-        gpu::destroy_texture_view(device, view)!!;
+        gpu::destroy_texture_view(device, view);
     }
     long single_ns = (long)single_start.to_now();
 
@@ -171,7 +171,7 @@ fn void run_descriptor_churn(gpu::Device* device) {
     for (uint i = 0; i < DESCRIPTOR_ITERATIONS / DESCRIPTOR_BATCH_SIZE; i++) {
         gpu::create_texture_views(device, descs[..], views[..])!!;
         foreach (view : views) {
-            gpu::destroy_texture_view(device, view)!!;
+            gpu::destroy_texture_view(device, view);
         }
     }
     long batch_ns = (long)batch_start.to_now();

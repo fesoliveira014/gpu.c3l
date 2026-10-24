@@ -447,12 +447,12 @@ acceleration_structure_descriptor_cell_get(
 ) @private {
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
     if (view.owner != heap.acceleration_structure_view_owner
-        || !view.index.is_valid()) return gpu::INVALID_HANDLE~;
+        || !view.index.is_valid()) abort("gpu: foreign AccelerationStructureView");
     uint slot = acceleration_structure_index_slot(view.index);
     if (slot >= heap.acceleration_structure_cells.len
         || !heap.acceleration_structure_cells[slot].used
         || heap.acceleration_structure_cells[slot].generation
-            != view.generation) return gpu::INVALID_HANDLE~;
+            != view.generation) abort("gpu: stale AccelerationStructureView");
     return &heap.acceleration_structure_cells[slot];
 }
 
@@ -538,7 +538,7 @@ fn void? destroy_acceleration_structure_descriptor_view(
     VkDeviceState* state,
     gpu::AccelerationStructureView view,
 ) {
-    if (state == null) return gpu::INVALID_ARGUMENT~;
+    if (state == null) abort("gpu: corrupt AccelerationStructureView");
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
@@ -546,7 +546,7 @@ fn void? destroy_acceleration_structure_descriptor_view(
         acceleration_structure_descriptor_cell_get(state, view)!;
     AccelerationStructureSlot* owner =
         state.acceleration_structures.get(cell.owner)!;
-    if (owner.live_view_count == 0) return gpu::BACKEND_ERROR~;
+    if (owner.live_view_count == 0) abort("gpu: corrupt AccelerationStructureView");
 
     cell.used = false;
     owner.live_view_count--;
@@ -592,13 +592,13 @@ fn TextureDescriptorCell*? texture_cell_get(
     gpu::TextureView view,
 ) @private {
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
-    if (!view.index.is_valid()) return gpu::INVALID_HANDLE~;
+    if (!view.index.is_valid()) abort("gpu: malformed TextureView");
     uint slot = texture_index_slot(view.index);
     if (slot >= heap.texture_cells.len || !heap.texture_cells[slot].used) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale TextureView");
     }
     if (heap.texture_cells[slot].generation != view.generation) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale TextureView");
     }
     return &heap.texture_cells[slot];
 }
@@ -638,18 +638,6 @@ fn void? validate_texture_view_increment(
             "texture view owner count exceeds descriptor heap capacity",
         );
     }
-}
-
-fn void? validate_texture_view_decrement(
-    VkDeviceState* state,
-    TextureSlot* owner,
-) @private {
-    if (owner.live_descriptor_views != 0) return;
-    return report_texture_view_owner_invariant_failure(
-        state,
-        "destroy_texture_view",
-        "texture view owner count is zero for a live descriptor",
-    );
 }
 
 fn void recycle_texture_descriptor_slot(
@@ -776,26 +764,9 @@ fn TextureSlot*? resolve_descriptor_texture(
     VkDeviceState* state,
     gpu::TextureHandle texture,
     ZString operation,
-    ZString texture_field,
     ZString usage_field,
 ) @private {
-    TextureSlot*? resolved = state.textures.get(texture);
-    if (catch f = resolved) {
-        return report_contract_failure(
-            state:               state,
-            operation:           operation,
-            public_fault:        f,
-            resource_kind:       gpu::DebugResourceKind.TEXTURE,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      texture_field,
-            invariant:           "texture must identify a live generation",
-            backend_text:        null,
-        )~;
-    }
-    TextureSlot* slot = resolved;
+    TextureSlot* slot = state.textures.get(texture)!;
     if (!slot.usage.sampled && !slot.usage.storage) {
         return report_contract_failure(
             state:               state,
@@ -861,11 +832,10 @@ fn gpu::TextureView? vk_create_texture_view(
     defer state.texture_view_cache_mutex.unlock();
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
     TextureSlot* texture_slot = resolve_descriptor_texture(
-        state:         state,
-        texture:       texture,
-        operation:     "create_texture_view",
-        texture_field: "texture",
-        usage_field:   "TextureDesc.usage",
+        state:       state,
+        texture:     texture,
+        operation:   "create_texture_view",
+        usage_field: "TextureDesc.usage",
     )!;
 
     uint headroom = texture_descriptor_headroom(heap);
@@ -930,11 +900,10 @@ fn void? prepare_texture_descriptor_item(
     CachedViewCreation* creation,
 ) @private {
     TextureSlot* texture_slot = resolve_descriptor_texture(
-        state:         state,
-        texture:       desc.texture,
-        operation:     "create_texture_views",
-        texture_field: "descs[].texture",
-        usage_field:   "TextureDesc.usage",
+        state:       state,
+        texture:     desc.texture,
+        operation:   "create_texture_views",
+        usage_field: "TextureDesc.usage",
     )!;
     validate_texture_view_increment(
         state:         state,
@@ -1179,16 +1148,10 @@ fn void? vk_destroy_texture_view(
         )~;
     }
     TextureDescriptorCell* cell = resolved;
-    TextureSlot*? resolved_owner = state.textures.get(cell.owner);
-    if (catch resolved_owner) {
-        return report_texture_view_owner_invariant_failure(
-            state,
-            "destroy_texture_view",
-            "live texture descriptor owner is missing",
-        );
+    TextureSlot* owner = state.textures.find(cell.owner);
+    if (owner == null || owner.live_descriptor_views == 0) {
+        abort("gpu: corrupt TextureView");
     }
-    TextureSlot* owner = resolved_owner;
-    validate_texture_view_decrement(state, owner)!;
     cell.used = false;
     owner.live_descriptor_views--;
     state.shader_heap.descriptors.texture_view_count--;
@@ -1284,11 +1247,10 @@ fn gpu::TextureView? vk_create_texture_view_at(
         return gpu::SLOT_TABLE_FULL~;
     }
     TextureSlot* texture_slot = resolve_descriptor_texture(
-        state:         state,
-        texture:       texture,
-        operation:     "create_texture_view_at",
-        texture_field: "texture",
-        usage_field:   "TextureDesc.usage",
+        state:       state,
+        texture:     texture,
+        operation:   "create_texture_view_at",
+        usage_field: "TextureDesc.usage",
     )!;
     validate_texture_view_increment(
         state:         state,
@@ -1339,21 +1301,19 @@ fn void? vk_update_texture_view(
     if (!should_recycle_handle_generation(cell.generation)) {
         return gpu::DESCRIPTOR_HEAP_FULL~;
     }
-    TextureSlot*? resolved_owner = state.textures.get(cell.owner);
-    if (catch resolved_owner) {
+    TextureSlot* old_owner = state.textures.find(cell.owner);
+    if (old_owner == null) {
         return report_texture_view_owner_invariant_failure(
             state,
             "update_texture_view",
             "live texture descriptor owner is missing",
         );
     }
-    TextureSlot* old_owner = resolved_owner;
     TextureSlot* texture_slot = resolve_descriptor_texture(
-        state:         state,
-        texture:       texture,
-        operation:     "update_texture_view",
-        texture_field: "texture",
-        usage_field:   "TextureDesc.usage",
+        state:       state,
+        texture:     texture,
+        operation:   "update_texture_view",
+        usage_field: "TextureDesc.usage",
     )!;
     if (texture_slot != old_owner) {
         validate_texture_view_increment(

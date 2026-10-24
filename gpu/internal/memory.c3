@@ -91,10 +91,11 @@ fn void? validate_texture_allocation(
             || !requirements.compatibility.is_valid()) {
             return gpu::INVALID_ARGUMENT~;
         }
-        gpu::internal::validate_resource_owner(
-            operation,
-            texture_compatibility_owner(requirements.compatibility),
-            gpu::internal::ResourceOwnerKind.ALLOCATION,
+        gpu::internal::validate_reported_resource_owner(
+            operation:   operation,
+            owner:       texture_compatibility_owner(requirements.compatibility),
+            kind:        gpu::internal::ResourceOwnerKind.ALLOCATION,
+            handle_kind: gpu::internal::HandleKind.TEXTURE_REQUIREMENTS,
         )!;
         if (requirements.dedicated_only && !allow_dedicated) {
             return gpu::UNSUPPORTED_FEATURE~;
@@ -107,7 +108,7 @@ fn void? validate_texture_allocation(
 
 <* Validation shared by `allocate_memory` and `allocate_mapped_allocation`.
 
-   @return "A normalized descriptor, or a recoverable invalid-argument, unsupported-feature, or ownership fault." *>
+   @return "A normalized descriptor, or a recoverable invalid-argument or unsupported-feature fault." *>
 fn AllocationDesc? validated_allocation_desc(
     DeviceOperation* operation,
     AllocationDesc* desc,
@@ -161,7 +162,7 @@ fn void discard_failed_mapped_allocation(
 <* Allocate a mapped class and borrow its complete span, mapping, and address
    under one device operation pin, so the create is transactional.
 
-   @return "Consistent borrowed views of the new allocation, or a recoverable invalid-argument, unsupported-feature, allocation, busy, device-loss, or backend fault." *>
+   @return "Consistent borrowed views of the new allocation, or a recoverable invalid-argument, unsupported-feature, allocation, or backend fault." *>
 fn MappedGpuSpan? allocate_mapped_allocation(
     Device* device,
     AllocationDesc* desc,

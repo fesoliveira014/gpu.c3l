@@ -20,7 +20,7 @@ fn gpu::Device? create_test_device(
     $endif
     gpu::Runtime runtime = gpu::create_runtime(desc)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!;
         gpu::DeviceSupport support =
@@ -84,18 +84,32 @@ fn gpu::GpuAddress test_span_address(gpu::Device* device, gpu::GpuSpan span) {
     return gpu::get_span_address(device, span)!!;
 }
 
+<* Discard a recording token unless another copy already consumed it. *>
 fn void? discard_test_commands(gpu::CommandList* commands) {
     if (commands == null || !commands.is_valid()) return;
-    if (catch err = gpu::discard_commands(commands)) {
-        if (err != gpu::INVALID_HANDLE) return err~;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::find_command_record(
+        commands.record,
+        commands.generation,
+        commands.device_identity,
+    );
+    if (record == null
+        || (record.state != gpu::internal::CommandState.RECORDING
+            && record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS)) {
+        return;
     }
+    return gpu::discard_commands(commands);
 }
 
+<* Discard an executable token unless it was submitted or discarded through a copy. *>
 fn void? discard_test_executable(gpu::ExecutableCommandList* commands) {
     if (commands == null || !commands.is_valid()) return;
-    if (catch err = gpu::discard_executable_commands(commands)) {
-        if (err != gpu::INVALID_HANDLE) return err~;
-    }
+    gpu::internal::vk::CommandRecord* record = gpu::internal::find_command_record(
+        commands.record,
+        commands.generation,
+        commands.device_identity,
+    );
+    if (record == null || record.state != gpu::internal::CommandState.EXECUTABLE) return;
+    return gpu::discard_executable_commands(commands);
 }
 
 fn void release_submitted_executables(
@@ -158,19 +172,10 @@ fn void? wait_test_queue(gpu::Device* device, gpu::QueueKind queue) {
 fn void? destroy_test_device(gpu::Device* device) {
     if (device == null || !device.is_valid()) return;
     gpu::Runtime runtime;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device, true)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     if (operation.data.runtime_retained) runtime = operation.data.runtime;
     gpu::internal::end_device_operation(&operation);
-    gpu::DeviceCaps? caps_result = gpu::get_device_caps(device);
-    if (catch err = caps_result) {
-        if (err == gpu::DEVICE_LOST) {
-            gpu::destroy_device(device)!;
-            if (runtime.is_valid()) gpu::destroy_runtime(&runtime)!;
-            return;
-        }
-        return err~;
-    }
-    gpu::QueueRoles queues = caps_result.queues;
+    gpu::QueueRoles queues = gpu::get_device_caps(device).queues;
     if (queues.graphics) {
         wait_test_queue(device, gpu::QueueKind.GRAPHICS)!;
     }

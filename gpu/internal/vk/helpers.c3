@@ -28,7 +28,7 @@ fn void? map_result(vk::Result result, bool report_unmapped) @private {
         case vk::Result.ERROR_OUT_OF_DEVICE_MEMORY:
             return gpu::OUT_OF_DEVICE_MEMORY~;
         case vk::Result.ERROR_DEVICE_LOST:
-            return gpu::DEVICE_LOST~;
+            return gpu::BACKEND_ERROR~;
         case vk::Result.ERROR_SURFACE_LOST_KHR:
             return gpu::SURFACE_LOST~;
         case vk::Result.ERROR_FEATURE_NOT_PRESENT:
@@ -51,6 +51,33 @@ fn void observe_device_result(VkDeviceState* state, vk::Result result) @private 
     if (state != null && result == vk::Result.ERROR_DEVICE_LOST) {
         gpu::internal::mark_device_lost(&state.owner);
     }
+}
+
+fn bool device_lost(VkDeviceState* state) @private {
+    return state != null && gpu::internal::device_marked_lost(&state.owner);
+}
+
+<* Report whether `result` is device loss. Device loss marks the device lost
+   and delivers one backend diagnostic per device; the caller continues with
+   its lost-device behavior instead of returning a fault. *>
+fn bool absorb_device_loss(
+    VkDeviceState* state,
+    ZString operation,
+    vk::Result result,
+) @private {
+    if (result != vk::Result.ERROR_DEVICE_LOST) return false;
+    if (state == null) return true;
+    if (!gpu::internal::mark_device_lost(&state.owner)) return true;
+    if (state.debug_callback == null) return true;
+    gpu::DebugMessage message = {
+        .severity             = gpu::DebugMessageSeverity.ERROR,
+        .category             = { .backend },
+        .operation            = operation,
+        .backend_text         = backend_result_text(result),
+        .validation_id_number = (int)result,
+    };
+    gpu::internal::dispatch_debug_message(state.debug_callback, state.debug_user_data, &message);
+    return true;
 }
 
 fn void? check_device_result(VkDeviceState* state, vk::Result result) @private {

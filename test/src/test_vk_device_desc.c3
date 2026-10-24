@@ -536,13 +536,13 @@ fn void runtime_owned_configuration_reaches_device_creation() @test {
             && runtime_state.config.pipeline_cache_data[0] == 1,
         "caller mutation cannot change the runtime cache copy"
     );
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
         if (!gpu::supports_device_desc(&adapter)!!.supported) continue;
 
         gpu::Device device = gpu::create_device(&adapter)!!;
-        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device);
         assert(
             caps.texture_heap_capacity == 17
                 && caps.sampler_heap_capacity == 19,
@@ -562,7 +562,7 @@ fn void adapter_support_and_creation_share_runtime_capacities() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     assert(adapters.count > 0, "the controlled target exposes an adapter");
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
@@ -576,7 +576,7 @@ fn void adapter_support_and_creation_share_runtime_capacities() @test {
             continue;
         }
         gpu::Device device = gpu::create_device(&adapter)!!;
-        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device);
         assert(
             caps.texture_heap_capacity == gpu::MAX_SHADER_HEAP_CAPACITY,
             "creation preserves the supported runtime texture capacity"
@@ -604,7 +604,7 @@ fn void public_creation_reports_cached_baseline_capacity_failure() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::internal::RuntimeData* runtime_data =
         gpu::internal::resolve_runtime(&runtime);
     gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
@@ -644,7 +644,7 @@ fn void cached_baseline_failure_precedes_native_device_creation() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::internal::RuntimeData* runtime_data =
         gpu::internal::resolve_runtime(&runtime);
     gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
@@ -703,7 +703,7 @@ fn void device_creation_enables_required_native_features() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
 
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
@@ -773,7 +773,7 @@ fn void ray_query_device_creation_enables_the_complete_optional_family() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::internal::RuntimeData* runtime_data =
         gpu::internal::resolve_runtime(&runtime);
     gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
@@ -839,7 +839,7 @@ fn void ray_tracing_pipeline_device_creation_is_independent_from_ray_queries() @
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::internal::RuntimeData* runtime_data =
         gpu::internal::resolve_runtime(&runtime);
     gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
@@ -909,7 +909,7 @@ fn void indirect2_ray_tracing_device_creation_chains_optional_feature() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::internal::RuntimeData* runtime_data =
         gpu::internal::resolve_runtime(&runtime);
     gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
@@ -959,7 +959,7 @@ fn void missing_negotiated_indirect_trace_proc_rolls_creation_back() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::internal::RuntimeData* runtime_data =
         gpu::internal::resolve_runtime(&runtime);
     gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
@@ -1007,7 +1007,7 @@ fn void missing_indirect2_trace_proc_downgrades_capability() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::internal::RuntimeData* runtime_data =
         gpu::internal::resolve_runtime(&runtime);
     gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
@@ -1043,7 +1043,7 @@ fn void missing_indirect2_trace_proc_downgrades_capability() @test {
             assert(false, "a missing optional Indirect2 procedure must not reject creation");
         }
         gpu::Device device = creation_result!!;
-        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device);
         assert(caps.ray_tracing_pipelines.enabled
                 && !caps.ray_tracing_pipelines.indirect2_dispatch,
             "a missing optional Indirect2 procedure clears only its capability");
@@ -1060,7 +1060,7 @@ fn void missing_indirect_acceleration_structure_proc_downgrades_capability() @te
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::internal::RuntimeData* runtime_data =
         gpu::internal::resolve_runtime(&runtime);
     gpu::internal::vk::VkRuntimeState* runtime_state = runtime_data.state;
@@ -1097,7 +1097,7 @@ fn void missing_indirect_acceleration_structure_proc_downgrades_capability() @te
                 "a missing optional indirect-build procedure must not reject creation");
         }
         gpu::Device device = creation_result!!;
-        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device);
         assert(caps.acceleration_structures.enabled
                 && !caps.acceleration_structures.indirect_build,
             "a missing optional indirect-build procedure clears only its capability");
@@ -1116,7 +1116,7 @@ fn void missing_dynamic_stack_procs_roll_creation_back() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::DeviceDesc device_desc = { .enable_ray_tracing_pipelines = true };
 
     for (uint i = 0; i < adapters.count; i++) {
@@ -1162,7 +1162,7 @@ fn void combined_ray_tracing_opt_in_enables_both_frontends() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::DeviceDesc device_desc = {
         .enable_ray_queries = true,
         .enable_ray_tracing_pipelines = true,
@@ -1214,7 +1214,7 @@ fn void requested_sparse_creation_enables_only_planned_features() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::DeviceDesc device_desc = {
         .enable_sparse_textures = true,
     };
@@ -1263,7 +1263,7 @@ fn void default_device_caps_hide_sparse_support() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::DeviceDesc device_desc;
 
     for (uint i = 0; i < adapters.count; i++) {
@@ -1273,7 +1273,7 @@ fn void default_device_caps_hide_sparse_support() @test {
         }
         gpu::Device device =
             gpu::create_device(&adapter, &device_desc)!!;
-        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device);
         assert(!caps.sparse_textures.image_2d
                 && !caps.sparse_textures.image_3d
                 && !caps.sparse_textures.nonresident_strict
@@ -1300,7 +1300,7 @@ fn void ray_tracing_support_and_created_caps_are_consistent() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::DeviceDesc device_desc = { .enable_ray_queries = true };
 
     for (uint i = 0; i < adapters.count; i++) {
@@ -1314,7 +1314,7 @@ fn void ray_tracing_support_and_created_caps_are_consistent() @test {
         }
 
         gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
-        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device);
         gpu::internal::vk::VkDeviceState* state =
             gpu::internal::device_slots[device.index].data.state;
         gpu::AccelerationStructureCaps expected =
@@ -1348,7 +1348,7 @@ fn void sparse_support_and_created_caps_are_consistent() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::DeviceDesc device_desc = {
         .enable_sparse_textures = true,
     };
@@ -1365,7 +1365,7 @@ fn void sparse_support_and_created_caps_are_consistent() @test {
 
         gpu::Device device =
             gpu::create_device(&adapter, &device_desc)!!;
-        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device);
         gpu::internal::vk::VkDeviceState* state =
             gpu::internal::device_slots[device.index].data.state;
         vk::PhysicalDeviceFeatures2 features2 =
@@ -1401,7 +1401,7 @@ fn void adapter_desc_creation_reuses_runtime_discovery() @test {
         .application_name  = "gpu_vk_device_desc_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     if (adapters.count == 0) {
         gpu::destroy_runtime(&runtime)!!;
         return;
@@ -1413,7 +1413,7 @@ fn void adapter_desc_creation_reuses_runtime_discovery() @test {
             gpu::supports_device_desc(&adapter)!!;
         if (!support.supported) continue;
 
-        gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(&adapter);
+        gpu::internal::RuntimeData* runtime_data = gpu::internal::require_adapter(&adapter)!!;
         gpu::internal::vk::VkRuntimeState* runtime_state =
             runtime_data.state;
         gpu::Device device = gpu::create_device(&adapter)!!;
@@ -1430,7 +1430,7 @@ fn void adapter_desc_creation_reuses_runtime_discovery() @test {
             runtime_state.config.enable_vulkan_validation,
             "the device inherits runtime Vulkan validation layers"
         );
-        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device);
         assert(
             gpu::internal::vk::device_dispatch_supports_dynamic_color(
                 &device_state.device_dispatch,
@@ -1480,7 +1480,7 @@ fn void adapter_desc_creation_reuses_runtime_discovery() @test {
 
         gpu::destroy_device(&device)!!;
         assert(
-            gpu::get_adapter_info(&adapter)!!.name.len > 0,
+            gpu::get_adapter_info(&adapter).name.len > 0,
             "device destruction leaves runtime discovery live"
         );
         gpu::destroy_runtime(&runtime)!!;
@@ -1503,7 +1503,7 @@ fn void malformed_native_desc_preserves_runtime_state() @test {
         .application_name = "gpu_vk_device_desc_failure_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     if (adapters.count == 0) {
         gpu::destroy_runtime(&runtime)!!;
         return;
@@ -1521,7 +1521,7 @@ fn void malformed_native_desc_preserves_runtime_state() @test {
         "an invalid descriptor is rejected before native creation"
     );
     assert(
-        gpu::get_adapter_info(&adapter)!!.name.len > 0,
+        gpu::get_adapter_info(&adapter).name.len > 0,
         "failed creation leaves runtime-owned adapter state intact"
     );
     gpu::destroy_runtime(&runtime)!!;
@@ -1541,7 +1541,7 @@ fn void presentation_device_creation_requires_instance_maintenance() @test {
     defer gpu::destroy_runtime(&runtime)!!;
     gpu::Surface surface = gpu::internal::register_surface(&runtime, (void*)1)!!;
     defer gpu::destroy_surface(&surface)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::Adapter adapter = adapters.get(0)!!;
     gpu::DeviceDesc device_desc = { .surface = surface };
     gpu::internal::vk::DeviceCreationProbe probe;
@@ -1568,7 +1568,7 @@ fn void device_creation_rolls_back_each_checkpoint() @test {
         .enable_vulkan_validation = true,
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
         if (!gpu::supports_device_desc(&adapter)!!.supported) continue;
@@ -1601,7 +1601,7 @@ fn void device_creation_rolls_back_each_checkpoint() @test {
                 "failed creation publishes no device"
             );
             assert(
-                gpu::get_adapter_info(&adapter)!!.name.len > 0,
+                gpu::get_adapter_info(&adapter).name.len > 0,
                 "failed creation leaves its adapter usable"
             );
         }
@@ -1621,7 +1621,7 @@ fn void native_device_creation_failure_rolls_back() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
         if (!gpu::supports_device_desc(&adapter)!!.supported) continue;
@@ -1659,7 +1659,7 @@ fn void device_loads_required_dynamic_color_dispatch() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!!;
         if (!gpu::supports_device_desc(&adapter)!!.supported) continue;
@@ -1691,7 +1691,7 @@ fn void opted_in_ray_query_state_is_transactional_and_prepublication() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::DeviceDesc device_desc = { .enable_ray_queries = true };
 
     for (uint i = 0; i < adapters.count; i++) {
@@ -1746,7 +1746,7 @@ fn void publication_failure_rolls_back_native_state() @test {
     defer {
         if (runtime.is_valid()) (void)gpu::destroy_runtime(&runtime);
     }
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     bool exercised;
 
     for (uint i = 0; i < adapters.count; i++) {
@@ -1803,7 +1803,7 @@ fn void publication_failure_rolls_back_native_state() @test {
         gpu::Device device = gpu::create_device(&adapter)!!;
         gpu::destroy_device(&device)!!;
         assert(
-            gpu::get_adapter_info(&adapter)!!.name.len > 0,
+            gpu::get_adapter_info(&adapter).name.len > 0,
             "registry recovery leaves the adapter usable"
         );
         gpu::destroy_runtime(&runtime)!!;
@@ -1819,7 +1819,7 @@ fn void runtime_devices_destroy_independently() @test {
         .application_name  = "gpu_vk_multi_device_test",
     };
     gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     bool exercised;
 
     for (uint i = 0; i < adapters.count; i++) {
@@ -1840,7 +1840,7 @@ fn void runtime_devices_destroy_independently() @test {
             io::eprintfn("runtime_devices: distinct-adapter=N/A (one baseline-compatible adapter)");
         }
 
-        gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(&adapter);
+        gpu::internal::RuntimeData* runtime_data = gpu::internal::require_adapter(&adapter)!!;
         gpu::internal::vk::VkRuntimeState* runtime_state =
             runtime_data.state;
         gpu::Device first = gpu::create_device(&adapter)!!;
@@ -1879,7 +1879,7 @@ fn void runtime_devices_destroy_independently() @test {
 
         gpu::destroy_device(&first)!!;
         assert(
-            gpu::get_device_caps(&second)!!.texture_heap_capacity > 0,
+            gpu::get_device_caps(&second).texture_heap_capacity > 0,
             "destroying one device preserves its peer"
         );
         assert(

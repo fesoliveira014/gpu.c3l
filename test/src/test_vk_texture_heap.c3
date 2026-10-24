@@ -185,7 +185,7 @@ fn void bindless_texture_write_then_sample() @test {
 
     assert_heap_pattern(&device, output.span, TEX_SIZE);
 
-    gpu::destroy_texture_view(&device, tex_index_view)!!;
+    gpu::destroy_texture_view(&device, tex_index_view);
     const uint REUSED_TEX_SIZE = 8;
     gpu::TextureDesc reused_desc = tex_desc;
     reused_desc.width = REUSED_TEX_SIZE;
@@ -250,7 +250,7 @@ fn void bindless_texture_write_then_sample() @test {
     )!!;
     gpu::wait_completion(reused_completion)!!;
     assert_heap_pattern(&device, output.span, REUSED_TEX_SIZE);
-    gpu::destroy_texture_view(&device, reused_view)!!;
+    gpu::destroy_texture_view(&device, reused_view);
 }
 
 fn void bindless_volume_write_load_and_sample() @test {
@@ -285,7 +285,7 @@ fn void bindless_volume_write_load_and_sample() @test {
     defer gpu::destroy_texture(&device, volume)!!;
     gpu::TextureView volume_view =
         gpu::create_texture_view(&device, volume, null)!!;
-    defer gpu::destroy_texture_view(&device, volume_view)!!;
+    defer gpu::destroy_texture_view(&device, volume_view);
 
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
@@ -442,13 +442,13 @@ fn void bindless_volume_write_load_and_sample() @test {
             && quantize_unorm8(sampled_image[3]) == 255,
         "the sample dispatch exercises the 2D sampled declaration");
 
-    gpu::destroy_texture_view(&device, image_view)!!;
+    gpu::destroy_texture_view(&device, image_view);
     gpu::TextureView recycled =
         gpu::create_texture_view(&device, volume, null)!!;
     assert(recycled.index == image_view.index
             && recycled.generation != image_view.generation,
         "2D and 3D views recycle one shared logical texture slot namespace");
-    gpu::destroy_texture_view(&device, recycled)!!;
+    gpu::destroy_texture_view(&device, recycled);
 }
 
 fn void bindless_cube_upload_and_sample() @test {
@@ -477,11 +477,11 @@ fn void bindless_cube_upload_and_sample() @test {
     gpu::TextureViewDesc cube_view_desc = { .cube = true };
     gpu::TextureView cube_view =
         gpu::create_texture_view(&device, cube, &cube_view_desc)!!;
-    defer gpu::destroy_texture_view(&device, cube_view)!!;
+    defer gpu::destroy_texture_view(&device, cube_view);
     gpu::TextureViewDesc face_view_desc = { .base_layer = 3, .layer_count = 1 };
     gpu::TextureView face_view =
         gpu::create_texture_view(&device, cube, &face_view_desc)!!;
-    defer gpu::destroy_texture_view(&device, face_view)!!;
+    defer gpu::destroy_texture_view(&device, face_view);
 
     gpu::TextureDesc plain_desc = cube_desc;
     plain_desc.cube_compatible = false;
@@ -690,7 +690,7 @@ fn void storage_write_then_fragment_sample() @test {
     gpu::TextureHandle sampled_texture = gpu::create_texture(&device, &sampled_desc)!!;
     defer gpu::destroy_texture(&device, sampled_texture)!!;
     gpu::TextureView sampled_view = gpu::create_texture_view(&device, sampled_texture, null)!!;
-    defer gpu::destroy_texture_view(&device, sampled_view)!!;
+    defer gpu::destroy_texture_view(&device, sampled_view);
 
     gpu::TextureDesc target_desc = {
         .access     = { .graphics, .transfer },
@@ -971,7 +971,7 @@ fn void anisotropic_sampler_caps_honest() @test {
         .anisotropy_enable = true,
         .max_anisotropy    = 1024.0f,
     };
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     if (caps.max_sampler_anisotropy > 0) {
         aniso.max_anisotropy = caps.max_sampler_anisotropy;
         gpu::SamplerIndex smp = gpu::intern_sampler(&device, &aniso)!!;
@@ -993,7 +993,7 @@ fn void anisotropy_range_validated() @test {
     };
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     if (caps.max_sampler_anisotropy <= 0) return;
 
     float[3] bad = { 0.0f, -1.0f, 0.5f };
@@ -1064,9 +1064,9 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
     gpu::TextureHandle small = gpu::create_texture(&device, &small_desc)!!;
     defer gpu::destroy_texture(&device, small)!!;
     gpu::TextureView large_write = gpu::create_texture_view(&device, large, null)!!;
-    defer gpu::destroy_texture_view(&device, large_write)!!;
+    defer gpu::destroy_texture_view(&device, large_write);
     gpu::TextureView small_write = gpu::create_texture_view(&device, small, null)!!;
-    defer gpu::destroy_texture_view(&device, small_write)!!;
+    defer gpu::destroy_texture_view(&device, small_write);
 
     gpu::TextureIndexRange range = gpu::reserve_texture_indices(&device, 1)!!;
     gpu::TextureView slot = gpu::create_texture_view_at(
@@ -1179,21 +1179,6 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
     )!!;
     assert(slot.index.value == range.base.value && slot.generation != stale.generation,
         "an update keeps the index and advances the generation");
-    assert(@catch(gpu::destroy_texture_view(&device, stale)) == gpu::INVALID_HANDLE,
-        "a token from before the update is stale");
-    assert(@catch(gpu::update_texture_view(
-        device:  &device,
-        view:    &stale,
-        texture: small,
-        desc:    null,
-    )) == gpu::INVALID_HANDLE
-        && @catch(gpu::update_texture_view(
-        device:  &device,
-        view:    null,
-        texture: small,
-        desc:    null,
-    )) == gpu::INVALID_HANDLE,
-        "stale and null tokens are rejected before heap mutation");
     assert(state.textures.get(large)!!.live_descriptor_views == 1
         && state.textures.get(small)!!.live_descriptor_views == 2,
         "the live-view count moves to the new texture");
@@ -1217,7 +1202,7 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
     gpu::wait_completion(submit_test_queue(&device, gpu::QueueKind.COMPUTE, &second_submit)!!)!!;
     assert_heap_pattern(&device, output.span, SMALL);
 
-    gpu::destroy_texture_view(&device, slot)!!;
+    gpu::destroy_texture_view(&device, slot);
     gpu::release_texture_indices(&device, range)!!;
 }
 
@@ -1391,7 +1376,7 @@ fn void reserved_row_addressing_samples_correct_texture() @test {
         );
     }
 
-    foreach (view : views) gpu::destroy_texture_view(&device, view)!!;
+    foreach (view : views) gpu::destroy_texture_view(&device, view);
     gpu::release_texture_indices(&device, range)!!;
 }
 
@@ -1633,6 +1618,6 @@ fn void row_addressed_render_samples_shader_computed_index() @test {
             "the shader-computed row-addressed index samples the texture placed there");
     }
 
-    foreach (view : views) gpu::destroy_texture_view(&device, view)!!;
+    foreach (view : views) gpu::destroy_texture_view(&device, view);
     gpu::release_texture_indices(&device, range)!!;
 }

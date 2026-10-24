@@ -42,15 +42,24 @@ waits and fails while a unit is recording, executable, or submitted.
 gpu::CommandList commands = gpu::begin_commands(&allocator)!;
 defer (void)gpu::discard_commands(&commands);
 // cmd_* calls ...
-gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
-defer (void)gpu::discard_executable_commands(&executable);
+gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)! };
+defer (void)gpu::discard_executable_commands(&lists[0]);
+gpu::SubmitDesc submit = { .command_lists = lists[..] };
+gpu::CompletionPoint done = gpu::submit(queue, &submit)!;
 ```
 
-`begin_commands` retires the queue's completed work when no unit is free
-and returns `DEVICE_BUSY` only if none retired; wait on an older
-completion point and retry. `end_commands` consumes the recording
-token. `submit` consumes the executable token. The deferred discards are
-no-ops after a successful consume and free the unit on an early fault.
+When no unit is free, `begin_commands` first retires the queue's completed
+work. If units are still in flight and none retired, it returns
+`DEVICE_BUSY`: wait on an older completion point and retry. If every unit is
+held by an open recording or an unsubmitted executable list, it returns
+`COMMAND_ALLOCATOR_CAPACITY_EXCEEDED`: submit or discard one of those lists
+and retry, or create the allocator with a larger `command_buffer_capacity`.
+`end_commands` consumes the recording token and `submit` consumes the
+executable tokens; each zeroes the token storage it was given. The deferred
+discards are no-ops after a successful consume and free the unit on an early
+fault. Defer the discard on the same storage the submit descriptor references:
+`submit` zeroes the entries of `command_lists`, not other copies, and
+discarding a copy after submission terminates.
 
 Copies of a token are aliases of one record. All aliases are confined to
 the recording thread and die together.
@@ -455,10 +464,12 @@ command list; label text is borrowed only for the begin call.
 | wrong token phase or unbalanced pass | `COMMAND_RECORDING_ERROR` |
 | unusable pipeline snapshot or incompatible implementation state | `INVALID_RESOURCE_STATE` |
 | bad range, count, or descriptor | `INVALID_ARGUMENT` |
-| stale or foreign handle | `INVALID_HANDLE` |
 | unavailable capability or native procedure | `UNSUPPORTED_FEATURE` |
-| command-unit or geometry capacity exceeded | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` |
+| every unit held by unsubmitted lists, or geometry capacity exceeded | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` |
 | generated reservation exceeded | `GENERATED_SCRATCH_EXHAUSTED` |
-| no free unit | `DEVICE_BUSY` |
+| every free unit still in flight | `DEVICE_BUSY` |
+
+A zero, stale, foreign, or consumed handle terminates instead of returning a
+fault; see [conventions](index.md#conventions).
 
 A fallible `cmd_*` call that returns a fault records nothing.

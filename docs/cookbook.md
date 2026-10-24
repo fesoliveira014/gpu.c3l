@@ -24,10 +24,10 @@ gpu::DeviceDesc desc = {
         .distinct_roles = { .compute },
     },
 };
-gpu::AdapterList adapters = gpu::enumerate_adapters(runtime)!;
+gpu::AdapterList adapters = gpu::enumerate_adapters(runtime);
 for (uint i = 0; i < adapters.count; i++) {
     gpu::Adapter adapter = adapters.get(i)!;
-    gpu::AdapterInfo info = gpu::get_adapter_info(&adapter)!;
+    gpu::AdapterInfo info = gpu::get_adapter_info(&adapter);
     if (info.device_class != gpu::AdapterClass.DISCRETE) continue;
     gpu::DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!;
     if (!support.supported) {
@@ -707,7 +707,7 @@ Generated records carry their own roots and arguments. Reserve storage on
 the allocator once, while it is idle:
 
 ```c3
-gpu::DeviceCaps caps = gpu::get_device_caps(device)!;
+gpu::DeviceCaps caps = gpu::get_device_caps(device);
 if (!caps.generated_work) return gpu::UNSUPPORTED_FEATURE~;
 
 gpu::GeneratedWorkReservationDesc reservation = {
@@ -804,7 +804,7 @@ lists retire.
 ## Measure GPU time
 
 ```c3
-gpu::DeviceCaps caps = gpu::get_device_caps(device)!;
+gpu::DeviceCaps caps = gpu::get_device_caps(device);
 if (!caps.timestamps.queues.graphics) return gpu::UNSUPPORTED_FEATURE~;
 gpu::TimestampPoolDesc pool_desc = { .capacity = 2 };
 gpu::TimestampPoolHandle pool = gpu::create_timestamp_pool(device, &pool_desc)!;
@@ -868,11 +868,11 @@ must not call the library. Strings are valid only during the call.
 ## Inspect memory
 
 ```c3
-gpu::MemoryStats stats = gpu::get_memory_stats(device)!;
+gpu::MemoryStats stats = gpu::get_memory_stats(device);
 for (uint i = 0; i < stats.heap_count; i++) {
     io::printfn("heap %d: %d / %d bytes", i, stats.heaps[i].usage, stats.heaps[i].budget);
 }
-String text = gpu::build_memory_report(device, true)!;
+String text = gpu::build_memory_report(device, true);
 defer text.free(mem);
 io::print(text);
 ```
@@ -937,7 +937,7 @@ The shader calls `sample_shadow_2d(index, sampler, vec3(uv, depth))`.
 gpu::wait_completion(last_graphics)!;
 gpu::wait_swapchain_presentations(device, swapchain, RETIRE_TIMEOUT_NS)!;
 gpu::resize_swapchain(device, swapchain, width, height)!;   // or destroy_swapchain
-gpu::SwapchainInfo info = gpu::get_swapchain_info(device, swapchain)!;
+gpu::SwapchainInfo info = gpu::get_swapchain_info(device, swapchain);
 ```
 
 Always in that order. `WAIT_TIMEOUT` from the presentation wait is safe to
@@ -946,13 +946,30 @@ acquired image was never presented. Rebuild pipelines if `info.format`
 changed. The full loop is in
 [getting started](getting_started.md#resize-and-teardown).
 
+## Handle device loss
+
+Calls keep succeeding on a lost device, without GPU effect. Check once per
+frame and before trusting a readback:
+
+```c3
+while (running) {
+    if (gpu::is_device_lost(device)) break;
+    // acquire, record, submit, present ...
+}
+// Tear down in the normal order, then create a new device.
+```
+
+A readback whose completion point completed after the loss holds
+unspecified bytes. Waits return immediately and teardown follows the usual
+order; see [device loss](api/runtime_and_devices.md#device-loss).
+
 ## Tear down
 
 Children before parents, and nothing while it can still be read:
 
 ```c3
 gpu::wait_completion(last)!;
-gpu::destroy_texture_view(device, view)!;
+gpu::destroy_texture_view(device, view);
 gpu::destroy_texture(device, texture)!;
 gpu::free_allocation(device, allocation)!;
 ```

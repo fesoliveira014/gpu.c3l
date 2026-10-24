@@ -296,7 +296,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
 
     gpu::TextureView tex_index_view = gpu::create_texture_view(&device, texture, null)!!;
     gpu::TextureIndex tex_index = tex_index_view.index;
-    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
+    defer gpu::destroy_texture_view(&device, tex_index_view);
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
         .mag_filter = gpu::Filter.NEAREST,
@@ -538,7 +538,7 @@ fn void compressed_upload_mip_chain_sample_and_readback() @test {
     defer gpu::destroy_texture(&device, edge)!!;
 
     gpu::TextureView chain_view = gpu::create_texture_view(&device, chain, null)!!;
-    defer gpu::destroy_texture_view(&device, chain_view)!!;
+    defer gpu::destroy_texture_view(&device, chain_view);
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
         .mag_filter = gpu::Filter.NEAREST,
@@ -763,7 +763,7 @@ fn void storage_write_direct_readback() @test {
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::TextureView tex_index_view = gpu::create_texture_view(&device, texture, null)!!;
     gpu::TextureIndex tex_index = tex_index_view.index;
-    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
+    defer gpu::destroy_texture_view(&device, tex_index_view);
 
     OwnedSpan readback = allocate_owned_span(
         device:       &device,
@@ -953,7 +953,7 @@ fn void mip_subset_view_sampled() @test {
     gpu::TextureViewDesc mip1_view = { .base_mip = 1, .mip_count = 1 };
     gpu::TextureView tex_index_view = gpu::create_texture_view(&device, texture, &mip1_view)!!;
     gpu::TextureIndex tex_index = tex_index_view.index;
-    defer gpu::destroy_texture_view(&device, tex_index_view)!!;
+    defer gpu::destroy_texture_view(&device, tex_index_view);
 
     gpu::TextureViewDesc out_of_range = { .base_mip = 2, .mip_count = 1 };
     fault range_fault = @catch(gpu::create_texture_view(&device, texture, &out_of_range));
@@ -1083,24 +1083,4 @@ fn void mip_subset_view_sampled() @test {
     float* sampled = (float*)test_span_mapping(&device, out_span).ptr;
     assert(quantize_unorm8(sampled[0]) == 200, "mip-subset view samples mip 1, not mip 0");
     assert(quantize_unorm8(sampled[1]) == 210, "mip-subset view green matches mip 1");
-}
-
-fn void mapped_span_stale_owner_faults() @test {
-    gpu::Device device = make_upload_test_device();
-    defer destroy_test_device(&device)!!;
-
-    OwnedSpan owned = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "stale_mapped_span",
-    )!!;
-    gpu::GpuSpan stale = owned.span;
-    gpu::flush_mapped_span(&device, stale)!!;
-    gpu::invalidate_mapped_span(&device, stale)!!;
-    free_owned_span(&device, &owned)!!;
-
-    fault stale_fault = @catch(gpu::flush_mapped_span(&device, stale));
-    assert(stale_fault == gpu::INVALID_HANDLE, "flush on a freed allocation faults INVALID_HANDLE");
 }

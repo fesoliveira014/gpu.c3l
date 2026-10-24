@@ -104,7 +104,7 @@ fn void rendering_attachments_use_classic_layouts() @test {
 
     gpu::internal::vk::PreparedRenderPass prepared =
         gpu::internal::vk::lower_render_pass(record, &pass)!!;
-    if (gpu::get_device_caps(&device)!!.unified_layouts) {
+    if (gpu::get_device_caps(&device).unified_layouts) {
         assert(prepared.attachments[0].image_layout == vk::ImageLayout.GENERAL
             && prepared.depth_attachment.image_layout == vk::ImageLayout.GENERAL,
             "unified mode renders in GENERAL");
@@ -247,7 +247,7 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         gpu::internal::recording_command(&commands)!!;
     gpu::internal::vk::PreparedRenderPass prepared =
         gpu::internal::vk::lower_render_pass(record, &pass)!!;
-    bool unified = gpu::get_device_caps(&device)!!.unified_layouts;
+    bool unified = gpu::get_device_caps(&device).unified_layouts;
     assert(prepared.attachments[0].resolve_image_layout
             == (unified ? vk::ImageLayout.GENERAL : vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL),
         "resolve uses the classic color-attachment layout");
@@ -474,7 +474,7 @@ fn void multisample_texture_reads_each_sample() @test {
     );
     defer gpu::destroy_texture(&device, color)!!;
     gpu::TextureView color_sampled = gpu::create_texture_view(&device, color, null)!!;
-    defer gpu::destroy_texture_view(&device, color_sampled)!!;
+    defer gpu::destroy_texture_view(&device, color_sampled);
     gpu::AttachmentViewHandle color_view = create_test_attachment_view(&device, color)!!;
     defer destroy_test_attachment_view(&device, &color_view)!!;
 
@@ -497,7 +497,7 @@ fn void multisample_texture_reads_each_sample() @test {
     defer {
         if (with_unsigned) {
             destroy_test_attachment_view(&device, &unsigned_view)!!;
-            gpu::destroy_texture_view(&device, unsigned_sampled)!!;
+            gpu::destroy_texture_view(&device, unsigned_sampled);
             gpu::destroy_texture(&device, unsigned_texture)!!;
         }
     }
@@ -686,10 +686,10 @@ fn void destroy_depth_resolve_targets(
     DepthResolveTargets* targets,
 ) {
     destroy_test_attachment_view(device, &targets.target_view)!!;
-    gpu::destroy_texture_view(device, targets.target_sampled)!!;
+    gpu::destroy_texture_view(device, targets.target_sampled);
     gpu::destroy_texture(device, targets.target)!!;
     destroy_test_attachment_view(device, &targets.source_view)!!;
-    gpu::destroy_texture_view(device, targets.source_sampled)!!;
+    gpu::destroy_texture_view(device, targets.source_sampled);
     gpu::destroy_texture(device, targets.source)!!;
 }
 
@@ -943,7 +943,7 @@ fn void depth_resolve_writes_the_selected_sample() @test {
         return;
     }
 
-    gpu::DepthResolveSupport supported = gpu::get_device_caps(&device)!!.depth_resolve_modes;
+    gpu::DepthResolveSupport supported = gpu::get_device_caps(&device).depth_resolve_modes;
     assert(supported.sample_zero, "every device resolves depth with sample zero");
     check_depth_resolve(&device, sample_count, gpu::DepthResolveMode.SAMPLE_ZERO);
     if (supported.min) check_depth_resolve(&device, sample_count, gpu::DepthResolveMode.MIN);
@@ -962,7 +962,7 @@ fn void depth_resolve_writes_the_selected_sample() @test {
         "an unreported MAX resolve faults UNSUPPORTED_FEATURE");
     state.caps.depth_resolve_modes = supported;
 
-    gpu::Format stencil_format = gpu::get_device_caps(&device)!!.depth_stencil_format;
+    gpu::Format stencil_format = gpu::get_device_caps(&device).depth_stencil_format;
     if (stencil_format == gpu::Format.UNDEFINED) {
         io::eprintfn("no combined depth-stencil format on this adapter; skipping the stencil resolve fault");
     } else {
@@ -1015,7 +1015,7 @@ fn void check_sample_coverage(
     );
     defer gpu::destroy_texture(device, color)!!;
     gpu::TextureView color_sampled = gpu::create_texture_view(device, color, null)!!;
-    defer gpu::destroy_texture_view(device, color_sampled)!!;
+    defer gpu::destroy_texture_view(device, color_sampled);
     gpu::AttachmentViewHandle color_view = create_test_attachment_view(device, color)!!;
     defer destroy_test_attachment_view(device, &color_view)!!;
 

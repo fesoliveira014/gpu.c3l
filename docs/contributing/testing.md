@@ -75,6 +75,12 @@ c3c test shader_abi --path test/cpu
 `consumer_compile` imports `gpu` and every `gpu::surface::*` module from
 consumer modules and compiles one file per operation set.
 
+A call that terminates on a programming error is not exercised by the test
+suites. Test the identity checks through the non-terminating lookups instead,
+for example `assert(table.find(stale) == null)`. A test that aborts by
+mistake can leave locks and device pins held, so read the first failure of a
+run, not the ones that follow.
+
 Compiler visibility and type checking define the public surface; there is no
 symbol inventory.
 

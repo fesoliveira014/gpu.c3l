@@ -81,6 +81,11 @@ cleanup with its own failure contract.
 - **Destruction never waits.** The application establishes completion before
   destroying resources. Actual child ownership and backend operations can
   return `RESOURCE_IN_USE` or `DEVICE_BUSY`, preserving the handle for retry.
+  Destroying the zero handle is a no-op.
+- **Handle misuse terminates.** A zero, stale, malformed, foreign, or consumed
+  handle, or a null object pointer, terminates the process with a message
+  naming the handle type and a backtrace to the call. Applications do not
+  handle it as a fault.
 - **Completion is the only fence.** `submit` returns a `CompletionPoint`.
   Reusing memory, reusing a command allocator, destroying a resource, and
   freeing an allocation all wait on the point that covers the last use.
@@ -227,6 +232,9 @@ allocator with `DEFAULT_COMMAND_ALLOCATOR_CAPACITY` (32) units can therefore
 have 32 lists in flight. When no unit is free, `begin_commands` retires the
 queue's completed work once before reporting `DEVICE_BUSY`, so an
 application that never polls still reuses units after their work completes.
+When every unit is held by an unsubmitted recording or executable list,
+nothing can retire, and `begin_commands` returns
+`COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` instead.
 Native command buffers are allocated on a unit's first use.
 
 Direct, indirect, and generated work share this lifecycle. Generated work
@@ -295,8 +303,8 @@ its own.
 
 | Category | Operations |
 |---|---|
-| Externally synchronized | runtime and surface registry mutation; one swapchain; submit, present, and sparse bind on one native queue |
-| Thread-safe | adapter queries; allocation, texture, view, sampler, pipeline, and acceleration-structure operations; completion poll and wait; operations on distinct objects |
+| Externally synchronized | runtime and surface registry mutation; one swapchain; submit, present, and sparse bind on one native queue; `destroy_device` against every other call on that device |
+| Thread-safe | adapter queries; `is_device_lost` and other device queries; allocation, texture, view, sampler, pipeline, and acceleration-structure operations; completion poll and wait; operations on distinct objects |
 | Thread-confined | a `CommandList` and all copies of it; the allocator while a recording is live |
 
 Distinct allocators record in parallel. Moving an `ExecutableCommandList` to

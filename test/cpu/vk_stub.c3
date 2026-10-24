@@ -95,7 +95,7 @@ fn gpu::GpuAddress? vk_get_acceleration_structure_address(
     if (state == null
         || !state.acceleration_structure_live
         || state.acceleration_structure != acceleration_structure) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale AccelerationStructureHandle");
     }
     if (state.acceleration_structure_kind
         != gpu::AccelerationStructureKind.BOTTOM_LEVEL) {
@@ -252,7 +252,6 @@ bool configured_allocator_create_failure @private;
 bool configured_swapchain_create_failure @private;
 bool configured_swapchain_info_override @private;
 gpu::SwapchainInfo configured_swapchain_info @private;
-fault configured_swapchain_info_fault @private;
 bool configured_device_destroy_failure @private;
 gpu::Device last_created_device @private;
 uint allocator_destroy_attempts @private;
@@ -275,7 +274,7 @@ gpu::Adapter last_device_adapter @private;
 uint runtime_creates @private;
 uint runtime_destroys @private;
 bool probe_destroy_visibility @private;
-fault destroy_visibility_fault @private;
+bool runtime_visible_at_destroy @private;
 uint surface_creates @private;
 uint surface_destroys @private;
 bool presentation_supported @private = true;
@@ -301,12 +300,12 @@ fn void? vk_begin_commands(
     gpu::CommandList* out_commands,
 ) {
     if (state == null || allocator == null || out_commands == null) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: corrupt CommandAllocator");
     }
     gpu::Device device = allocator.device;
     gpu::internal::DeviceData* data =
         gpu::internal::resolve_pinned_device(&device);
-    if (data == null || data.state != state) return gpu::INVALID_HANDLE~;
+    if (data == null || data.state != state) abort("gpu: corrupt Device");
 
     state.next_command++;
     uint index = state.reuse_command_index ? 1 : state.next_command;
@@ -343,7 +342,7 @@ fn void? vk_end_commands(
     CommandRecord* record,
 ) {
     if (state == null || record == null || record.device_state != state) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: corrupt CommandList");
     }
     if (state.reject_end) return gpu::DEVICE_BUSY~;
     if (record.state != gpu::internal::CommandState.RECORDING) {
@@ -361,7 +360,7 @@ fn void? vk_discard_commands(
         || record == null
         || record.device_state != state
         || !record.identity.is_valid()) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale CommandList");
     }
     if (state.reject_discard) return gpu::DEVICE_BUSY~;
     bool state_matches = executable
@@ -374,7 +373,7 @@ fn void? vk_discard_commands(
     if (index >= state.command_records.len
         || !state.command_used[index]
         || record != &state.command_records[index]) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale CommandList");
     }
 
     record.state = gpu::internal::CommandState.INACTIVE;
@@ -392,7 +391,7 @@ fn bool? vk_poll_completion(
     uint queue_id,
     ulong sequence,
 ) {
-    if (state == null) return gpu::INVALID_HANDLE~;
+    if (state == null) abort("gpu: corrupt Device");
     state.completion_poll_calls++;
     state.completion_last_queue_id = queue_id;
     state.completion_last_sequence = sequence;
@@ -406,7 +405,7 @@ fn void? vk_wait_completion(
     ulong timeout_ns,
 ) {
     context_wait_calls++;
-    if (state == null) return gpu::INVALID_HANDLE~;
+    if (state == null) abort("gpu: corrupt Device");
     state.completion_wait_calls++;
     state.completion_last_queue_id = queue_id;
     state.completion_last_sequence = sequence;
@@ -421,10 +420,10 @@ fn gpu::CompletionPoint? vk_submit(
     gpu::Queue queue,
     gpu::SubmitDesc* desc,
 ) {
-    if (state == null || desc == null) return gpu::INVALID_HANDLE~;
+    if (state == null || desc == null) abort("gpu: corrupt Device");
     gpu::internal::DeviceData* data =
         gpu::internal::resolve_pinned_device(&queue.device);
-    if (data == null || data.state != state) return gpu::INVALID_HANDLE~;
+    if (data == null || data.state != state) abort("gpu: corrupt Device");
     gpu::internal::DeviceSlotControl control =
         (gpu::internal::DeviceSlotControl)
             gpu::internal::device_slots[queue.device.index]
@@ -440,7 +439,7 @@ fn gpu::CompletionPoint? vk_submit(
         CommandRecord* record =
             gpu::internal::executable_command(commands)!;
         if (record.device_state != state || record.queue != queue) {
-            return gpu::INVALID_HANDLE~;
+            abort("gpu: foreign ExecutableCommandList");
         }
         for (sz previous = 0; previous < i; previous++) {
             if (records[previous] == record) {
@@ -471,7 +470,7 @@ fn gpu::CommandAllocatorHandle? vk_create_command_allocator(
     gpu::Queue queue,
     gpu::CommandAllocatorDesc* desc,
 ) {
-    if (state == null || desc == null) return gpu::INVALID_HANDLE~;
+    if (state == null || desc == null) abort("gpu: corrupt Device");
     state.allocator_creates++;
     state.allocator_queue = queue;
     state.allocator_desc = *desc;
@@ -494,10 +493,10 @@ fn void? vk_destroy_command_allocator(
     VkDeviceState* state,
     gpu::CommandAllocatorHandle handle,
 ) {
-    if (state == null) return gpu::INVALID_HANDLE~;
+    if (state == null) abort("gpu: corrupt Device");
     state.allocator_destroy_calls++;
     allocator_destroy_attempts++;
-    if (!handle.is_valid()) return gpu::INVALID_HANDLE~;
+    if (!handle.is_valid()) return;
     if (state.reject_allocator_destroy) return gpu::RESOURCE_IN_USE~;
 }
 
@@ -755,7 +754,7 @@ fn uint stub_sampler_native_destroy_count() => sampler_native_destroys;
 
 fn void destroy_vk_runtime_state(VkRuntimeState* state) {
     if (probe_destroy_visibility) {
-        destroy_visibility_fault = @catch(gpu::enumerate_adapters(&state.runtime));
+        runtime_visible_at_destroy = gpu::internal::resolve_runtime(&state.runtime) != null;
         probe_destroy_visibility = false;
     }
     runtime_destroys++;
@@ -764,7 +763,7 @@ fn void destroy_vk_runtime_state(VkRuntimeState* state) {
 
 fn gpu::AdapterInfo? vk_get_adapter_info(VkRuntimeState* state, uint index) {
     device_support_queries++;
-    if (state == null || index >= state.adapter_count) return gpu::INVALID_HANDLE~;
+    if (state == null || index >= state.adapter_count) abort("gpu: corrupt Adapter");
     return {
         .name             = index == 0 ? "stub adapter 0" : "stub adapter 1",
         .device_class     = index < configured_adapter_classes.len
@@ -851,7 +850,7 @@ fn bool? vk_adapter_supports_sparse_textures(
     uint adapter_index,
 ) {
     if (state == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: corrupt Adapter");
     }
     return configured_sparse_texture_support;
 }
@@ -860,7 +859,7 @@ fn gpu::AdapterDiagnostics? vk_get_adapter_diagnostics(
     VkRuntimeState* state,
     uint index,
 ) {
-    if (state == null || index >= state.adapter_count) return gpu::INVALID_HANDLE~;
+    if (state == null || index >= state.adapter_count) abort("gpu: corrupt Adapter");
     return {
         .backend_name = "stub",
         .driver_name  = "stub driver",
@@ -915,7 +914,7 @@ fn bool? vk_supports_presentation(
     void* surface,
 ) {
     if (state == null || surface == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: corrupt Adapter");
     }
     return presentation_supported;
 }
@@ -930,7 +929,7 @@ fn bool? vk_supports_queue_request(
 ) {
     (void)backend_surface;
     if (state == null || request == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: corrupt Adapter");
     }
     if (require_sparse_binding && !configured_sparse_queue_support) {
         return false;
@@ -1021,13 +1020,11 @@ fn void stub_set_context_creation_failures(bool allocator, bool swapchain, bool 
     configured_swapchain_create_failure = swapchain;
     configured_device_destroy_failure = device_destroy;
     configured_swapchain_info_override = false;
-    configured_swapchain_info_fault = {};
 }
 
-fn void stub_set_context_swapchain_info(gpu::SwapchainInfo info, fault info_fault = {}) {
+fn void stub_set_context_swapchain_info(gpu::SwapchainInfo info) {
     configured_swapchain_info_override = true;
     configured_swapchain_info = info;
-    configured_swapchain_info_fault = info_fault;
 }
 
 fn gpu::Device stub_last_created_device() => last_created_device;
@@ -1104,7 +1101,7 @@ fn gpu::Adapter? stub_device_adapter(gpu::Device* device) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     defer gpu::internal::end_device_operation(&operation);
     VkDeviceState* state = operation.state;
-    if (state == null) return gpu::INVALID_HANDLE~;
+    if (state == null) abort("gpu: corrupt Device");
     return state.adapter;
 }
 
@@ -1112,7 +1109,7 @@ fn void stub_probe_destroy_visibility() {
     probe_destroy_visibility = true;
 }
 
-fn fault stub_destroy_visibility_fault() => destroy_visibility_fault;
+fn bool stub_runtime_visible_at_destroy() => runtime_visible_at_destroy;
 
 fn void stub_reset_runtime_counts() {
     runtime_creates = 0;
@@ -1270,7 +1267,7 @@ fn void? vk_destroy_timestamp_pool(
 ) {
     (void)state;
     (void)pool;
-    return gpu::INVALID_HANDLE~;
+    abort("gpu: stale TimestampPoolHandle");
 }
 
 fn void? vk_read_timestamps(
@@ -1315,8 +1312,8 @@ fn void? vk_free_allocation(
 ) {
     allocation_free_attempts++;
     state.allocation_free_calls++;
-    if (!state.allocation_live) return gpu::INVALID_HANDLE~;
-    if (state.allocation != allocation) return gpu::INVALID_HANDLE~;
+    if (!state.allocation_live) abort("gpu: stale GpuAllocation");
+    if (state.allocation != allocation) abort("gpu: stale GpuAllocation");
     if (state.allocation_block_free
         || state.allocation_has_texture_placement) {
         return gpu::RESOURCE_IN_USE~;
@@ -1342,7 +1339,7 @@ fn gpu::AllocationInfo? vk_get_allocation_info(
     gpu::GpuAllocation allocation,
 ) {
     if (!state.allocation_live || allocation != state.allocation) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale GpuAllocation");
     }
     bool texture_memory =
         state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE;
@@ -1369,7 +1366,7 @@ fn gpu::GpuSpan? vk_get_allocation_span(
     gpu::GpuAllocation allocation,
 ) {
     if (!state.allocation_live || allocation != state.allocation) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale GpuAllocation");
     }
     if (state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE) {
         return gpu::INVALID_ARGUMENT~;
@@ -1386,7 +1383,7 @@ fn char[]? vk_get_span_mapping(VkDeviceState* state, gpu::GpuSpan span) {
     if (!state.allocation_live || span.owner != state.allocation.owner
         || span.index != state.allocation.index
         || span.generation != state.allocation.generation) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale GpuSpan");
     }
     if (span.size == 0
         || state.allocation_desc.memory_class == gpu::MemoryClass.GPU_PRIVATE
@@ -1411,7 +1408,7 @@ fn gpu::GpuAddress? vk_get_span_address(
     if (!state.allocation_live || span.owner != state.allocation.owner
         || span.index != state.allocation.index
         || span.generation != state.allocation.generation) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale GpuSpan");
     }
     if (span.size == 0
         || state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE
@@ -1588,8 +1585,8 @@ fn void? vk_destroy_texture(
     gpu::TextureHandle texture,
 ) {
     texture_destroy_attempts++;
-    if (!state.texture_live) return gpu::INVALID_HANDLE~;
-    if (state.texture != texture) return gpu::INVALID_HANDLE~;
+    if (!state.texture_live) abort("gpu: stale TextureHandle");
+    if (state.texture != texture) abort("gpu: stale TextureHandle");
     state.texture = {};
     state.texture_live = false;
     state.allocation_has_texture_placement = false;
@@ -1634,7 +1631,7 @@ fn void? vk_wait_swapchain_presentations(
 ) {
     context_wait_calls++;
     if (state == null || !state.swapchain_live || state.swapchain != handle) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale SwapchainHandle");
     }
     if (state.present_wait_pending_count == 0) return;
     state.present_wait_calls++;
@@ -1651,8 +1648,8 @@ fn void? vk_destroy_swapchain(
     gpu::SwapchainHandle handle,
 ) {
     swapchain_destroy_attempts++;
-    if (state == null || !state.swapchain_live) return gpu::INVALID_HANDLE~;
-    if (state.swapchain != handle) return gpu::INVALID_HANDLE~;
+    if (state == null || !state.swapchain_live) abort("gpu: stale SwapchainHandle");
+    if (state.swapchain != handle) abort("gpu: stale SwapchainHandle");
     if (state.reject_swapchain_destroy) return gpu::RESOURCE_IN_USE~;
 
     gpu::internal::surface_release_swapchain(&state.surface)!;
@@ -1672,7 +1669,7 @@ fn void? vk_resize_swapchain(
     uint height,
 ) {
     if (state == null || !state.swapchain_live || state.swapchain != handle) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale SwapchainHandle");
     }
     state.swapchain_info.width = width;
     state.swapchain_info.height = height;
@@ -1683,9 +1680,8 @@ fn gpu::SwapchainInfo? vk_get_swapchain_info(
     gpu::SwapchainHandle handle,
 ) {
     if (state == null || !state.swapchain_live || state.swapchain != handle) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale SwapchainHandle");
     }
-    if (configured_swapchain_info_fault) return configured_swapchain_info_fault~;
     return state.swapchain_info;
 }
 
@@ -1696,7 +1692,7 @@ fn gpu::AcquiredImage? vk_acquire_next_image(
 ) {
     (void)timeout_ns;
     if (state == null || !state.swapchain_live || state.swapchain != handle) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale SwapchainHandle");
     }
     return gpu::UNSUPPORTED_FEATURE~;
 }
@@ -1717,7 +1713,7 @@ fn gpu::PresentModeSupport? vk_get_present_mode_support(
     gpu::SwapchainHandle handle,
 ) {
     if (state == null || !state.swapchain_live || state.swapchain != handle) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: stale SwapchainHandle");
     }
     return { .fifo = true };
 }
@@ -1740,8 +1736,8 @@ fn void? validate_device_baseline_support(
     VkRuntimeState* runtime_state,
     uint adapter_index,
 ) {
-    if (runtime_state == null) return gpu::INVALID_HANDLE~;
-    if (adapter_index >= runtime_state.adapter_count) return gpu::INVALID_HANDLE~;
+    if (runtime_state == null) abort("gpu: corrupt Adapter");
+    if (adapter_index >= runtime_state.adapter_count) abort("gpu: corrupt Adapter");
     if (!configured_device_baseline_support) return gpu::UNSUPPORTED_FEATURE~;
 }
 
@@ -1772,8 +1768,7 @@ fn gpu::Device? create_vk_device(
         transfer_aliases_compute:    true,
     )!;
     gpu::internal::RuntimeData* runtime_data =
-        gpu::internal::resolve_runtime(retained_runtime);
-    if (runtime_data == null) return gpu::INVALID_HANDLE~;
+        gpu::internal::require_runtime(retained_runtime)!;
     gpu::DeviceCaps caps = {
         .presentation_enabled = normalized.surface.is_valid(),
         .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,
@@ -2188,6 +2183,6 @@ fn void? vk_cmd_barrier(CommandRecord* commands, gpu::Barrier* barrier) {
     while (state.block_command && !state.command_release.load(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
-    if (state.reject_command) return gpu::INVALID_HANDLE~;
+    if (state.reject_command) abort("gpu: stale CommandList");
     $endif
 }

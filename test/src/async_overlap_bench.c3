@@ -180,14 +180,14 @@ fn int main() {
     bool families_distinct = state.graphics_family != state.compute_family;
     io::printfn(
         "topology: async_compute=%s graphics=%d:0 compute=%d:%d queues_distinct=%s families_distinct=%s",
-        gpu::get_device_caps(&device)!!.async_compute ? "true" : "false",
+        gpu::get_device_caps(&device).async_compute ? "true" : "false",
         state.graphics_family,
         state.compute_family,
         state.compute_queue_index,
         state.compute_queue_distinct ? "true" : "false",
         families_distinct ? "true" : "false",
     );
-    if (!gpu::get_device_caps(&device)!!.async_compute) {
+    if (!gpu::get_device_caps(&device).async_compute) {
         io::printfn("single queue: compute aliases graphics on this adapter -- phase A and phase B submit to the same queue, so wall_a ~= wall_b is expected");
     }
 
@@ -626,7 +626,7 @@ fn int main() {
     double intersection_ratio = median_max > 0.0 ? median_intersection / median_max : 0.0;
     io::printfn(
         "verdict: %s (intersection_ratio=%.3f) -- cross-queue timestamp comparison assumes one clock domain; per-queue GPU durations and wall clocks above are the primary evidence",
-        verdict_text(gpu::get_device_caps(&device)!!.async_compute, overlap_detected), intersection_ratio,
+        verdict_text(gpu::get_device_caps(&device).async_compute, overlap_detected), intersection_ratio,
     );
 
     return 0;

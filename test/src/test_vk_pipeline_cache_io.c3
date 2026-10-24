@@ -273,15 +273,6 @@ fn void cache_foreign_uuid_blob_starts_empty() @test {
     run_cache_io_dispatch(&device_b, pipe_b);
 }
 
-fn void present_mode_query_requires_valid_swapchain() @test {
-    gpu::Device device = make_cache_io_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::SwapchainHandle bogus = { .index = 3, .generation = 7 };
-    fault f = @catch(gpu::get_present_mode_support(&device, bogus));
-    assert(f == gpu::INVALID_HANDLE, "query on a bogus swapchain faults INVALID_HANDLE");
-}
-
 fn void pipeline_cache_retry_seam_is_exact_and_silent_on_success() @test {
     vk::VkDeviceState state;
     CacheBackendCapture capture;

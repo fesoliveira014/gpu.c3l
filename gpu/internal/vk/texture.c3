@@ -195,12 +195,19 @@ fn gpu::TextureHandle? TextureTable.alloc(&self, TextureSlot value) {
     };
 }
 
+<* Look up a slot without terminating: null unless `h` is live. *>
+fn TextureSlot* TextureTable.find(&self, gpu::TextureHandle h) {
+    if (h.owner != self.owner || h.index >= self.slots.len) return null;
+    if (!self.slots[h.index].used
+        || self.slots[h.index].generation != h.generation) return null;
+    return &self.slots[h.index].value;
+}
+
 fn TextureSlot*? TextureTable.get(&self, gpu::TextureHandle h) {
-    if (h.owner != self.owner) return gpu::INVALID_HANDLE~;
-    uint idx = h.index;
-    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::INVALID_HANDLE~;
-    if (self.slots[idx].generation != h.generation) return gpu::INVALID_HANDLE~;
-    return &self.slots[idx].value;
+    if (h.owner != self.owner) abort("gpu: foreign TextureHandle");
+    TextureSlot* slot = self.find(h);
+    if (slot == null) abort("gpu: stale TextureHandle");
+    return slot;
 }
 
 fn void? TextureTable.free(&self, gpu::TextureHandle h) {
@@ -575,8 +582,8 @@ fn gpu::TextureHandle[] retain_pending_texture_inits(VkDeviceState* state) {
     gpu::TextureHandle[] out = mem::new_array(gpu::TextureHandle, total);
     uint count = 0;
     for (uint i = 0; i < total; i++) {
-        TextureSlot*? slot = state.textures.get(state.pending_init_textures[i]);
-        if (catch err = slot) continue;
+        TextureSlot* slot = state.textures.find(state.pending_init_textures[i]);
+        if (slot == null) continue;
         (void)slot.internal_references.add(1, AtomicOrdering.RELAXED);
         out[count++] = state.pending_init_textures[i];
     }
@@ -598,8 +605,8 @@ fn void release_pending_texture_inits(
 ) {
     if (handles.len == 0) return;
     foreach (handle : handles) {
-        TextureSlot*? slot = state.textures.get(handle);
-        if (catch err = slot) continue;
+        TextureSlot* slot = state.textures.find(handle);
+        if (slot == null) continue;
         (void)slot.internal_references.sub(1, AtomicOrdering.RELAXED);
     }
     if (restore) {

@@ -111,7 +111,7 @@ fn gpu::Device? create_ray_tracing_test_device(
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::DeviceDesc device_desc = {
         .enable_ray_tracing_pipelines = true,
     };
@@ -125,7 +125,7 @@ fn gpu::Device? create_ray_tracing_test_device(
             if (f == gpu::UNSUPPORTED_FEATURE) continue;
             return f~;
         }
-        gpu::AdapterInfo adapter_info = gpu::get_adapter_info(&adapter)!;
+        gpu::AdapterInfo adapter_info = gpu::get_adapter_info(&adapter);
         io::printfn("ray tracing adapter: %s", adapter_info.name);
         *out_runtime = runtime;
         validation.errors = 0;
@@ -443,7 +443,7 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         destroy_test_device(&device)!!;
         runtime = {};
     }
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     io::printfn(
         "ray tracing dispatch capabilities: basic=%s, indirect2=%s",
         caps.ray_tracing_pipelines.indirect_dispatch ? "true" : "false",
@@ -604,7 +604,7 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
     defer free_owned_span(&device, &tlas_scratch)!!;
     gpu::AccelerationStructureView tlas_view =
         gpu::create_acceleration_structure_view(&device, tlas)!!;
-    defer gpu::destroy_acceleration_structure_view(&device, tlas_view)!!;
+    defer gpu::destroy_acceleration_structure_view(&device, tlas_view);
 
     OwnedSpan output = allocate_trace_span(
         device:       &device,

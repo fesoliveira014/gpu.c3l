@@ -35,7 +35,7 @@ gpu::AllocationDesc desc = {
 };
 gpu::GpuAllocation allocation = gpu::allocate_memory(&device, &desc)!;
 defer (void)gpu::free_allocation(&device, &allocation);
-gpu::AllocationInfo info = gpu::get_allocation_info(&device, allocation)!;
+gpu::AllocationInfo info = gpu::get_allocation_info(&device, allocation);
 ```
 
 | `MemoryClass` | Mapped | Addressable | Use |
@@ -101,8 +101,8 @@ freed.
 ## Memory statistics
 
 ```c3
-gpu::MemoryStats stats = gpu::get_memory_stats(&device)!;
-String report = gpu::build_memory_report(&device, true)!;
+gpu::MemoryStats stats = gpu::get_memory_stats(&device);
+String report = gpu::build_memory_report(&device, true);
 defer report.free(mem);
 ```
 
@@ -225,7 +225,7 @@ gpu::TextureViewDesc mip1 = { .base_mip = 1, .mip_count = 1 };
 gpu::TextureView view_mip1 = gpu::create_texture_view(&device, texture, &mip1)!;
 root.albedo = view.index;
 ...
-gpu::destroy_texture_view(&device, view)!;   // slot is reused immediately
+gpu::destroy_texture_view(&device, view);   // slot is reused immediately
 ```
 
 Batch creation publishes all or nothing:
@@ -263,7 +263,7 @@ gpu::update_texture_view(
     texture: b,
     desc:    null,
 )!;                                                    // same index, new texture
-gpu::destroy_texture_view(&device, slot1)!;            // slot stays reserved
+gpu::destroy_texture_view(&device, slot1);            // slot stays reserved
 gpu::release_texture_indices(&device, row)!;           // every slot must be empty
 ```
 
@@ -423,11 +423,13 @@ fills an SBT.
 | Cause | Fault |
 |---|---|
 | bad range, alignment, descriptor, or limit | `INVALID_ARGUMENT` |
-| zero, stale, or foreign handle | `INVALID_HANDLE` |
 | unsupported usage, format, or feature | `UNSUPPORTED_FEATURE` |
 | out of memory | `OUT_OF_HOST_MEMORY`, `OUT_OF_DEVICE_MEMORY` |
 | fixed table full | `SLOT_TABLE_FULL` |
 | heap full | `DESCRIPTOR_HEAP_FULL` |
 | live child or backend operation | `RESOURCE_IN_USE` |
+
+A zero, stale, foreign, or consumed handle terminates instead of returning a
+fault; see [conventions](index.md#conventions).
 
 All creation here is thread-safe and transactional.

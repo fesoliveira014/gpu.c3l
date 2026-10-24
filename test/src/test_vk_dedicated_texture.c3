@@ -534,7 +534,7 @@ fn void dedicated_texture_reports_device_local_memory() @test {
     }
 
     gpu::AllocationInfo info =
-        gpu::get_allocation_info(&device, created.allocation)!!;
+        gpu::get_allocation_info(&device, created.allocation);
 
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;

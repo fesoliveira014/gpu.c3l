@@ -674,13 +674,6 @@ fn void sparse_backing_resolution_validates_unbind_and_allocation_contract() @te
 
     gpu::GpuAllocation stale = fixture.allocation;
     stale.generation++;
-    assert(@catch(vk::resolve_sparse_backing_locked(
-        state:             &fixture.state,
-        texture:           texture,
-        allocation:        stale,
-        allocation_offset: 0,
-        size:              4096,
-    )) == gpu::INVALID_HANDLE);
     fixture.allocation_cells[0].value.memory_class =
         gpu::MemoryClass.GPU_PRIVATE;
     assert(@catch(vk::resolve_sparse_backing_locked(
@@ -1324,13 +1317,6 @@ fn void sparse_backing_resolution_checks_every_live_compatibility_rule() @test {
 
     gpu::GpuAllocation foreign = fixture.allocation;
     foreign.owner++;
-    assert(@catch(vk::resolve_sparse_backing_locked(
-        state:             &fixture.state,
-        texture:           texture,
-        allocation:        foreign,
-        allocation_offset: 0,
-        size:              4096,
-    )) == gpu::INVALID_HANDLE);
     fixture.allocation_cells[0].value = original;
     fixture.allocation_cells[0].value.memory_class =
         gpu::MemoryClass.GPU_PRIVATE;
@@ -1421,12 +1407,6 @@ fn void sparse_bind_validation_precedes_host_allocation() @test {
     sparse_bind_capture = {};
 
     desc.texture.generation++;
-    assert(@catch(vk::vk_bind_sparse_texture_memory_with_ops(
-        state: &fixture.state,
-        queue: fixture.queue,
-        desc:  &desc,
-        ops:   &ops,
-    )) == gpu::INVALID_HANDLE);
     desc.texture = fixture.texture;
 
     tiles[0].offset.x = 1;
@@ -1439,24 +1419,12 @@ fn void sparse_bind_validation_precedes_host_allocation() @test {
     tiles[0].offset.x = 0;
 
     tiles[0].allocation.generation++;
-    assert(@catch(vk::vk_bind_sparse_texture_memory_with_ops(
-        state: &fixture.state,
-        queue: fixture.queue,
-        desc:  &desc,
-        ops:   &ops,
-    )) == gpu::INVALID_HANDLE);
     tiles[0].allocation = fixture.allocation;
 
     gpu::CompletionPoint[1] waits = {
         gpu::internal::make_completion_point(fixture.queue, 1)!!,
     };
     desc.waits = waits[..];
-    assert(@catch(vk::vk_bind_sparse_texture_memory_with_ops(
-        state: &fixture.state,
-        queue: fixture.queue,
-        desc:  &desc,
-        ops:   &ops,
-    )) == gpu::INVALID_HANDLE);
 
     assert(allocator.attempts == 0
             && allocator.acquires == 0
@@ -1542,56 +1510,13 @@ fn void sparse_bind_headroom_and_sequence_failures_are_pre_native() @test {
     assert(sparse_bind_capture.calls == 0);
 }
 
-fn void sparse_bind_unpublished_wait_and_malformed_allocation_are_pre_native() @test {
-    SparseBindFixture fixture;
-    init_sparse_bind_fixture(&fixture);
-    defer destroy_sparse_bind_fixture(&fixture);
-    gpu::SparseTextureTileBind[1] tiles = {{
-        .aspect     = gpu::SparseTextureAspect.COLOR,
-        .mip_level  = 0,
-        .offset     = { 0, 0, 0 },
-        .extent     = { 64, 64, 1 },
-        .allocation = fixture.allocation,
-    }};
-    gpu::CompletionPoint[1] waits = {
-        gpu::internal::make_completion_point(fixture.queue, 1)!!,
-    };
-    gpu::SparseTextureBindDesc desc = {
-        .texture = fixture.texture,
-        .tiles   = tiles[..],
-        .waits   = waits[..],
-    };
-    vk::SparseBindNativeOps ops = sparse_bind_ops();
-    sparse_bind_capture = {};
-
-    assert(@catch(vk::vk_bind_sparse_texture_memory_with_ops(
-        state: &fixture.state,
-        queue: fixture.queue,
-        desc:  &desc,
-        ops:   &ops,
-    )) == gpu::INVALID_HANDLE);
-    assert(sparse_bind_capture.calls == 0);
-
-    desc.waits = {};
-    tiles[0].allocation = { .generation = 1 };
-    assert(@catch(vk::vk_bind_sparse_texture_memory_with_ops(
-        state: &fixture.state,
-        queue: fixture.queue,
-        desc:  &desc,
-        ops:   &ops,
-    )) == gpu::INVALID_HANDLE);
-    assert(sparse_bind_capture.calls == 0);
-}
-
 fn void sparse_bind_fault_mapping_and_inputs_are_transactional() @test {
-    vk::Result[3] results = {
+    vk::Result[2] results = {
         vk::Result.ERROR_OUT_OF_DEVICE_MEMORY,
-        vk::Result.ERROR_DEVICE_LOST,
         vk::Result.ERROR_INITIALIZATION_FAILED,
     };
-    fault[3] expected = {
+    fault[2] expected = {
         gpu::OUT_OF_DEVICE_MEMORY,
-        gpu::DEVICE_LOST,
         gpu::BACKEND_ERROR,
     };
     foreach (i, result : results) {
@@ -1629,6 +1554,45 @@ fn void sparse_bind_fault_mapping_and_inputs_are_transactional() @test {
             ) == 0);
         destroy_sparse_bind_fixture(&fixture);
     }
+}
+
+fn void sparse_bind_after_loss_publishes_complete_point() @test {
+    SparseBindFixture fixture;
+    init_sparse_bind_fixture(&fixture);
+    defer destroy_sparse_bind_fixture(&fixture);
+    gpu::SparseTextureTileBind[1] tiles = {{
+        .aspect     = gpu::SparseTextureAspect.COLOR,
+        .mip_level  = 0,
+        .offset     = { 0, 0, 0 },
+        .extent     = { 64, 64, 1 },
+        .allocation = fixture.allocation,
+    }};
+    gpu::SparseTextureBindDesc desc = {
+        .texture = fixture.texture,
+        .tiles   = tiles[..],
+    };
+    vk::SparseBindNativeOps ops = sparse_bind_ops();
+    sparse_bind_capture = {};
+    sparse_bind_result = vk::Result.ERROR_DEVICE_LOST;
+    defer sparse_bind_result = vk::Result.SUCCESS;
+
+    gpu::CompletionPoint point = vk::vk_bind_sparse_texture_memory_with_ops(
+        state: &fixture.state,
+        queue: fixture.queue,
+        desc:  &desc,
+        ops:   &ops,
+    )!!;
+    ulong sequence = gpu::internal::completion_point_sequence(point);
+
+    assert(sparse_bind_capture.calls == 1);
+    assert(fixture.completions[0].published_sequence.load(
+            AtomicOrdering.ACQUIRE,
+        ) == sequence,
+        "device loss publishes the reserved completion point");
+    assert(fixture.completions[0].retired_sequence.load(
+            AtomicOrdering.ACQUIRE,
+        ) == sequence,
+        "the published point is already complete");
 }
 
 fn void sparse_bind_shape_limits_precede_allocation_and_native_work() @test {
@@ -1985,7 +1949,7 @@ fn void real_sparse_bind_use_and_unbind_when_supported() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::DeviceDesc device_desc = {
         .enable_sparse_textures = true,
     };
@@ -1998,7 +1962,7 @@ fn void real_sparse_bind_use_and_unbind_when_supported() @test {
             &device_desc,
         )!!.supported) continue;
         gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
-        gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+        gpu::DeviceCaps caps = gpu::get_device_caps(&device);
         if (!ran_2d) {
             ran_2d = run_real_sparse_bind_dimension(
                 &device,
