@@ -42,9 +42,8 @@ fn CompletionPoint? make_completion_point(
     Queue queue,
     ulong sequence,
 ) @private {
-    if (!queue.is_valid() || queue.id >= MAX_SELECTED_QUEUE_IDENTITIES) {
-        return gpu::INVALID_HANDLE~;
-    }
+    if (!queue.is_valid()) abort("gpu: zero Queue");
+    if (queue.id >= MAX_SELECTED_QUEUE_IDENTITIES) abort("gpu: malformed Queue");
     if (sequence == 0 || sequence > MAX_COMPLETION_SEQUENCE) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -412,12 +411,12 @@ fn void? validate_queue(
     Device* device,
     Queue queue,
 ) @private {
-    if (operation == null || !operation.active || device == null || !queue.is_valid()) {
-        return gpu::INVALID_HANDLE~;
+    if (operation == null || !operation.active || device == null) {
+        abort("gpu: corrupt Queue");
     }
-    if (queue.device != *device || !queue_id_is_selected(operation, queue)) {
-        return gpu::INVALID_HANDLE~;
-    }
+    if (!queue.is_valid()) abort("gpu: zero Queue");
+    if (queue.device != *device) abort("gpu: foreign Queue");
+    if (!queue_id_is_selected(operation, queue)) abort("gpu: malformed Queue");
 }
 
 fn void? validate_completion_point(
@@ -425,15 +424,13 @@ fn void? validate_completion_point(
     Device* device,
     CompletionPoint point,
 ) @private {
-    if (operation == null
-        || !operation.active
-        || device == null
-        || !point.is_valid()
-        || point.device != *device) {
-        return gpu::INVALID_HANDLE~;
+    if (operation == null || !operation.active || device == null) {
+        abort("gpu: corrupt CompletionPoint");
     }
+    if (!point.is_valid()) abort("gpu: zero CompletionPoint");
+    if (point.device != *device) abort("gpu: foreign CompletionPoint");
     if (completion_point_queue_id(point)
         >= selected_queues(operation).identity_count) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: malformed CompletionPoint");
     }
 }

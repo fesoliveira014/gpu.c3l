@@ -26,7 +26,7 @@ fn void? create_vk_allocator(VkDeviceState* state) {
 }
 
 fn gpu::MemoryStats? vk_get_memory_stats(VkDeviceState* state) {
-    if (state.allocator == null) return gpu::INVALID_ARGUMENT~;
+    if (state.allocator == null) abort("gpu: corrupt Device");
 
     vk::PhysicalDeviceMemoryProperties mem_props;
     vk::get_physical_device_memory_properties(state.physical_device, &mem_props);
@@ -60,7 +60,7 @@ fn gpu::MemoryStats? vk_get_memory_stats(VkDeviceState* state) {
 }
 
 fn String? vk_build_memory_report(VkDeviceState* state, bool detailed) {
-    if (state.allocator == null) return gpu::INVALID_ARGUMENT~;
+    if (state.allocator == null) abort("gpu: corrupt Device");
 
     ZString vma_string;
     state.allocator.build_stats_string(&vma_string, detailed ? vk::TRUE : vk::FALSE);

@@ -51,7 +51,7 @@ fn gpu::Device? make_mesh_device(
     gpu::DeviceDesc device_desc = { .enable_mesh_shaders = true };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!;
         gpu::DeviceSupport support = gpu::supports_device_desc(&adapter, &device_desc)!;
@@ -105,7 +105,7 @@ fn gpu::Vec3u mesh_groups_over_total(gpu::MeshShaderCaps* caps) {
 fn void mesh_shaders_gate_on_the_feature() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     assert(!caps.mesh_shaders.enabled && !caps.mesh_shaders.task_shaders,
         "mesh caps are zero without the request");
     DepthCtx ctx = make_depth_ctx();
@@ -137,7 +137,7 @@ fn void mesh_pipeline_draws_meshlet_triangle() @test {
     gpu::Device device = candidate;
     defer destroy_test_device(&device)!!;
     validation.errors = 0;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     assert(caps.mesh_shaders.enabled && caps.mesh_shaders.max_mesh_work_group_count.x > 0
         && caps.mesh_shaders.max_mesh_output_vertices >= 3,
         "mesh caps report the adapter limits");
@@ -220,7 +220,7 @@ fn void mesh_indirect_draws_execute_gpu_written_arguments() @test {
     gpu::Device device = candidate;
     defer destroy_test_device(&device)!!;
     validation.errors = 0;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     DepthCtx ctx = make_depth_ctx();
     gpu::PipelineHandle mesh_pipeline = make_mesh_pipeline(&device, &ctx);
     defer gpu::destroy_pipeline(&device, mesh_pipeline)!!;
@@ -442,7 +442,7 @@ fn void task_pipelines_release_every_shader_identity() @test {
     }
     gpu::Device device = candidate;
     defer destroy_test_device(&device)!!;
-    if (!gpu::get_device_caps(&device)!!.mesh_shaders.task_shaders) {
+    if (!gpu::get_device_caps(&device).mesh_shaders.task_shaders) {
         io::printfn("task shaders unsupported; skipping");
         return;
     }

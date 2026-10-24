@@ -185,47 +185,6 @@ fn void commands_reject_null_descriptors() @test {
         "commands reject null host descriptors");
 }
 
-fn void resources_reject_foreign_and_stale_identity() @test {
-    RuntimeDiagnosticCapture first_capture;
-    RuntimeDiagnosticCapture second_capture;
-    gpu::RuntimeDesc first_desc = diagnostic_runtime_desc(
-        vulkan_layers:   false,
-        callback:        true,
-        debug_names:     false,
-        capture:         &first_capture,
-    );
-    gpu::RuntimeDesc second_desc = diagnostic_runtime_desc(
-        vulkan_layers:   false,
-        callback:        true,
-        debug_names:     false,
-        capture:         &second_capture,
-    );
-    gpu::Device first = create_test_device(&first_desc)!!;
-    defer destroy_test_device(&first)!!;
-    gpu::Device second = create_test_device(&second_desc)!!;
-    defer destroy_test_device(&second)!!;
-    first_capture = {};
-    second_capture = {};
-    gpu::Queue first_queue = gpu::get_queue(&first, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator first_allocator = gpu::create_command_allocator(&first, first_queue)!!;
-    defer gpu::destroy_command_allocator(&first_allocator)!!;
-    OwnedSpan owned = command_family_span(&first, { .graphics }, "boundary_owned");
-
-    gpu::CommandList commands = record_diagnostic_fill(&first_allocator, owned.span);
-    gpu::discard_commands(&commands)!!;
-
-    gpu::GpuAllocation foreign = owned.allocation;
-    assert(@catch(gpu::free_allocation(&second, &foreign))
-        == gpu::INVALID_HANDLE,
-        "safe resolution rejects foreign ownership");
-    gpu::GpuAllocation stale = owned.allocation;
-    gpu::free_allocation(&first, &owned.allocation)!!;
-    owned.span = {};
-    assert(@catch(gpu::get_allocation_info(&first, stale))
-        == gpu::INVALID_HANDLE,
-        "safe resolution rejects stale identities");
-}
-
 fn uint diagnostic_live_device_count() {
     uint count;
     for (uint i = 0; i < gpu::internal::MAX_DEVICES; i++) {
@@ -247,7 +206,7 @@ fn void partial_creation_rolls_back_before_publication() @test {
             capture:         &capture,
         );
         gpu::Runtime runtime = gpu::create_runtime(&desc)!!;
-        gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+        gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
         bool exercised;
         for (uint i = 0; i < adapters.count; i++) {
             gpu::Adapter adapter = adapters.get(i)!!;
@@ -282,7 +241,7 @@ fn void partial_creation_rolls_back_before_publication() @test {
     }
 }
 
-fn void device_loss_discards_commands() @test {
+fn void lost_device_discards_commands() @test {
     {
         RuntimeDiagnosticCapture capture;
         gpu::RuntimeDesc desc = diagnostic_runtime_desc(
@@ -301,8 +260,9 @@ fn void device_loss_discards_commands() @test {
         gpu::discard_commands(&commands)!!;
 
         gpu::destroy_command_allocator(&allocator)!!;
+        free_owned_span(&device, &owned)!!;
         destroy_test_device(&device)!!;
         assert(!device.is_valid(),
-            "device-loss teardown consumes the device");
+            "lost-device teardown consumes the device");
     }
 }

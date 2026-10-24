@@ -60,7 +60,7 @@ fn void backend_result_diagnostic_preserves_unmapped_fault() @test {
     assert(capture.calls == 1, "null callback does not dispatch a structured duplicate");
 }
 
-fn void explicit_device_loss_invalidates_only_its_owner() @test {
+fn void explicit_device_loss_marks_only_its_owner() @test {
     gpu::internal::vk::VkDeviceState* first_state =
         mem::new(gpu::internal::vk::VkDeviceState);
     gpu::internal::vk::VkDeviceState* second_state =
@@ -76,9 +76,9 @@ fn void explicit_device_loss_invalidates_only_its_owner() @test {
         )) == gpu::BACKEND_ERROR,
         "an unknown native result remains a backend error"
     );
-    assert(!gpu::get_device_caps(&first)!!.presentation_enabled,
+    assert(!gpu::get_device_caps(&first).presentation_enabled,
         "an unknown result leaves its owner usable");
-    assert(!gpu::get_device_caps(&second)!!.presentation_enabled,
+    assert(!gpu::get_device_caps(&second).presentation_enabled,
         "an unknown result leaves a peer usable");
 
     assert(
@@ -86,14 +86,14 @@ fn void explicit_device_loss_invalidates_only_its_owner() @test {
             state:     first_state,
             operation: "submit",
             result:    vk::Result.ERROR_DEVICE_LOST,
-        )) == gpu::DEVICE_LOST,
-        "explicit native loss remains exact"
+        )) == gpu::BACKEND_ERROR,
+        "native loss reaching a fault route is a backend error"
     );
-    assert(
-        @catch(gpu::get_device_caps(&first)) == gpu::DEVICE_LOST,
-        "the reporting device becomes unusable"
-    );
-    assert(!gpu::get_device_caps(&second)!!.presentation_enabled,
+    assert(gpu::is_device_lost(&first), "the reporting device is lost");
+    assert(!gpu::get_device_caps(&first).presentation_enabled,
+        "a lost device still answers queries");
+    assert(!gpu::is_device_lost(&second), "a peer device is not lost");
+    assert(!gpu::get_device_caps(&second).presentation_enabled,
         "a peer device remains usable");
 
     gpu::destroy_device(&first)!!;
@@ -112,10 +112,10 @@ fn void custom_result_routes_mark_the_reporting_device() @test {
             texture:   {},
             slot:      &texture_slot,
             result:    vk::Result.ERROR_DEVICE_LOST,
-        )) == gpu::DEVICE_LOST,
-        "texture-view loss remains exact"
+        )) == gpu::BACKEND_ERROR,
+        "texture-view loss is a backend error"
     );
-    assert(@catch(gpu::get_device_caps(&texture_device)) == gpu::DEVICE_LOST, "texture-view loss marks its owner");
+    assert(gpu::is_device_lost(&texture_device), "texture-view loss marks its owner");
     gpu::destroy_device(&texture_device)!!;
 
     gpu::internal::vk::VkDeviceState* wsi_state =
@@ -130,10 +130,10 @@ fn void custom_result_routes_mark_the_reporting_device() @test {
             context: &context,
             kind:    gpu::internal::vk::WsiResultKind.PRESENT,
             result:  vk::Result.ERROR_DEVICE_LOST,
-        )) == gpu::DEVICE_LOST,
-        "presentation loss remains exact"
+        )) == gpu::BACKEND_ERROR,
+        "presentation loss is a backend error"
     );
-    assert(@catch(gpu::get_device_caps(&wsi_device)) == gpu::DEVICE_LOST, "presentation loss marks its owner");
+    assert(gpu::is_device_lost(&wsi_device), "presentation loss marks its owner");
     gpu::destroy_device(&wsi_device)!!;
 }
 
@@ -150,7 +150,7 @@ fn void generic_result_mapping_is_truthful() @test {
 
     assert(host_oom == gpu::OUT_OF_HOST_MEMORY, "host OOM remains exact");
     assert(device_oom == gpu::OUT_OF_DEVICE_MEMORY, "device OOM remains exact");
-    assert(device_lost == gpu::DEVICE_LOST, "explicit device loss remains exact");
+    assert(device_lost == gpu::BACKEND_ERROR, "device loss without device context is a backend error");
     assert(unknown == gpu::BACKEND_ERROR, "unknown native result is not device loss");
     assert(format == gpu::BACKEND_ERROR, "format result needs operation context");
     assert(initialization == gpu::BACKEND_ERROR, "initialization failure needs operation context");
@@ -218,7 +218,7 @@ fn void pipeline_and_cache_result_mapping_preserves_fatal_faults() @test {
     assert(pipeline_shader == gpu::PIPELINE_CREATE_FAILED, "pipeline invalid shader is creation failure");
     assert(pipeline_compile == gpu::PIPELINE_CREATE_FAILED, "compile-required status is creation failure");
     assert(pipeline_oom == gpu::OUT_OF_DEVICE_MEMORY, "pipeline device OOM is not collapsed");
-    assert(pipeline_lost == gpu::DEVICE_LOST, "pipeline device loss remains exact");
+    assert(pipeline_lost == gpu::BACKEND_ERROR, "pipeline device loss is a backend error");
     assert(cache_incomplete == gpu::INVALID_ARGUMENT, "cache export growth reports undersized output");
     assert(enumeration_incomplete == gpu::BACKEND_ERROR, "partial enumeration is not device loss");
 
@@ -236,5 +236,5 @@ fn void wait_timeout_mapping_stays_retryable() @test {
     fault pure_device_lost = gpu::internal::vk::wait_result_fault(vk::Result.ERROR_DEVICE_LOST);
     assert(timeout == gpu::WAIT_TIMEOUT, "bounded wait timeout remains retryable");
     assert(pure_timeout == timeout, "legacy and context-aware waits share one timeout taxonomy");
-    assert(pure_device_lost == gpu::DEVICE_LOST, "pure wait mapping preserves generic device loss");
+    assert(pure_device_lost == gpu::BACKEND_ERROR, "pure wait mapping reports device loss as a backend error");
 }

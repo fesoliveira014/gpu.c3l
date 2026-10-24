@@ -3,6 +3,8 @@ module hello_gpu;
 import gpu;
 import std::io;
 
+faultdef LOST_DEVICE;
+
 const char[*] DOUBLER_SPIRV = $embed("../shaders/doubler.comp.spv");
 const uint COUNT = 256;
 
@@ -26,7 +28,7 @@ fn void? run() {
     runtime_desc.application_name = "hello_gpu";
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer (void)gpu::destroy_runtime(&runtime);
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::Adapter adapter = adapters.get(0)!;
     gpu::Device device = gpu::create_device(&adapter)!;
     defer (void)gpu::destroy_device(&device);
@@ -84,6 +86,7 @@ fn void? run() {
         output_span: output.span,
         root:        root,
     )!;
+    if (gpu::is_device_lost(&device)) return LOST_DEVICE~;
     gpu::invalidate_mapped_span(&device, output.span)!;
     float* out_data = (float*)output.bytes.ptr;
     for (uint i = 0; i < COUNT; i++) {
@@ -121,10 +124,9 @@ fn void? run_compute(
         .after  = { .host = true },
     };
     gpu::cmd_barrier(&commands, &to_host)!;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
-    defer (void)gpu::discard_executable_commands(&executable);
+    gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)! };
+    defer (void)gpu::discard_executable_commands(&lists[0]);
 
-    gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionPoint completion = gpu::submit(queue, &submit)!;
     gpu::wait_completion(completion)!;

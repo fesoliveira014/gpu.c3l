@@ -111,88 +111,6 @@ fn void wsi_backend_result_diagnostic_preserves_mapping() @test {
         "resolved WSI result keeps exact identity");
 }
 
-fn void wsi_stale_handle_diagnostic_has_no_identity() @test {
-    WsiDiagnosticCapture capture;
-    gpu::RuntimeDesc desc = {
-        .enable_vulkan_validation = true,
-        .application_name  = "gpu_wsi_stale_handle_test",
-        .debug_callback    = &capture_wsi_diagnostic,
-        .debug_user_data   = &capture,
-    };
-    gpu::Device device = create_test_device(&desc)!!;
-    defer destroy_test_device(&device)!!;
-    capture = {};
-
-    gpu::SwapchainHandle bogus = { .index = 3, .generation = 7 };
-    fault query_fault = @catch(gpu::get_swapchain_info(&device, bogus));
-
-    assert(query_fault == gpu::INVALID_HANDLE, "stale handle fault is unchanged");
-    assert(capture.calls == 1, "stale swapchain lookup emits exactly once");
-    assert(capture.last.public_fault == query_fault, "stale diagnostic preserves the fault");
-    assert(capture.last.operation.str_view() == "get_swapchain_info", "stale lookup names the operation");
-    assert(capture.last.rejected_field.str_view() == "SwapchainHandle", "stale lookup names the handle");
-    assert(capture.last.resource.kind == gpu::DebugResourceKind.SWAPCHAIN, "stale lookup keeps resource kind");
-    assert(!capture.last.resource.has_public_identity, "unverified handle bits are not identity");
-
-    capture = {};
-    assert(
-        @catch(gpu::destroy_swapchain(&device, bogus)) == gpu::INVALID_HANDLE,
-        "destroy preserves stale-handle fault"
-    );
-    assert(
-        capture.calls == 1 && capture.last.operation.str_view() == "destroy_swapchain",
-        "destroy reports exactly once"
-    );
-
-    capture = {};
-    assert(
-        @catch(gpu::resize_swapchain(&device, bogus, 640, 480)) == gpu::INVALID_HANDLE,
-        "resize preserves stale-handle fault"
-    );
-    assert(
-        capture.calls == 1 && capture.last.operation.str_view() == "resize_swapchain",
-        "resize reports exactly once"
-    );
-
-    capture = {};
-    assert(
-        @catch(gpu::acquire_next_image(&device, bogus)) == gpu::INVALID_HANDLE,
-        "acquire preserves stale-handle fault"
-    );
-    assert(
-        capture.calls == 1 && capture.last.operation.str_view() == "acquire_next_image",
-        "acquire reports exactly once"
-    );
-
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::SubmitDesc submit_desc;
-    gpu::CompletionPoint completion = gpu::submit(queue, &submit_desc)!!;
-    gpu::wait_completion(completion, 1_000_000_000)!!;
-    gpu::AcquiredImage acquired = {
-        .readiness = gpu::internal::vk::make_swapchain_readiness(
-            device,
-            bogus,
-            1,
-        )!!,
-    };
-    capture = {};
-    assert(
-        @catch(gpu::present(&device, &acquired, completion)) == gpu::INVALID_HANDLE,
-        "present preserves stale-handle fault"
-    );
-    assert(capture.calls == 1 && capture.last.operation.str_view() == "present", "present reports exactly once");
-
-    capture = {};
-    assert(
-        @catch(gpu::get_present_mode_support(&device, bogus)) == gpu::INVALID_HANDLE,
-        "support query preserves stale-handle fault"
-    );
-    assert(
-        capture.calls == 1 && capture.last.operation.str_view() == "get_present_mode_support",
-        "support query reports exactly once"
-    );
-}
-
 fn void expect_wsi_result(
     gpu::internal::vk::WsiResultKind kind,
     vk::Result result,
@@ -314,35 +232,6 @@ fn void all_specialized_wsi_results_use_one_mapping_seam() @test {
         expected:  gpu::SWAPCHAIN_OUT_OF_DATE,
         operation: "present",
     );
-}
-
-fn void wrapped_image_failure_is_backend_with_swapchain_identity() @test {
-    WsiDiagnosticCapture capture;
-    gpu::internal::vk::VkDeviceState state = {
-                .debug_callback  = &capture_wsi_diagnostic,
-        .debug_user_data = &capture,
-    };
-    gpu::internal::vk::WsiDiagnosticContext context = {
-        .state               = &state,
-        .operation           = "present",
-        .has_public_identity = true,
-        .index               = 4,
-        .generation          = 6,
-        .debug_name          = "main_swapchain",
-    };
-    gpu::TextureHandle missing = { .index = 7, .generation = 3 };
-
-    fault missing_fault = @catch(gpu::internal::vk::resolve_swapchain_texture_for_operation(&context, missing));
-
-    assert(missing_fault == gpu::INVALID_HANDLE, "wrapped-image invariant preserves internal lookup fault");
-    assert(capture.calls == 1, "wrapped-image invariant emits exactly once");
-    assert(capture.last.category.backend && !capture.last.category.public_contract,
-        "wrapped-image invariant is backend-only");
-    assert(capture.last.resource.has_public_identity, "wrapped-image failure carries resolved swapchain identity");
-    assert(capture.last.resource.index == 4 && capture.last.resource.generation == 6,
-        "wrapped-image failure carries exact swapchain identity");
-    assert(capture.last.rejected_field == null && capture.last.invariant == null,
-        "wrapped-image failure does not blame a caller field");
 }
 
 fn void wsi_lifecycle_diagnostics_are_contract_failures() @test {

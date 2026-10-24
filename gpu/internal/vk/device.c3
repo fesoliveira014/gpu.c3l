@@ -670,21 +670,19 @@ fn gpu::Device? create_vk_device_with_probe(
 ) {
     gpu::DeviceDesc normalized =
         gpu::internal::normalize_device_desc(device_desc)!;
-    gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(adapter);
-    if (runtime_data == null) return gpu::INVALID_HANDLE~;
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::require_adapter(adapter)!;
     VkRuntimeState* runtime_state = runtime_data.state;
-    if (runtime_state == null) return gpu::INVALID_HANDLE~;
+    if (runtime_state == null) abort("gpu: corrupt Adapter");
 
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
     gpu::Surface requested_surface = normalized.surface;
     vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null;
     if (requested_surface.is_valid()) {
         gpu::internal::SurfaceData* surface_data =
-            gpu::internal::resolve_surface(&requested_surface);
-        if (surface_data == null) return gpu::INVALID_HANDLE~;
+            gpu::internal::require_surface(&requested_surface)!;
         gpu::internal::RuntimeData* surface_runtime =
             gpu::internal::resolve_runtime(&surface_data.runtime);
-        if (surface_runtime != runtime_data) return gpu::INVALID_HANDLE~;
+        if (surface_runtime != runtime_data) abort("gpu: mismatched Surface");
         presentation_surface = (vk::SurfaceKHR)surface_data.backend_surface;
         if (!runtime_state.instance_capabilities.surface_maintenance) {
             return gpu::UNSUPPORTED_FEATURE~;
@@ -718,8 +716,8 @@ fn void? validate_device_baseline_support(
     VkRuntimeState* runtime_state,
     uint adapter_index,
 ) {
-    if (runtime_state == null) return gpu::INVALID_HANDLE~;
-    if (adapter_index >= runtime_state.adapters.len) return gpu::INVALID_HANDLE~;
+    if (runtime_state == null) abort("gpu: corrupt Adapter");
+    if (adapter_index >= runtime_state.adapters.len) abort("gpu: corrupt Adapter");
 
     VkShaderHeapState shader_heap =
         resolve_shader_heap_state(&runtime_state.config)!;
@@ -1319,16 +1317,16 @@ fn bool? device_destroy_ready_with_query(
             >= expected) continue;
 
         ulong current;
-        vk::Result result = query_fn(
-            state.device,
-            completion.timeline,
-            &current,
-        );
-        if (result == vk::Result.ERROR_DEVICE_LOST) {
-            observe_device_result(state, result);
-            return true;
-        }
-        check_device_result(state, result)!;
+        check_device_result(
+            state,
+            query_queue_timeline(
+                state:      state,
+                operation:  "destroy_device",
+                completion: completion,
+                query_fn:   query_fn,
+                completed:  &current,
+            ),
+        )!;
         if (current < expected) return false;
     }
 
@@ -1368,7 +1366,7 @@ fn void vk_destroy_device(VkDeviceState* state) {
     destroy_state(state);
 }
 
-<* Reverse-order cleanup after accepted destruction, device loss, or partial creation. *>
+<* Reverse-order cleanup after accepted destruction or partial creation. *>
 fn void destroy_state(VkDeviceState* state) @private {
     if (state == null) return;
     if (state.device != null) {
@@ -1402,7 +1400,7 @@ fn void destroy_state(VkDeviceState* state) @private {
         destroy_descriptor_heap(state);
         destroy_sampler_table(state);
         destroy_attachment_view_table(state);
-        // Internal textures and device-loss leftovers remain backend-owned.
+        // Internal textures remain backend-owned.
         if (state.textures.slots.ptr != null) {
             foreach (&cell : state.textures.slots[:state.textures.next_new]) {
                 if (cell.used) {

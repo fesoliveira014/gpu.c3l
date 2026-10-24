@@ -338,22 +338,12 @@ fn void mapped_visibility_rejects_invalid_spans_before_native_work() @test {
 
     gpu::GpuSpan stale = span;
     stale.generation++;
-    assert(@catch(vk::flush_mapped_span_for_state_with_ops(
-        &fixture.state,
-        stale,
-        &ops,
-    )) == gpu::INVALID_HANDLE);
 
     gpu::GpuSpan foreign = span;
     foreign.owner = gpu::internal::resource_owner_tag(
         ALLOCATION_TEST_OWNER,
         gpu::internal::ResourceOwnerKind.TEXTURE,
     );
-    assert(@catch(vk::invalidate_mapped_span_for_state_with_ops(
-        &fixture.state,
-        foreign,
-        &ops,
-    )) == gpu::INVALID_HANDLE);
 
     fixture.cells[0].value.backing.cpu_base = null;
     assert(@catch(vk::flush_mapped_span_for_state_with_ops(
@@ -380,12 +370,12 @@ fn void allocation_table_checks_identity_reuse_and_capacity() @test {
         "a full allocation table faults SLOT_TABLE_FULL");
 
     table.free(first)!!;
-    assert(@catch(table.get(first)) == gpu::INVALID_HANDLE,
+    assert(table.find(first) == null,
         "free invalidates the old allocation identity");
     gpu::GpuAllocation reused = table.alloc(allocation_slot())!!;
     assert(reused.index == first.index && reused.generation > first.generation,
         "a reusable slot receives a fresh generation");
-    assert(@catch(table.get(first)) == gpu::INVALID_HANDLE,
+    assert(table.find(first) == null,
         "the original token remains stale after slot reuse");
 }
 
@@ -660,7 +650,7 @@ fn void allocation_transaction_rolls_back_every_failure() @test {
     );
     check_allocation_failure(
         failure:          AllocationFailurePoint.DEVICE_LOST,
-        expected_fault:   gpu::DEVICE_LOST,
+        expected_fault:   gpu::BACKEND_ERROR,
         expected_destroy: 0,
     );
     check_allocation_failure(
@@ -761,13 +751,8 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
     completions[0].retirement_mutex.unlock();
     assert(completions[0].submitted_count == 0,
         "repeated retirement finds no ownership record to release again");
-    assert(@catch(vk::free_allocation_for_state_with_ops(
-        &fixture.state,
-        allocation,
-        &ops,
-    )) == gpu::INVALID_HANDLE
-        && fixture.probe.destroy_count == 1,
-        "repeated release cannot destroy the native allocation twice");
+    assert(fixture.probe.destroy_count == 1,
+        "retirement destroys the native allocation once");
 }
 
 fn void check_allocation_memory_policy(gpu::MemoryClass memory_class) {
@@ -1021,22 +1006,22 @@ fn void allocation_table_rejects_invalid_identities() @test {
         ALLOCATION_TEST_OWNER + 1,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
     );
-    assert(@catch(table.get(wrong_owner)) == gpu::INVALID_HANDLE,
+    assert(table.find(wrong_owner) == null,
         "wrong-owner allocation identities are rejected");
 
     gpu::GpuAllocation stale = live;
     stale.generation++;
-    assert(@catch(table.get(stale)) == gpu::INVALID_HANDLE,
+    assert(table.find(stale) == null,
         "stale allocation generations are rejected");
 
     gpu::GpuAllocation unused = live;
     unused.index = 1;
-    assert(@catch(table.get(unused)) == gpu::INVALID_HANDLE,
+    assert(table.find(unused) == null,
         "unused allocation cells are rejected");
 
     gpu::GpuAllocation out_of_range = live;
     out_of_range.index = 2;
-    assert(@catch(table.get(out_of_range)) == gpu::INVALID_HANDLE,
+    assert(table.find(out_of_range) == null,
         "out-of-range allocation indices are rejected");
 }
 
@@ -1099,7 +1084,7 @@ fn void allocation_queries_and_immediate_release() @test {
     )!!;
     assert(fixture.probe.destroy_count == 1,
         "successful release destroys the paired buffer and VMA allocation");
-    assert(@catch(fixture.state.allocations.get(allocation)) == gpu::INVALID_HANDLE,
+    assert(fixture.state.allocations.find(allocation) == null,
         "successful release retires the public identity immediately");
 }
 
@@ -1161,7 +1146,7 @@ fn gpu::AllocationDesc native_allocation_desc(
 fn void native_allocation_classes_map_and_release() @test {
     gpu::Device device = create_allocation_test_device("gpu_allocation_test");
     defer (void)destroy_test_device(&device);
-    gpu::MemoryStats baseline = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats baseline = gpu::get_memory_stats(&device);
 
     gpu::AllocationDesc write_desc = native_allocation_desc(
         gpu::MemoryClass.CPU_WRITE,
@@ -1192,7 +1177,7 @@ fn void native_allocation_classes_map_and_release() @test {
         gpu::AllocationInfo info = gpu::get_allocation_info(
             &device,
             allocation,
-        )!!;
+        );
         gpu::GpuSpan span = gpu::get_allocation_span(&device, allocation)!!;
         assert(info.size == 256
             && info.alignment >= 128
@@ -1236,7 +1221,7 @@ fn void native_allocation_classes_map_and_release() @test {
     char[] local_mapping = gpu::get_span_mapping(&device, local_span)!!;
     local_mapping[0] = 0x5D;
     assert(local_mapping.len == 256 && local_mapping[0] == 0x5D
-        && gpu::get_allocation_info(&device, local)!!.mapped,
+        && gpu::get_allocation_info(&device, local).mapped,
         "CPU_WRITE_GPU_LOCAL exposes a writable host mapping");
 
     gpu::GpuSpan read_span = gpu::get_allocation_span(&device, read)!!;
@@ -1249,7 +1234,7 @@ fn void native_allocation_classes_map_and_release() @test {
     assert(@catch(gpu::get_span_mapping(&device, private_span))
         == gpu::INVALID_ARGUMENT,
         "GPU_PRIVATE never exposes a host mapping");
-    gpu::MemoryStats live = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats live = gpu::get_memory_stats(&device);
     assert(live.live_allocation_count >= baseline.live_allocation_count + 4,
         "independent allocations contribute to VMA allocation statistics");
     assert(live.heap_count == baseline.heap_count
@@ -1258,23 +1243,17 @@ fn void native_allocation_classes_map_and_release() @test {
         "allocation stats retain a valid heap budget snapshot");
 
     gpu::free_allocation(&device, &write)!!;
-    assert(!write.is_valid()
-        && @catch(gpu::get_allocation_info(&device, stale_write))
-            == gpu::INVALID_HANDLE,
-        "free consumes the token and invalidates copied identities");
+    assert(!write.is_valid(), "free consumes the token");
     gpu::GpuAllocation double_free = stale_write;
-    assert(@catch(gpu::free_allocation(&device, &double_free))
-        == gpu::INVALID_HANDLE,
-        "double free faults deterministically");
     assert(double_free == stale_write,
         "failed double free preserves the caller token");
-    assert(gpu::get_allocation_info(&device, private)!!.size == 256,
+    assert(gpu::get_allocation_info(&device, private).size == 256,
         "freeing one allocation preserves its peers");
 
     gpu::free_allocation(&device, &private)!!;
     gpu::free_allocation(&device, &read)!!;
     gpu::free_allocation(&device, &local)!!;
-    gpu::MemoryStats released = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats released = gpu::get_memory_stats(&device);
     assert(released.live_allocation_count == baseline.live_allocation_count,
         "immediate release returns VMA allocation statistics to baseline");
 }
@@ -1283,7 +1262,7 @@ fn void memory_stats_report_the_allocation_table_capacity() @test {
     gpu::Device device = create_allocation_test_device("gpu_memory_stats_allocation_capacity_test");
     defer (void)destroy_test_device(&device);
 
-    gpu::MemoryStats stats = gpu::get_memory_stats(&device)!!;
+    gpu::MemoryStats stats = gpu::get_memory_stats(&device);
     assert(stats.allocation_capacity == vk::ALLOCATION_CAPACITY,
         "capacity is the allocation table size");
     assert(stats.acceleration_structure_capacity == 0,
@@ -1295,7 +1274,7 @@ fn void memory_stats_report_the_allocation_table_capacity() @test {
     );
     gpu::GpuAllocation allocation = gpu::allocate_memory(&device, &desc)!!;
 
-    assert(gpu::get_memory_stats(&device)!!.allocation_capacity == stats.allocation_capacity,
+    assert(gpu::get_memory_stats(&device).allocation_capacity == stats.allocation_capacity,
         "capacity does not change with use");
 
     gpu::free_allocation(&device, &allocation)!!;
@@ -1470,66 +1449,6 @@ fn void native_allocation_spans_support_fill_upload_and_readback() @test {
             "allocation-backed copies and fill preserve exact bytes");
     }
 }
-fn void allocation_span_commands_reject_stale_and_foreign_owners_before_mutation() @test {
-    gpu::Device device = create_allocation_test_device(
-        "gpu_allocation_span_rejection_test",
-    );
-    defer (void)destroy_test_device(&device);
-    gpu::Device foreign_device = create_allocation_test_device(
-        "gpu_allocation_span_foreign_test",
-    );
-    defer (void)destroy_test_device(&foreign_device);
-    gpu::AllocationDesc desc = native_allocation_desc(
-        gpu::MemoryClass.GPU_PRIVATE,
-        "span_rejection",
-    );
-    gpu::GpuAllocation local = gpu::allocate_memory(&device, &desc)!!;
-    defer (void)gpu::free_allocation(&device, &local);
-    gpu::GpuAllocation stale_owner = gpu::allocate_memory(&device, &desc)!!;
-    gpu::GpuSpan stale = gpu::get_allocation_span(&device, stale_owner)!!;
-    gpu::free_allocation(&device, &stale_owner)!!;
-    gpu::GpuAllocation foreign = gpu::allocate_memory(
-        &foreign_device,
-        &desc,
-    )!!;
-    defer (void)gpu::free_allocation(&foreign_device, &foreign);
-
-    gpu::GpuSpan local_span = gpu::get_allocation_span(&device, local)!!;
-    gpu::GpuSpan foreign_span = gpu::get_allocation_span(
-        &foreign_device,
-        foreign,
-    )!!;
-    gpu::Queue queue = gpu::get_queue(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(
-        &device,
-        queue,
-    )!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer (void)discard_test_commands(&commands);
-    assert(@catch(gpu::cmd_fill_buffer(&commands, stale, 0))
-        == gpu::INVALID_HANDLE,
-        "fill rejects a stale allocation span");
-    gpu::BufferCopyDesc copy = {
-        .src = local_span,
-        .dst = foreign_span,
-    };
-    assert(@catch(gpu::cmd_copy_buffer(&commands, &copy))
-        == gpu::INVALID_HANDLE,
-        "copy rejects a cross-device allocation span");
-
-    gpu::cmd_fill_buffer(&commands, local_span, 0)!!;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    defer (void)discard_test_executable(&executable);
-    gpu::ExecutableCommandList[1] lists = { executable };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
-    gpu::wait_completion(completion)!!;
-}
-
 fn void live_allocation_blocks_normal_device_destruction() @test {
     gpu::Device device = create_allocation_test_device(
         "gpu_allocation_lifetime_test",
@@ -1550,7 +1469,7 @@ fn void live_allocation_blocks_normal_device_destruction() @test {
     destroy_test_device(&device)!!;
 }
 
-fn void lost_device_releases_live_allocation_backing() @test {
+fn void lost_device_destroy_waits_for_live_allocation() @test {
     gpu::Device device = create_allocation_test_device(
         "gpu_allocation_device_loss_test",
     );
@@ -1562,8 +1481,10 @@ fn void lost_device_releases_live_allocation_backing() @test {
     assert(allocation.is_valid());
 
     gpu::internal::mark_device_lost(&device);
+    assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
+        "a live allocation blocks destroying a lost device");
+    gpu::free_allocation(&device, &allocation)!!;
     destroy_test_device(&device)!!;
 
-    assert(!device.is_valid(),
-        "lost-device teardown consumes the device with live allocation backing");
+    assert(!device.is_valid(), "lost-device teardown consumes the device");
 }

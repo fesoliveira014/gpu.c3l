@@ -42,11 +42,8 @@ fn void discard_consumes_recording_and_executable_lists() @test {
     defer discard_test_executable(&executable)!!;
     assert(@catch(gpu::destroy_device(&device)) == gpu::RESOURCE_IN_USE,
         "an executable command list blocks device destruction");
-    gpu::ExecutableCommandList stale = executable;
     gpu::discard_executable_commands(&executable)!!;
     assert(!executable.is_valid(), "discard consumes an executable list");
-    assert(@catch(gpu::discard_executable_commands(&stale)) == gpu::INVALID_HANDLE,
-        "a consumed executable-list alias is stale");
 
     gpu::destroy_command_allocator(&allocator)!!;
     destroy_test_device(&device)!!;
@@ -153,59 +150,6 @@ fn void command_record_owns_its_device_token_value() @test {
     wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
 }
 
-fn void stale_command_generation_faults_invalid_handle() @test {
-    gpu::RuntimeDesc desc = {};
-    gpu::Device device = create_test_device(&desc)!!;
-    defer destroy_test_device(&device)!!;
-
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
-    defer discard_test_executable(&commands_executable)!!;
-    gpu::ExecutableCommandList live_commands = commands_executable;
-    commands_executable.generation++;
-    gpu::ExecutableCommandList[1] stale_lists = { commands_executable };
-    gpu::SubmitDesc stale_submit = { .command_lists = stale_lists[..] };
-    fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &stale_submit));
-    assert(rejected == gpu::INVALID_HANDLE,
-        "stale command generation faults INVALID_HANDLE");
-
-    gpu::ExecutableCommandList[1] live_lists = { live_commands };
-    gpu::SubmitDesc live_submit = { .command_lists = live_lists[..] };
-    submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &live_submit)!!;
-    wait_test_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-}
-
-fn void foreign_device_command_faults_before_claim() @test {
-    gpu::RuntimeDesc desc = {};
-    gpu::Device target = create_test_device(&desc)!!;
-    defer destroy_test_device(&target)!!;
-    gpu::Device foreign = create_test_device(&desc)!!;
-    defer destroy_test_device(&foreign)!!;
-    gpu::Queue target_queue =
-        gpu::get_queue(&target, gpu::QueueKind.GRAPHICS)!!;
-    gpu::Queue foreign_queue =
-        gpu::get_queue(&foreign, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator =
-        gpu::create_command_allocator(&foreign, foreign_queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    defer discard_test_executable(&executable)!!;
-    gpu::ExecutableCommandList[1] lists = { executable };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    assert(@catch(gpu::submit(target_queue, &submit)) == gpu::INVALID_HANDLE,
-        "a live command owned by another device faults INVALID_HANDLE");
-    assert(lists[0].is_valid(),
-        "foreign device ownership preserves the executable token");
-
-    gpu::CompletionPoint completion = gpu::submit(foreign_queue, &submit)!!;
-    gpu::wait_completion(completion, ulong::max)!!;
-}
-
 fn void aliased_queue_roles_share_the_authoritative_queue() @test {
     gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
@@ -256,11 +200,6 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
     assert(replacement_executable.record != original_executable.record,
         "a submitted command record is not reused before retirement");
 
-    gpu::ExecutableCommandList[1] original_alias = { original_executable };
-    gpu::SubmitDesc second = { .command_lists = original_alias[..] };
-    fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &second));
-    assert(rejected == gpu::COMMAND_RECORDING_ERROR,
-        "a submitted alias faults on its authoritative phase");
     gpu::wait_completion(original_completion)!!;
 
     gpu::CommandList reused = gpu::begin_commands(&allocator)!!;
@@ -270,10 +209,6 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
             && reused_executable.generation
                 != original_executable.generation,
         "completion retirement reuses the record with a new generation");
-    gpu::ExecutableCommandList[1] retired_alias = { original_executable };
-    gpu::SubmitDesc retired_submit = { .command_lists = retired_alias[..] };
-    assert(@catch(gpu::submit(queue, &retired_submit)) == gpu::INVALID_HANDLE,
-        "a retired alias cannot name the reused command record");
     gpu::discard_executable_commands(&reused_executable)!!;
 
     gpu::ExecutableCommandList[1] replacement_lists = { replacement_executable };
@@ -559,60 +494,6 @@ fn void empty_submit_preserves_duplicate_epoch() @test {
     gpu::wait_completion(completion)!!;
 }
 
-fn void readiness_only_submit_validates_stale_swapchain() @test {
-    gpu::RuntimeDesc desc = {};
-    gpu::Device device = create_test_device(&desc)!!;
-    defer destroy_test_device(&device)!!;
-
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    gpu::SwapchainHandle stale = {
-        .owner      = gpu::internal::resource_owner_tag(state.resource_owner, gpu::internal::ResourceOwnerKind.SWAPCHAIN),
-        .generation = 1,
-    };
-    gpu::SwapchainReadiness readiness = gpu::internal::vk::make_swapchain_readiness(
-        device,
-        stale,
-        1,
-    )!!;
-    gpu::SubmitDesc submit = {
-        .readiness        = readiness,
-        .readiness_before = { .color_output },
-    };
-    vk::QueueCompletionState* completion =
-        &state.queue_completions[state.graphics_completion_id];
-    ulong next_sequence_before = completion.next_sequence;
-
-    fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit));
-    assert(rejected == gpu::INVALID_HANDLE, "stale readiness faults INVALID_HANDLE");
-    assert(completion.next_sequence == next_sequence_before,
-        "stale readiness reserves no queue completion");
-}
-
-fn void readiness_only_submit_rejects_malformed_identity() @test {
-    gpu::RuntimeDesc desc = {};
-    gpu::Device device = create_test_device(&desc)!!;
-    defer destroy_test_device(&device)!!;
-
-    gpu::SwapchainReadiness malformed = {
-        .device  = device,
-        .payload = 1,
-    };
-    gpu::SubmitDesc submit = {
-        .readiness        = malformed,
-        .readiness_before = { .color_output },
-    };
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::QueueCompletionState* completion =
-        &state.queue_completions[state.graphics_completion_id];
-    ulong next_sequence_before = completion.next_sequence;
-
-    fault rejected = @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &submit));
-    assert(rejected == gpu::INVALID_HANDLE, "malformed readiness faults INVALID_HANDLE");
-    assert(completion.next_sequence == next_sequence_before,
-        "malformed readiness reserves no queue completion");
-}
-
 fn void simultaneous_devices_submit_independently() @test {
     gpu::RuntimeDesc desc = {};
     gpu::Device first = create_test_device(&desc)!!;
@@ -632,7 +513,7 @@ fn void simultaneous_devices_submit_independently() @test {
     gpu::destroy_command_allocator(&first_allocator)!!;
     destroy_test_device(&first)!!;
 
-    assert(!gpu::get_device_caps(&second)!!.presentation_enabled,
+    assert(!gpu::get_device_caps(&second).presentation_enabled,
         "destroying one device leaves the other live");
     gpu::Queue second_queue = gpu::get_queue(&second, gpu::QueueKind.GRAPHICS)!!;
     gpu::CommandAllocator second_allocator = gpu::create_command_allocator(&second, second_queue)!!;
@@ -663,62 +544,13 @@ fn void discarded_command_buffer_is_reused_by_recording_owner() @test {
     defer discard_test_executable(&executable)!!;
     gpu::discard_executable_commands(&executable)!!;
 
-    fault stale = @catch(gpu::discard_executable_commands(&executable));
-    assert(stale == gpu::INVALID_HANDLE, "discard invalidates the executable token");
+    assert(!executable.is_valid(), "discard zeroes the executable token");
+    gpu::discard_executable_commands(&executable)!!;
 
     gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;
     assert(vk::resolve_command(&next)!!.command_buffer == abandoned_buffer,
         "the recording owner reuses the discarded command buffer");
-}
-
-fn void bad_command_state_rejected() @test {
-    gpu::RuntimeDesc desc = {
-    };
-    gpu::Device device = create_test_device(&desc)!!;
-    defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    gpu::CommandList stale_recording = commands;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    defer discard_test_executable(&executable)!!;
-
-    gpu::Barrier barrier = {
-        .before = { .host = true },
-        .after = { .transfer = true },
-    };
-    fault rejected = @catch(gpu::cmd_barrier(
-        &stale_recording,
-        &barrier,
-    ));
-    assert(rejected == gpu::COMMAND_RECORDING_ERROR,
-        "recording through an ended alias faults COMMAND_RECORDING_ERROR");
-}
-fn void texture_barrier_faults() @test {
-    gpu::RuntimeDesc desc = {};
-    gpu::Device device = create_test_device(&desc)!!;
-    defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-    gpu::TextureBarrier bar = {
-        .texture = gpu::TEXTURE_HANDLE_INVALID,
-        .before  = {
-            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
-            .stages = { .transfer },
-            .access = { .write },
-        },
-        .after   = gpu::sampled_at({ .fragment_shader }),
-    };
-    fault barrier_fault = @catch(gpu::cmd_texture_barrier(&cmd, &bar));
-    assert(barrier_fault == gpu::INVALID_HANDLE, "barrier on an invalid texture handle faults INVALID_HANDLE");
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-    defer discard_test_executable(&cmd_executable)!!;
 }
 
 fn void submitted_command_buffer_recycles_at_completion() @test {

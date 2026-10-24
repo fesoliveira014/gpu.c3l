@@ -11,7 +11,7 @@ import gpu::internal::vk;
    @param runtime : "Live runtime that will own the surface."
    @param display : "Borrowed non-null native display handle."
    @param surface : "Borrowed non-null native surface handle."
-   @return "A runtime-owned surface token, or a recoverable invalid-argument, invalid-handle, capacity, allocation, or platform fault." *>
+   @return "A runtime-owned surface token, or a recoverable invalid-argument, capacity, allocation, or platform fault." *>
 fn gpu::Surface? create_surface(
     gpu::Runtime* runtime,
     DisplayHandle display,
@@ -23,8 +23,7 @@ fn gpu::Surface? create_surface(
         return gpu::INVALID_ARGUMENT~;
     }
 
-    gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_runtime(runtime);
-    if (runtime_data == null) return gpu::INVALID_HANDLE~;
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::require_runtime(runtime)!;
     void* backend_surface = gpu::internal::vk::vk_create_wayland_surface(
         runtime_data.state,
         native_display,

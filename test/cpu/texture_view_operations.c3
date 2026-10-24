@@ -29,6 +29,6 @@ fn void? texture_view_batch_operations(
     )!;
     foreach (i, view : views[..textures.len]) {
         out_indices[i] = view.index;
-        gpu::destroy_texture_view(device, view)!;
+        gpu::destroy_texture_view(device, view);
     }
 }

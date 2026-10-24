@@ -78,7 +78,7 @@ fn gpu::GraphicsState stencil_graphics_state(gpu::StencilFaceState face, bool co
 fn void stencil_mask_selects_fragments() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
-    gpu::Format format = gpu::get_device_caps(&device)!!.depth_stencil_format;
+    gpu::Format format = gpu::get_device_caps(&device).depth_stencil_format;
     assert(format != gpu::Format.UNDEFINED, "a conformant device exposes a combined depth-stencil format");
     DepthCtx ctx = make_depth_ctx();
     gpu::PipelineHandle pipeline = make_stencil_pipeline(&device, &ctx, format);
@@ -225,7 +225,7 @@ fn void stencil_mask_selects_fragments() @test {
 fn void depth_only_pass_preserves_stencil() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
-    gpu::Format format = gpu::get_device_caps(&device)!!.depth_stencil_format;
+    gpu::Format format = gpu::get_device_caps(&device).depth_stencil_format;
     DepthCtx ctx = make_depth_ctx();
     gpu::PipelineHandle pipeline = make_stencil_pipeline(
         device:     &device,
@@ -300,7 +300,7 @@ fn void depth_only_pass_preserves_stencil() @test {
 fn void stencil_aspect_samples_through_the_heap() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
-    gpu::Format format = gpu::get_device_caps(&device)!!.depth_stencil_format;
+    gpu::Format format = gpu::get_device_caps(&device).depth_stencil_format;
     DepthCtx ctx = make_depth_ctx();
     gpu::PipelineHandle pipeline = make_stencil_pipeline(
         device:     &device,
@@ -326,10 +326,10 @@ fn void stencil_aspect_samples_through_the_heap() @test {
         "a sampled view of a combined format must select an aspect");
     gpu::TextureViewDesc stencil_desc = { .aspect = gpu::TextureAspect.STENCIL };
     gpu::TextureView stencil_view = gpu::create_texture_view(&device, ds, &stencil_desc)!!;
-    defer gpu::destroy_texture_view(&device, stencil_view)!!;
+    defer gpu::destroy_texture_view(&device, stencil_view);
     gpu::TextureViewDesc depth_desc = { .aspect = gpu::TextureAspect.DEPTH };
     gpu::TextureView depth_view = gpu::create_texture_view(&device, ds, &depth_desc)!!;
-    defer gpu::destroy_texture_view(&device, depth_view)!!;
+    defer gpu::destroy_texture_view(&device, depth_view);
     assert(stencil_view.index != depth_view.index, "each aspect publishes its own slot");
 
     OwnedSpan tri = write_tri(&device, NEAR_Z);
@@ -556,7 +556,7 @@ struct StencilDiagnosticCapture {
 fn void stencil_aspect_fetches_in_fragment_stage() @test {
     gpu::Device device = make_depth_device();
     defer destroy_test_device(&device)!!;
-    gpu::Format format = gpu::get_device_caps(&device)!!.depth_stencil_format;
+    gpu::Format format = gpu::get_device_caps(&device).depth_stencil_format;
     DepthCtx ctx = make_depth_ctx();
     gpu::PipelineHandle pipeline = make_stencil_pipeline(
         device:     &device,
@@ -583,7 +583,7 @@ fn void stencil_aspect_fetches_in_fragment_stage() @test {
     defer destroy_test_attachment_view(&device, &ds_view)!!;
     gpu::TextureViewDesc stencil_desc = { .aspect = gpu::TextureAspect.STENCIL };
     gpu::TextureView stencil_view = gpu::create_texture_view(&device, ds, &stencil_desc)!!;
-    defer gpu::destroy_texture_view(&device, stencil_view)!!;
+    defer gpu::destroy_texture_view(&device, stencil_view);
     gpu::TextureDesc target_desc = {
         .access = { .graphics, .transfer },
         .width  = DP_RT,

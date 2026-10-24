@@ -161,7 +161,7 @@ runtime_desc.application_name = "hello_gpu";
 gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
 defer (void)gpu::destroy_runtime(&runtime);
 
-gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
 gpu::Adapter adapter = adapters.get(0)!;
 gpu::Device device = gpu::create_device(&adapter)!;
 defer (void)gpu::destroy_device(&device);
@@ -277,10 +277,9 @@ gpu::Barrier to_host = {
     .after  = { .host },
 };
 gpu::cmd_barrier(&commands, &to_host)!;
-gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
-defer (void)gpu::discard_executable_commands(&executable);
+gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)! };
+defer (void)gpu::discard_executable_commands(&lists[0]);
 
-gpu::ExecutableCommandList[1] lists = { executable };
 gpu::SubmitDesc submit = { .command_lists = lists[..] };
 gpu::CompletionPoint completion = gpu::submit(queue, &submit)!;
 gpu::wait_completion(completion)!;
@@ -288,18 +287,25 @@ gpu::wait_completion(completion)!;
 
 The compute-to-host barrier makes the output visible to the CPU. `submit`
 consumes the executable list and returns the point that every later reuse
-waits on. The deferred discards are no-ops after a successful end and
-submit; they only run on an early fault.
+waits on. `end_commands` and `submit` zero the tokens they consume, so the
+deferred discards are no-ops after a successful end and submit; they only run
+on an early fault. Defer the discard on the array entry that the submit
+descriptor references: `submit` zeroes that entry, not other copies.
 
 ### Read back
 
 ```c3
+if (gpu::is_device_lost(&device)) return LOST_DEVICE~;
 gpu::invalidate_mapped_span(&device, output.span)!;
 float* out_data = (float*)output.bytes.ptr;
 for (uint i = 0; i < COUNT; i++) {
     if (out_data[i] != (float)i * 2.0f) return gpu::INVALID_ARGUMENT~;
 }
 ```
+
+If the device was lost, the wait still returned but the output is undefined,
+so the program checks `is_device_lost` before trusting it. `LOST_DEVICE` is
+the program's own fault, declared with `faultdef LOST_DEVICE;`.
 
 ### Run
 
@@ -401,7 +407,7 @@ the first adapter that supports it:
 ```c3
 fn gpu::Device? create_presentation_device(gpu::Runtime* runtime, gpu::Surface* surface) {
     gpu::DeviceDesc desc = { .surface = *surface };
-    gpu::AdapterList adapters = gpu::enumerate_adapters(runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(runtime);
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!;
         if (!gpu::supports_device_desc(&adapter, &desc)!.supported) continue;
@@ -423,7 +429,7 @@ gpu::SwapchainDesc swapchain_desc = {
 };
 gpu::SwapchainHandle swapchain =
     gpu::create_swapchain(&device, &surface, &swapchain_desc)!;
-gpu::SwapchainInfo swapchain_info = gpu::get_swapchain_info(&device, swapchain)!;
+gpu::SwapchainInfo swapchain_info = gpu::get_swapchain_info(&device, swapchain);
 ```
 
 `width` and `height` come from `sdl::get_window_size_in_pixels`. The backend
@@ -449,6 +455,7 @@ culling, depth, and blending are set per pass with `GraphicsState`.
 ### Frame: acquire
 
 ```c3
+if (gpu::is_device_lost(&device)) break;
 gpu::AcquiredImage? acquired = gpu::acquire_next_image(
     device:     &device,
     swapchain:  swapchain,
@@ -465,7 +472,10 @@ if (catch err = acquired) {
 ```
 
 `WAIT_TIMEOUT` means no image was free within the budget. Skip the frame and
-pump events. `SWAPCHAIN_OUT_OF_DATE` means the window changed.
+pump events. `SWAPCHAIN_OUT_OF_DATE` means the window changed. A lost device
+keeps accepting calls without drawing anything, so the loop checks
+`is_device_lost` and leaves for [teardown](#resize-and-teardown); see
+[device loss](api/runtime_and_devices.md#device-loss).
 
 ### Frame: record
 

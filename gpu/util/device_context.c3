@@ -1,6 +1,7 @@
 module gpu::util;
 
 import gpu;
+import gpu::internal @public;
 import std::io;
 
 <* Return one fresh surface from the supplied runtime, transferring ownership.
@@ -93,7 +94,7 @@ fn DeviceContext? create_device_context(DeviceContextDesc* desc) {
     gpu::Runtime runtime = gpu::create_runtime(&settings.runtime)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
 
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     if (adapters.count == 0) return gpu::UNSUPPORTED_FEATURE~;
 
     gpu::Surface surface;
@@ -125,8 +126,7 @@ fn DeviceContext? create_device_context(DeviceContextDesc* desc) {
     gpu::SwapchainInfo swapchain_info;
     if (surface.is_valid()) {
         swapchain = gpu::create_swapchain(&device, &surface, &settings.swapchain)!;
-        defer catch (void)gpu::destroy_swapchain(&device, swapchain);
-        swapchain_info = gpu::get_swapchain_info(&device, swapchain)!;
+        swapchain_info = gpu::get_swapchain_info(&device, swapchain);
     }
 
     return {
@@ -206,10 +206,14 @@ fn gpu::Surface? create_context_surface(
     DeviceContextDesc* settings,
 ) @private {
     gpu::Surface surface = settings.create_surface(runtime, settings.surface_user_data)!;
+    // Reject a foreign callback result before any call could destroy it.
+    gpu::internal::SurfaceData* data = gpu::internal::require_surface(&surface)!;
+    if ((ulong)data.runtime != (ulong)*runtime) {
+        abort("gpu: mismatched Surface");
+    }
     gpu::Adapter first_adapter = adapters.get(0)!;
     if (catch err = gpu::supports_presentation(&first_adapter, &surface)) {
-        // Identity faults must not destroy a foreign callback result.
-        if (err != gpu::INVALID_HANDLE) (void)gpu::destroy_surface(&surface);
+        (void)gpu::destroy_surface(&surface);
         return err~;
     }
     return surface;
@@ -236,7 +240,7 @@ fn gpu::Adapter? select_context_adapter(
             }
             return selected;
         }
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: foreign Adapter");
     }
 
     gpu::Adapter best;
@@ -244,7 +248,7 @@ fn gpu::Adapter? select_context_adapter(
     for (uint index = 0; index < adapters.count; index++) {
         gpu::Adapter candidate = adapters.get(index)!;
         if (!gpu::supports_device_desc(&candidate, requirements)!.supported) continue;
-        gpu::AdapterInfo info = gpu::get_adapter_info(&candidate)!;
+        gpu::AdapterInfo info = gpu::get_adapter_info(&candidate);
         uint rank = adapter_rank(info.device_class);
         if (rank <= best_rank) continue;
         best = candidate;

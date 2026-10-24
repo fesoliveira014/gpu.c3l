@@ -313,9 +313,6 @@ fn void copy_texture_validation_faults_at_the_command() @test {
     gpu::TextureCopyDesc unequal = { .src = source, .dst = other };
     assert(@catch(gpu::cmd_copy_texture(&cmd, &unequal)) == gpu::INVALID_ARGUMENT,
         "unequal formats fault INVALID_ARGUMENT");
-    gpu::TextureCopyDesc stale = { .src = source, .dst = {} };
-    assert(@catch(gpu::cmd_copy_texture(&cmd, &stale)) == gpu::INVALID_HANDLE,
-        "an unset destination faults INVALID_HANDLE");
     gpu::TextureCopyDesc overlapping = { .src = source, .dst = source, .dst_x = 1, .width = 2, .height = 2 };
     assert(@catch(gpu::cmd_copy_texture(&cmd, &overlapping)) == gpu::INVALID_ARGUMENT,
         "an overlapping same-texture region faults INVALID_ARGUMENT");

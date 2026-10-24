@@ -70,7 +70,7 @@ fn void host_timestamp_reads_reject_ranges_outside_the_pool() @test {
     gpu::Device device =
         create_timestamp_read_device("gpu_timestamp_read_range_test")!!;
     defer destroy_test_device(&device)!!;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     if (!caps.timestamps.queues.compute) return;
 
     gpu::TimestampPoolDesc pool_desc = {
@@ -79,7 +79,7 @@ fn void host_timestamp_reads_reject_ranges_outside_the_pool() @test {
     };
     gpu::TimestampPoolHandle pool =
         gpu::create_timestamp_pool(&device, &pool_desc)!!;
-    defer gpu::destroy_timestamp_pool(&device, pool)!!;
+    defer gpu::destroy_timestamp_pool(&device, pool);
 
     // Wider than the pool so the public wrapper's out.len check cannot fire
     // first; each rejection below has to come from the backend range check.
@@ -120,7 +120,7 @@ fn void host_timestamp_read_of_unwritten_slots_faults_device_busy() @test {
     gpu::Device device =
         create_timestamp_read_device("gpu_timestamp_read_busy_test")!!;
     defer destroy_test_device(&device)!!;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     if (!caps.timestamps.queues.compute) return;
 
     gpu::TimestampPoolDesc pool_desc = {
@@ -129,7 +129,7 @@ fn void host_timestamp_read_of_unwritten_slots_faults_device_busy() @test {
     };
     gpu::TimestampPoolHandle pool =
         gpu::create_timestamp_pool(&device, &pool_desc)!!;
-    defer gpu::destroy_timestamp_pool(&device, pool)!!;
+    defer gpu::destroy_timestamp_pool(&device, pool);
 
     gpu::Queue queue =
         gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
@@ -170,6 +170,49 @@ fn void host_timestamp_read_of_unwritten_slots_faults_device_busy() @test {
     );
 }
 
+fn void host_timestamp_read_after_loss_succeeds() @test {
+    gpu::Device device =
+        create_timestamp_read_device("gpu_timestamp_read_loss_test")!!;
+    defer destroy_test_device(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
+    if (!caps.timestamps.queues.compute) return;
+
+    gpu::TimestampPoolDesc pool_desc = {
+        .capacity   = TIMESTAMP_QUERY_COUNT,
+        .debug_name = "read_loss_pool",
+    };
+    gpu::TimestampPoolHandle pool =
+        gpu::create_timestamp_pool(&device, &pool_desc)!!;
+    defer gpu::destroy_timestamp_pool(&device, pool);
+
+    gpu::Queue queue =
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::CommandAllocator allocator =
+        gpu::create_command_allocator(&device, queue)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
+    gpu::cmd_reset_timestamps(
+        commands: &commands,
+        pool:     pool,
+        first:    0,
+        count:    TIMESTAMP_QUERY_COUNT,
+    )!!;
+    gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)!! };
+    gpu::SubmitDesc submit = { .command_lists = lists[..] };
+    gpu::wait_completion(gpu::submit(queue, &submit)!!, ulong::max)!!;
+
+    // Unwritten slots report DEVICE_BUSY on a healthy device.
+    gpu::internal::mark_device_lost(&device);
+    ulong[TIMESTAMP_QUERY_COUNT] out;
+    gpu::read_timestamps(
+        device: &device,
+        pool:   pool,
+        first:  0,
+        count:  TIMESTAMP_QUERY_COUNT,
+        out:    out[..],
+    )!!;
+}
+
 fn void run_timestamp_query_measurement(
     TimestampValidationCapture* validation_capture,
 ) {
@@ -181,7 +224,7 @@ fn void run_timestamp_query_measurement(
     };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     if (!caps.timestamps.queues.compute) return;
 
     // The callback is installed at device creation, so it also sees bootstrap
@@ -195,7 +238,7 @@ fn void run_timestamp_query_measurement(
     };
     gpu::TimestampPoolHandle pool =
         gpu::create_timestamp_pool(&device, &pool_desc)!!;
-    defer gpu::destroy_timestamp_pool(&device, pool)!!;
+    defer gpu::destroy_timestamp_pool(&device, pool);
 
     OwnedSpan readback = allocate_owned_span(
         device:       &device,

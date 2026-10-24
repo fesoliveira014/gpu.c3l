@@ -112,7 +112,7 @@ fn IndDrawCtx make_ind_draw_ctx(gpu::Device* device) {
 }
 
 fn void destroy_ind_draw_ctx(gpu::Device* device, IndDrawCtx* ctx) {
-    gpu::destroy_texture_view(device, ctx.tex_view)!!;
+    gpu::destroy_texture_view(device, ctx.tex_view);
     gpu::destroy_texture(device, ctx.pattern)!!;
     gpu::destroy_pipeline(device, ctx.pipeline)!!;
 }
@@ -609,7 +609,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
 fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     gpu::Device device = make_generated_work_device();
     defer destroy_test_device(&device)!!;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     if (!caps.generated_work) {
         io::printfn(
             "generated-work: NOT EXERCISED (generated work unavailable)",
@@ -1450,7 +1450,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
 fn void count_buffer_limits_draws() @test {
     gpu::Device device = make_ind_device();
     defer destroy_test_device(&device)!!;
-    if (!gpu::get_device_caps(&device)!!.draw_indirect_count) return;
+    if (!gpu::get_device_caps(&device).draw_indirect_count) return;
 
     IndDrawCtx ctx = make_ind_draw_ctx(&device);
     defer destroy_ind_draw_ctx(&device, &ctx);

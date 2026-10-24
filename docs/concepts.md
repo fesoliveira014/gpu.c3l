@@ -52,8 +52,10 @@ Contract: [Lifetime rules](architecture.md#lifetime-rules).
 Public resources are named by handles: small copyable values such as
 `TextureHandle`, `PipelineHandle`, and `SwapchainHandle`. A handle carries
 the identity of its device and a generation counter. Copying a handle copies
-a name, not ownership; destroying the resource makes every copy stale, and a
-stale handle is rejected by library handle resolution.
+a name, not ownership; destroying the resource makes every copy stale, and
+passing a stale handle to the library terminates the process with a message
+naming the handle type and a backtrace to the call. Handle misuse is a
+programming error, not a fault to handle.
 
 Objects form a tree. A `Runtime` owns adapters and surfaces; a `Device` owns
 allocations, textures, pipelines, command allocators, and swapchains; a
@@ -73,7 +75,7 @@ fn void? handles_and_ownership() {
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer (void)gpu::destroy_runtime(&runtime);
 
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::Adapter adapter = adapters.get(0)!;
     gpu::Device device = gpu::create_device(&adapter)!;
     defer (void)gpu::destroy_device(&device);
@@ -95,8 +97,9 @@ fn void? handles_and_ownership() {
 ```
 
 `is_valid` checks shape only: a nonzero handle is valid in shape even after
-the resource is destroyed. Library handle resolution checks that it still
-names a live resource whenever an operation resolves it.
+the resource is destroyed. Every operation that resolves a handle checks that
+it still names a live resource. Destroying the zero handle is a no-op, so
+cleanup code can destroy a handle that was never created.
 
 Three public values are not handles: `GpuAddress`, `TextureIndex`, and
 `SamplerIndex`. They are plain numbers that shaders read. The
@@ -281,7 +284,7 @@ struct MaterialParams {
 fn MaterialParams? texture_and_sampler_indices(gpu::Device* device, gpu::TextureHandle texture) {
     gpu::TextureViewDesc view_desc = {};
     gpu::TextureView view = gpu::create_texture_view(device, texture, &view_desc)!;
-    defer (void)gpu::destroy_texture_view(device, view);
+    defer gpu::destroy_texture_view(device, view);
 
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.LINEAR,
@@ -345,10 +348,9 @@ fn gpu::CompletionPoint? commands(
     defer (void)gpu::discard_commands(&list);
     gpu::cmd_bind_pipeline(&list, pipeline)!;
     gpu::cmd_dispatch(&list, root, { 1, 1, 1 })!;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&list)!;
-    defer (void)gpu::discard_executable_commands(&executable);
+    gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&list)! };
+    defer (void)gpu::discard_executable_commands(&lists[0]);
 
-    gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit_desc = { .command_lists = lists[..] };
     return gpu::submit(queue, &submit_desc);
 }
@@ -402,8 +404,8 @@ fn void? completion_points(
 completes or a timeout passes. Wait for the last GPU use before destroying a
 resource or freeing its memory: those calls do not infer application GPU use
 or wait. Live library dependents can still cause `RESOURCE_IN_USE`, and
-incomplete library-owned work can cause `DEVICE_BUSY`; the object stays
-intact for a retry.
+`destroy_device` returns `DEVICE_BUSY` while submitted work is running; the
+object stays intact for a retry.
 
 Points are values. Copy them, store one per frame, pass them across threads.
 A point stays meaningful until its device is destroyed. `CompletionPoint`'s

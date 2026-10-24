@@ -1,6 +1,7 @@
 module gpu;
 
 import gpu::internal @public;
+import gpu_test;
 struct DiagnosticCapture {
     uint              calls;
     void*             user_data;
@@ -17,15 +18,6 @@ fn void capture_diagnostic(DebugMessage* message, void* user_data) {
 fn void diagnostic_dispatch_is_null_safe() @test {
     DebugMessage message = {};
     gpu::internal::dispatch_debug_message(null, null, &message);
-}
-
-fn void null_command_owner_faults_as_invalid_handle() @test {
-    fault command_result = @catch(end_commands((CommandList*)null));
-
-    assert(
-        command_result == INVALID_HANDLE,
-        "null command token faults INVALID_HANDLE"
-    );
 }
 
 fn void diagnostic_dispatch_delivers_complete_message_once() @test {

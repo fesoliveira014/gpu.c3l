@@ -104,7 +104,7 @@ fn bool? vk_supports_presentation(
     void* backend_surface,
 ) {
     if (state == null || backend_surface == null || adapter_index >= state.adapters.len) {
-        return gpu::INVALID_HANDLE~;
+        abort("gpu: corrupt Surface");
     }
     if (!instance_dispatch_supports_presentation(&state.dispatch)
         || !state.instance_capabilities.surface_maintenance) return false;

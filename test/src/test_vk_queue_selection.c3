@@ -906,7 +906,7 @@ fn void queue_alias_matches_async_compute_cap() @test {
     defer destroy_test_device(&device)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device)!!;
+    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
 
     assert(state.compute_queue_distinct == caps.async_compute);
     assert((state.compute_queue == state.graphics_queue) == !caps.async_compute);
@@ -959,7 +959,7 @@ fn void cross_queue_timeline_chain_validates() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::QueueRequest request = {
         .required = { .graphics, .compute },
         .distinct_roles = { .compute },
@@ -1007,7 +1007,7 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
     };
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::QueueRequest request = {
         .required = { .graphics, .compute, .transfer },
         .distinct_roles = { .graphics, .compute, .transfer },

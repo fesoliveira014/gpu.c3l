@@ -22,7 +22,7 @@ fn gpu::Device? create_bench_device(
     }
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer catch (void)gpu::destroy_runtime(&runtime);
-    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime)!;
+    gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     for (uint i = 0; i < adapters.count; i++) {
         gpu::Adapter adapter = adapters.get(i)!;
         gpu::DeviceSupport support =
@@ -40,9 +40,13 @@ fn gpu::Device? create_bench_device(
 
 fn void? discard_bench_executable(gpu::ExecutableCommandList* commands) {
     if (commands == null || !commands.is_valid()) return;
-    if (catch err = gpu::discard_executable_commands(commands)) {
-        if (err != gpu::INVALID_HANDLE) return err~;
-    }
+    gpu::internal::vk::CommandRecord* record = gpu::internal::find_command_record(
+        commands.record,
+        commands.generation,
+        commands.device_identity,
+    );
+    if (record == null || record.state != gpu::internal::CommandState.EXECUTABLE) return;
+    return gpu::discard_executable_commands(commands);
 }
 
 fn gpu::CompletionPoint? submit_bench_queue(
@@ -72,19 +76,10 @@ fn void? wait_bench_queue(gpu::Device* device, gpu::QueueKind queue) {
 fn void? destroy_bench_device(gpu::Device* device) {
     if (device == null || !device.is_valid()) return;
     gpu::Runtime runtime;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device, true)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
     if (operation.data.runtime_retained) runtime = operation.data.runtime;
     gpu::internal::end_device_operation(&operation);
-    gpu::DeviceCaps? caps_result = gpu::get_device_caps(device);
-    if (catch err = caps_result) {
-        if (err == gpu::DEVICE_LOST) {
-            gpu::destroy_device(device)!;
-            if (runtime.is_valid()) gpu::destroy_runtime(&runtime)!;
-            return;
-        }
-        return err~;
-    }
-    gpu::QueueRoles queues = caps_result.queues;
+    gpu::QueueRoles queues = gpu::get_device_caps(device).queues;
     if (queues.graphics) {
         wait_bench_queue(device, gpu::QueueKind.GRAPHICS)!;
     }

@@ -104,7 +104,7 @@ fn void timestamp_pool_table_is_fixed_and_generation_checked() @test {
     assert(table.get(first)!!.capacity == 4,
         "the live handle resolves stored metadata");
     table.free(first)!!;
-    assert(@catch(table.get(first)) == gpu::INVALID_HANDLE,
+    assert(table.find(first) == null,
         "a freed generation is stale");
 
     gpu::TimestampPoolHandle second = table.alloc({
@@ -128,11 +128,11 @@ fn void timestamp_pool_table_rejects_foreign_stale_and_full_handles() @test {
 
     gpu::TimestampPoolHandle foreign = live;
     foreign.owner++;
-    assert(@catch(table.get(foreign)) == gpu::INVALID_HANDLE,
+    assert(table.find(foreign) == null,
         "foreign owners cannot alias a local slot");
     gpu::TimestampPoolHandle stale = live;
     stale.generation++;
-    assert(@catch(table.get(stale)) == gpu::INVALID_HANDLE,
+    assert(table.find(stale) == null,
         "generation mismatch cannot resolve a live slot");
 }
 
@@ -242,7 +242,7 @@ fn void timestamp_pool_destruction_releases_native_and_generation() @test {
     )!!;
     assert(probe.destroy_calls == 1 && probe.destroyed == native,
         "quiescent destruction releases the exact native pool");
-    assert(@catch(table.get(handle)) == gpu::INVALID_HANDLE,
+    assert(table.find(handle) == null,
         "destruction retires the public generation");
 }
 

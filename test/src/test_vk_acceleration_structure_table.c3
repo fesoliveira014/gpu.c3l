@@ -734,8 +734,6 @@ fn void acceleration_structure_destroy_checks_use_without_waiting() @test {
     assert(acceleration_structure_native_destroy_count == 1
             && allocations[0].value.live_placements == 0,
         "eligible destruction releases native and placement ownership once");
-    assert(@catch(vk_destroy_acceleration_structure(&state, handle))
-        == gpu::INVALID_HANDLE);
 }
 
 fn void acceleration_structure_address_is_blas_only_and_generation_checked() @test {
@@ -775,8 +773,6 @@ fn void acceleration_structure_address_is_blas_only_and_generation_checked() @te
         == gpu::INVALID_ARGUMENT);
     gpu::AccelerationStructureHandle foreign = blas;
     foreign.owner++;
-    assert(@catch(vk_get_acceleration_structure_address(&state, foreign))
-        == gpu::INVALID_HANDLE);
     assert(acceleration_structure_address_count == 1,
         "wrong-kind and foreign handles reach no native address query");
 }
@@ -1289,13 +1285,6 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
         gpu::AccelerationStructureIndirectBuildRange::size,
     );
     ranges.owner++;
-    assert(@catch(record_acceleration_structure_indirect_build_with_ops(
-        record:           &record,
-        desc:             &build,
-        ranges:           ranges,
-        update:           false,
-        ops:              &ops,
-    )) == gpu::INVALID_HANDLE);
     ranges = acceleration_structure_test_span(ranges_buffer, 32);
     ranges.offset = usz::max - 7;
     assert(@catch(record_acceleration_structure_indirect_build_with_ops(
@@ -1820,15 +1809,6 @@ fn void acceleration_structure_views_are_transactional_and_generation_checked() 
     assert(second.index == first.index
             && second.generation > first.generation,
         "retired slots are reused only with a new generation");
-    assert(@catch(destroy_acceleration_structure_descriptor_view(
-        &state,
-        first,
-    )) == gpu::INVALID_HANDLE);
-    assert(@catch(destroy_acceleration_structure_descriptor_view(
-        &state,
-        { .owner = 0xBAD, .index = second.index,
-            .generation = second.generation },
-    )) == gpu::INVALID_HANDLE);
     assert(descriptor_cells[0].used
             && state.acceleration_structures.get(top_level)!!
                 .live_view_count == 1,
@@ -1837,6 +1817,18 @@ fn void acceleration_structure_views_are_transactional_and_generation_checked() 
     assert(state.acceleration_structures.get(top_level)!!
             .live_view_count == 0,
         "view destruction releases exactly one TLAS relationship");
+
+    gpu::AccelerationStructureView third =
+        create_acceleration_structure_descriptor_view_with_ops(
+            &state,
+            top_level,
+            &ops,
+        )!!;
+    state.acceleration_structures.get(top_level)!!.live_view_count = 0;
+    assert(descriptor_cells[0].used,
+        "the owner-count invariant preserves the descriptor");
+    state.acceleration_structures.get(top_level)!!.live_view_count = 1;
+    destroy_acceleration_structure_descriptor_view(&state, third)!!;
 }
 
 fn void acceleration_structure_model_keeps_capacity_and_state_backend_free() @test {
@@ -1891,11 +1883,11 @@ fn void acceleration_structure_table_is_generation_and_owner_checked() @test {
 
     gpu::AccelerationStructureHandle foreign = first;
     foreign.owner++;
-    assert(@catch(table.get(foreign)) == gpu::INVALID_HANDLE);
+    assert(table.find(foreign) == null);
 
     AccelerationStructureSlot released = table.free(first)!!;
     assert(released.desc.kind == gpu::AccelerationStructureKind.TOP_LEVEL);
-    assert(@catch(table.get(first)) == gpu::INVALID_HANDLE);
+    assert(table.find(first) == null);
 
     gpu::AccelerationStructureHandle second = table.alloc(slot)!!;
     assert(second.index == first.index
