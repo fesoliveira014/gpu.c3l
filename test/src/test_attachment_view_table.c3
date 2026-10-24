@@ -21,7 +21,7 @@ fn void attachment_view_table_is_generation_checked() @test {
     gpu::AttachmentViewHandle first = table.alloc(slot)!!;
     assert(first.owner == 41 && first.index == 0,
         "attachment table publishes its exact owner and slot");
-    assert(table.get(first)!!.width == 16,
+    assert(table.get(first).width == 16,
         "attachment metadata remains immutable while live");
     table.free(first)!!;
     assert(table.find(first) == null,

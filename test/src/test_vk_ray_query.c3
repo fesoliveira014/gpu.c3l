@@ -106,7 +106,7 @@ fn void lavapipe_acceleration_structure_storage_models_are_explicit() @test {
     gpu::internal::vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::AccelerationStructureSlot* owned =
-        state.acceleration_structures.get(hidden)!!;
+        state.acceleration_structures.get(hidden);
     assert(owned.backing_buffer != null && owned.backing_allocation != null
         && !owned.placement.is_valid(),
         "an ordinary structure directly owns its native backing");

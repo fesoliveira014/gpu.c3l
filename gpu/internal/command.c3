@@ -40,7 +40,7 @@ fn gpu::internal::vk::CommandRecord* find_command_record(
     return record;
 }
 
-fn gpu::internal::vk::CommandRecord*? direct_command_record(
+fn gpu::internal::vk::CommandRecord* direct_command_record(
     gpu::internal::vk::CommandRecord* record,
     uint generation,
     uint device_identity,
@@ -72,7 +72,7 @@ fn gpu::internal::vk::CommandRecord*? direct_command_record(
 
 <* Resolve a recording token. A record that has moved past recording was
    consumed through another copy of the token. *>
-fn gpu::internal::vk::CommandRecord*? recording_command(
+fn gpu::internal::vk::CommandRecord* recording_command(
     CommandList* commands,
 ) @private {
     if (commands == null) abort("gpu: null CommandList");
@@ -81,7 +81,7 @@ fn gpu::internal::vk::CommandRecord*? recording_command(
         commands.generation,
         commands.device_identity,
         HandleKind.COMMAND_LIST,
-    )!;
+    );
     switch (record.state) {
         case gpu::internal::CommandState.RECORDING:
         case gpu::internal::CommandState.RECORDING_RENDER_PASS:
@@ -108,7 +108,7 @@ fn gpu::internal::vk::CommandRecord*? executable_command(
         commands.generation,
         commands.device_identity,
         HandleKind.EXECUTABLE_COMMAND_LIST,
-    )!;
+    );
     return executable_record_phase(record);
 }
 
@@ -147,7 +147,7 @@ fn void publish_executable_command_list(
         gpu::internal::command_token_device_identity(record.device);
 }
 
-fn gpu::internal::DeviceOperation? command_operation(
+fn gpu::internal::DeviceOperation command_operation(
     gpu::internal::vk::CommandRecord* record,
 ) @private {
     if (record == null) abort("gpu: corrupt CommandList");
@@ -165,7 +165,7 @@ fn bool generated_work_kind_valid(GeneratedWorkKind kind) @private {
     }
 }
 
-fn void? validate_command_allocator(
+fn void validate_command_allocator(
     gpu::internal::DeviceOperation* operation,
     CommandAllocator* allocator,
 ) @private {
@@ -175,10 +175,10 @@ fn void? validate_command_allocator(
     if (!allocator.handle.is_valid()) {
         abort("gpu: zero CommandAllocator");
     }
-    validate_queue(operation, &allocator.device, allocator.queue)!;
+    validate_queue(operation, &allocator.device, allocator.queue);
     gpu::internal::validate_resource_owner(
         operation,
         allocator.handle.owner,
         gpu::internal::ResourceOwnerKind.COMMAND_ALLOCATOR,
-    )!;
+    );
 }

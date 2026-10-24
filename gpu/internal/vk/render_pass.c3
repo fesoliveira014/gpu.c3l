@@ -311,7 +311,7 @@ fn PreparedRenderPass? lower_render_pass(
         .color_count = (uint)desc.colors.len,
     };
     foreach (i, &target : desc.colors) {
-        AttachmentViewSlot* view = state.attachment_views.get(target.view)!;
+        AttachmentViewSlot* view = state.attachment_views.get(target.view);
         if (view.native == null) return gpu::INVALID_RESOURCE_STATE~;
         pass.color_slots[i] = view;
         vk::RenderingAttachmentInfo* attachment = &pass.attachments[i];
@@ -332,7 +332,7 @@ fn PreparedRenderPass? lower_render_pass(
         if (target.resolve_view.is_valid()) {
             AttachmentViewSlot* resolve = state.attachment_views.get(
                 target.resolve_view,
-            )!;
+            );
             if (resolve.native == null) return gpu::INVALID_RESOURCE_STATE~;
             attachment.resolve_mode = color_resolve_mode(view.format);
             attachment.resolve_image_view = resolve.native;
@@ -347,7 +347,7 @@ fn PreparedRenderPass? lower_render_pass(
     if (desc.depth != null) {
         AttachmentViewSlot* depth = state.attachment_views.get(
             desc.depth.view,
-        )!;
+        );
         if (depth.native == null) return gpu::INVALID_RESOURCE_STATE~;
         pass.depth_view = depth;
         vk::ImageLayout layout = texture_layout_to_vk(
@@ -383,7 +383,7 @@ fn PreparedRenderPass? lower_render_pass(
 
             AttachmentViewSlot* resolve = state.attachment_views.get(
                 desc.depth.resolve_view,
-            )!;
+            );
             if (resolve.native == null) return gpu::INVALID_RESOURCE_STATE~;
 
             pass.depth_attachment.resolve_mode = depth_resolve_mode_to_vk(

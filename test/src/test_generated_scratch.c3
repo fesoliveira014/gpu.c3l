@@ -95,7 +95,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     vk::CommandAllocatorSlot* cold_slot = state.command_allocators.get(
         allocator.handle,
-    )!!;
+    );
     assert(cold_slot.reservations.len == 0
             && cold_slot.preprocess_index_storage.len == 0,
         "an allocator without a reservation owns no generated-work storage");
@@ -110,10 +110,10 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
         == gpu::RESOURCE_IN_USE,
         "reservation replacement requires a quiescent allocator");
 
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         record.allocator,
-    )!!;
+    );
     assert(slot.reservations.len
             == (usz)vk::GENERATED_PREPROCESS_PER_LIST
         && slot.reservations.len == slot.preprocess_index_storage.len
@@ -161,7 +161,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
 
     gpu::discard_commands(&commands)!!;
     gpu::CommandList retry = gpu::begin_commands(&allocator)!!;
-    vk::CommandRecord* retry_record = vk::resolve_command(&retry)!!;
+    vk::CommandRecord* retry_record = vk::resolve_command(&retry);
     vk::GeneratedPreprocessBuffer* reacquired =
         vk::acquire_generated_preprocess_buffer(
             state:        state,
@@ -262,7 +262,7 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     gpu::reserve_generated_work(&reserved_allocator, &reservation)!!;
     vk::CommandAllocatorSlot* reserved_slot = state.command_allocators.get(
         reserved_allocator.handle,
-    )!!;
+    );
     vk::GeneratedPreprocessBuffer original = reserved_slot.reservations[0];
 
     reservation.concurrent_lists = vk::GENERATED_PREPROCESS_PER_LIST + 1;
@@ -319,7 +319,7 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     )!!;
     vk::CommandRecord* unreserved_record = vk::resolve_command(
         &unreserved_commands,
-    )!!;
+    );
     uint unreserved_indices =
         unreserved_record.scratch.generated_preprocess_count;
     bool reserved_in_use = reserved_slot.reservations[0].reservation_in_use;
@@ -442,7 +442,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
     bind_test_compute_pipeline(&reserved_commands, pipeline);
     vk::CommandRecord* reserved_record = vk::resolve_command(
         &reserved_commands,
-    )!!;
+    );
     gpu::cmd_dispatch_generated(
         commands:           &reserved_commands,
         records:            records.span,
@@ -457,7 +457,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
         "zero-size public recording consumes a slot without preprocess storage");
     vk::CommandAllocatorSlot* reserved_slot = state.command_allocators.get(
         reserved_allocator.handle,
-    )!!;
+    );
     assert(reserved_slot.reservations[0].reservation_in_use
             && reserved_slot.generated_reservations_in_use == 1,
         "zero-size public recording retains the exact reservation");
@@ -477,7 +477,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
     bind_test_compute_pipeline(&unreserved_commands, pipeline);
     vk::CommandRecord* unreserved_record = vk::resolve_command(
         &unreserved_commands,
-    )!!;
+    );
     assert(@catch(gpu::cmd_dispatch_generated(
         commands:           &unreserved_commands,
         records:            records.span,

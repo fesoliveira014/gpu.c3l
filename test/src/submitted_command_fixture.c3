@@ -22,7 +22,7 @@ fn gpu::internal::vk::CommandRecord* submitted_command_fixture_record(
 ) {
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator,
-    )!!;
+    );
     gpu::internal::vk::CommandRecord* record = state.commands.claim(
         device:       gpu::DEVICE_INVALID,
         device_state: state,

@@ -101,7 +101,7 @@ fn void timestamp_pool_table_is_fixed_and_generation_checked() @test {
     })!!;
     assert(first.owner == table.owner && first.index == 0,
         "allocation publishes the table owner and slot");
-    assert(table.get(first)!!.capacity == 4,
+    assert(table.get(first).capacity == 4,
         "the live handle resolves stored metadata");
     table.free(first)!!;
     assert(table.find(first) == null,
@@ -195,7 +195,7 @@ fn void timestamp_pool_creation_is_transactional_and_copies_name() @test {
         ops:        &ops,
     )!!;
     name[0] = 'x';
-    TimestampPoolSlot* slot = table.get(handle)!!;
+    TimestampPoolSlot* slot = table.get(handle);
     assert(slot.capacity == 4
         && ((ZString)&slot.debug_name[0]).str_view() == "frame",
         "creation publishes copied pool metadata");
@@ -232,7 +232,7 @@ fn void timestamp_pool_destruction_releases_native_and_generation() @test {
         debug_name: null,
         ops:        &ops,
     )!!;
-    TimestampPoolSlot* slot = table.get(handle)!!;
+    TimestampPoolSlot* slot = table.get(handle);
     vk::QueryPool native = slot.pool;
     destroy_timestamp_pool_with(
         &table,

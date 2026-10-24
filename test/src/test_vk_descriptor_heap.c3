@@ -346,7 +346,7 @@ fn uint live_descriptor_view_count(
     vk::VkDeviceState* state,
     gpu::TextureHandle texture,
 ) {
-    return state.textures.get(texture)!!.live_descriptor_views;
+    return state.textures.get(texture).live_descriptor_views;
 }
 
 fn void texture_view_round_trip() @test {
@@ -564,7 +564,7 @@ fn void texture_view_increment_invariant_faults_transactionally() @test {
     defer gpu::destroy_texture(&device, texture)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    vk::TextureSlot* owner = state.textures.get(texture)!!;
+    vk::TextureSlot* owner = state.textures.get(texture);
     vk::DescriptorHeapState* heap = &state.shader_heap.descriptors;
     owner.live_descriptor_views = 8;
     DescriptorBackendCapture capture = {
@@ -610,7 +610,7 @@ fn void texture_views_batch_increment_invariant_is_transactional() @test {
     defer gpu::destroy_texture(&device, texture)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    vk::TextureSlot* owner = state.textures.get(texture)!!;
+    vk::TextureSlot* owner = state.textures.get(texture);
     vk::DescriptorHeapState* heap = &state.shader_heap.descriptors;
     owner.live_descriptor_views = 7;
     DescriptorBackendCapture capture = {
@@ -661,7 +661,7 @@ fn void texture_views_late_increment_invariant_rolls_back_cached_view() @test {
     defer gpu::destroy_texture(&device, inconsistent)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    vk::TextureSlot* inconsistent_owner = state.textures.get(inconsistent)!!;
+    vk::TextureSlot* inconsistent_owner = state.textures.get(inconsistent);
     inconsistent_owner.live_descriptor_views = 8;
     gpu::TextureViewDesc new_view = {
         .base_mip    = 1,
@@ -1550,7 +1550,7 @@ fn void lost_device_destroy_waits_for_live_texture_views() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     assert(view.is_valid()
-            && state.textures.get(texture)!!.live_descriptor_views == 1
+            && state.textures.get(texture).live_descriptor_views == 1
             && cached_texture_view_count(state, texture) == 1,
         "device-loss fixture owns one descriptor and one cached native view");
     assert(@catch(vk::check_backend_result(

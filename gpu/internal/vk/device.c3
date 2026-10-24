@@ -670,7 +670,7 @@ fn gpu::Device? create_vk_device_with_probe(
 ) {
     gpu::DeviceDesc normalized =
         gpu::internal::normalize_device_desc(device_desc)!;
-    gpu::internal::RuntimeData* runtime_data = gpu::internal::require_adapter(adapter)!;
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::require_adapter(adapter);
     VkRuntimeState* runtime_state = runtime_data.state;
     if (runtime_state == null) abort("gpu: corrupt Adapter");
 
@@ -679,7 +679,7 @@ fn gpu::Device? create_vk_device_with_probe(
     vk::SurfaceKHR presentation_surface = (vk::SurfaceKHR)null;
     if (requested_surface.is_valid()) {
         gpu::internal::SurfaceData* surface_data =
-            gpu::internal::require_surface(&requested_surface)!;
+            gpu::internal::require_surface(&requested_surface);
         gpu::internal::RuntimeData* surface_runtime =
             gpu::internal::resolve_runtime(&surface_data.runtime);
         if (surface_runtime != runtime_data) abort("gpu: mismatched Surface");

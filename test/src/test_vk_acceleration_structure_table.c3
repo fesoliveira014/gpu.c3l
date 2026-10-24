@@ -580,7 +580,7 @@ fn void acceleration_structure_native_creation_is_transactional() @test {
             ops:                 &ops,
         )!!;
     AccelerationStructureSlot* slot =
-        state.acceleration_structures.get(handle)!!;
+        state.acceleration_structures.get(handle);
     assert(capture.create_count == 1 && capture.destroy_count == 0
             && capture.buffer == buffer && capture.offset == 256
             && capture.size == requirements.storage_size
@@ -722,14 +722,14 @@ fn void acceleration_structure_destroy_checks_use_without_waiting() @test {
         state.acceleration_structures.alloc(slot)!!;
     acceleration_structure_native_destroy_count = 0;
 
-    state.acceleration_structures.get(handle)!!.live_view_count = 1;
+    state.acceleration_structures.get(handle).live_view_count = 1;
     assert(@catch(vk_destroy_acceleration_structure(&state, handle))
         == gpu::RESOURCE_IN_USE);
     assert(acceleration_structure_native_destroy_count == 0
             && allocations[0].value.live_placements == 1,
         "live views reject without native destruction or placement mutation");
 
-    state.acceleration_structures.get(handle)!!.live_view_count = 0;
+    state.acceleration_structures.get(handle).live_view_count = 0;
     vk_destroy_acceleration_structure(&state, handle)!!;
     assert(acceleration_structure_native_destroy_count == 1
             && allocations[0].value.live_placements == 0,
@@ -1048,7 +1048,7 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
         },
     };
     AccelerationStructureSlot* destination_slot =
-        state.acceleration_structures.get(destination)!!;
+        state.acceleration_structures.get(destination);
     destination_slot.desc.geometries = aabb_schema[..];
     gpu::AccelerationStructureGeometryBuildDesc[1] aabb_inputs = {
         {
@@ -1310,7 +1310,7 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
     assert(capture.calls == 0);
 
     AccelerationStructureSlot* destination_slot =
-        state.acceleration_structures.get(destination)!!;
+        state.acceleration_structures.get(destination);
     assert(capture.calls == 0,
         "invalid indirect inputs emit no native command");
 
@@ -1463,7 +1463,7 @@ fn void acceleration_structure_build_and_update_record_without_polling() @test {
         ops:    &ops,
     )!!;
     AccelerationStructureSlot* destination_slot =
-        state.acceleration_structures.get(destination)!!;
+        state.acceleration_structures.get(destination);
     assert(capture.calls == 1
             && capture.info.mode
                 == vk::BuildAccelerationStructureModeKHR.BUILD_KHR
@@ -1669,7 +1669,7 @@ fn void acceleration_structure_clone_records_without_polling() @test {
     assert(build_capture.calls == 1
             && build_capture.info.mode == vk::BuildAccelerationStructureModeKHR.BUILD_KHR
             && build_capture.info.dst_acceleration_structure
-                == state.acceleration_structures.get(source)!!.native);
+                == state.acceleration_structures.get(source).native);
 
     gpu_test::BarrierEmitCapture barrier_capture;
     BarrierEmitOps barrier_ops = {
@@ -1696,8 +1696,8 @@ fn void acceleration_structure_clone_records_without_polling() @test {
         ops:         &ops,
     )!!;
     assert(capture.calls == 1
-            && capture.info.src == state.acceleration_structures.get(source)!!.native
-            && capture.info.dst == state.acceleration_structures.get(destination)!!.native
+            && capture.info.src == state.acceleration_structures.get(source).native
+            && capture.info.dst == state.acceleration_structures.get(destination).native
             && capture.info.mode == vk::CopyAccelerationStructureModeKHR.CLONE_KHR,
         "build then clone emits exact native endpoints without completion polling");
 
@@ -1712,8 +1712,8 @@ fn void acceleration_structure_clone_records_without_polling() @test {
     )!!;
     assert(capture.calls == 2
             && capture.command_buffer == second_record.command_buffer
-            && capture.info.src == state.acceleration_structures.get(source)!!.native
-            && capture.info.dst == state.acceleration_structures.get(destination)!!.native
+            && capture.info.src == state.acceleration_structures.get(source).native
+            && capture.info.dst == state.acceleration_structures.get(destination).native
             && capture.info.mode == vk::CopyAccelerationStructureModeKHR.CLONE_KHR,
         "a dependent command list records clone before producer polling");
 
@@ -1780,8 +1780,8 @@ fn void acceleration_structure_views_are_transactional_and_generation_checked() 
             && first.generation == 1 && capture.calls == 1
             && capture.slot == 0
             && capture.acceleration_structure
-                == state.acceleration_structures.get(top_level)!!.native
-            && state.acceleration_structures.get(top_level)!!
+                == state.acceleration_structures.get(top_level).native
+            && state.acceleration_structures.get(top_level)
                 .live_view_count == 1,
         "TLAS publication writes slot-plus-one and retains one live view");
     assert(@catch(create_acceleration_structure_descriptor_view_with_ops(
@@ -1795,7 +1795,7 @@ fn void acceleration_structure_views_are_transactional_and_generation_checked() 
         &ops,
     )) == gpu::INVALID_ARGUMENT);
     assert(capture.calls == 1
-            && state.acceleration_structures.get(top_level)!!
+            && state.acceleration_structures.get(top_level)
                 .live_view_count == 1,
         "heap exhaustion and BLAS rejection publish nothing");
 
@@ -1810,11 +1810,11 @@ fn void acceleration_structure_views_are_transactional_and_generation_checked() 
             && second.generation > first.generation,
         "retired slots are reused only with a new generation");
     assert(descriptor_cells[0].used
-            && state.acceleration_structures.get(top_level)!!
+            && state.acceleration_structures.get(top_level)
                 .live_view_count == 1,
         "stale and foreign views cannot retire the current descriptor");
     destroy_acceleration_structure_descriptor_view(&state, second)!!;
-    assert(state.acceleration_structures.get(top_level)!!
+    assert(state.acceleration_structures.get(top_level)
             .live_view_count == 0,
         "view destruction releases exactly one TLAS relationship");
 
@@ -1824,10 +1824,10 @@ fn void acceleration_structure_views_are_transactional_and_generation_checked() 
             top_level,
             &ops,
         )!!;
-    state.acceleration_structures.get(top_level)!!.live_view_count = 0;
+    state.acceleration_structures.get(top_level).live_view_count = 0;
     assert(descriptor_cells[0].used,
         "the owner-count invariant preserves the descriptor");
-    state.acceleration_structures.get(top_level)!!.live_view_count = 1;
+    state.acceleration_structures.get(top_level).live_view_count = 1;
     destroy_acceleration_structure_descriptor_view(&state, third)!!;
 }
 
@@ -1879,7 +1879,7 @@ fn void acceleration_structure_table_is_generation_and_owner_checked() @test {
     };
 
     gpu::AccelerationStructureHandle first = table.alloc(slot)!!;
-    assert(table.get(first)!!.desc.max_instance_count == 8);
+    assert(table.get(first).desc.max_instance_count == 8);
 
     gpu::AccelerationStructureHandle foreign = first;
     foreign.owner++;

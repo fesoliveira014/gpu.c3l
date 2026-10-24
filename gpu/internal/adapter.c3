@@ -3,7 +3,7 @@ module gpu::internal @private;
 import gpu;
 
 
-fn RuntimeData*? require_adapter(Adapter* adapter) @private {
+fn RuntimeData* require_adapter(Adapter* adapter) @private {
     if (adapter == null) abort("gpu: null Adapter");
     if (!adapter.is_valid()) abort("gpu: zero Adapter");
     if (adapter.reserved != 0 || adapter.runtime_index >= MAX_RUNTIMES) {

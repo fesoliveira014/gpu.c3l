@@ -112,7 +112,7 @@ fn DeviceSupport? evaluate_device_desc_support(
 
     void* backend_surface = null;
     if (normalized.surface.is_valid()) {
-        SurfaceData* surface_data = require_surface(&normalized.surface)!;
+        SurfaceData* surface_data = require_surface(&normalized.surface);
         RuntimeData* surface_runtime = resolve_runtime(&surface_data.runtime);
         if (surface_runtime != data) {
             abort("gpu: mismatched Surface");

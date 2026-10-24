@@ -322,12 +322,12 @@ fn void three_dimensional_texture_lifecycle_and_views() @test {
         gpu::create_texture(&device, &depth_one_desc)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    assert(state.textures.get(depth_one)!!.depth == 1,
+    assert(state.textures.get(depth_one).depth == 1,
         "depth one creates a genuine three-dimensional texture slot");
     gpu::destroy_texture(&device, depth_one)!!;
 
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    vk::TextureSlot* slot = state.textures.get(texture)!!;
+    vk::TextureSlot* slot = state.textures.get(texture);
     vk::MipExtent mip0 = vk::texture_mip_extent(slot, 0);
     vk::MipExtent mip1 = vk::texture_mip_extent(slot, 1);
     vk::MipExtent mip2 = vk::texture_mip_extent(slot, 2);
@@ -381,7 +381,7 @@ fn void three_dimensional_texture_lifecycle_and_views() @test {
     transfer_only.usage = { .transfer_src, .transfer_dst };
     gpu::TextureHandle transfer =
         gpu::create_texture(&device, &transfer_only)!!;
-    assert(state.textures.get(transfer)!!.default_view == null,
+    assert(state.textures.get(transfer).default_view == null,
         "transfer-only three-dimensional textures omit default views");
     gpu::destroy_texture(&device, transfer)!!;
 }
@@ -478,7 +478,7 @@ fn void three_dimensional_texture_barriers_use_one_array_layer() @test {
         },
     };
     vk::vk_cmd_texture_barrier_with_ops(
-        vk::resolve_command(&commands)!!,
+        vk::resolve_command(&commands),
         &barrier,
         &ops,
     )!!;
@@ -491,7 +491,7 @@ fn void three_dimensional_texture_barriers_use_one_array_layer() @test {
 
     barrier.view = { .base_layer = 1 };
     assert(@catch(vk::vk_cmd_texture_barrier_with_ops(
-        vk::resolve_command(&commands)!!,
+        vk::resolve_command(&commands),
         &barrier,
         &ops,
     )) == gpu::INVALID_ARGUMENT
@@ -543,7 +543,7 @@ fn void default_texture_views_follow_usage_eligibility() @test {
         };
         gpu::TextureHandle texture =
             gpu::create_texture(&device, &desc)!!;
-        vk::TextureSlot* slot = state.textures.get(texture)!!;
+        vk::TextureSlot* slot = state.textures.get(texture);
         assert((slot.default_view != null) == expects_view[i],
             "default view existence follows immutable texture usage");
         gpu::destroy_texture(&device, texture)!!;
@@ -730,7 +730,7 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    vk::TextureSlot* slot = state.textures.get(texture)!!;
+    vk::TextureSlot* slot = state.textures.get(texture);
     TextureBarrierEmitCapture capture;
     vk::BarrierEmitOps ops = {
         .user_data = &capture,
@@ -753,7 +753,7 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
         },
     };
     vk::vk_cmd_texture_barrier_with_ops(
-        vk::resolve_command(&commands)!!,
+        vk::resolve_command(&commands),
         &barrier,
         &ops,
     )!!;
@@ -815,13 +815,13 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    vk::TextureSlot* slot = state.textures.get(texture)!!;
+    vk::TextureSlot* slot = state.textures.get(texture);
     TextureBarrierEmitCapture capture;
     vk::BarrierEmitOps ops = {
         .user_data = &capture,
         .emit      = &capture_texture_barrier_emit,
     };
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
 
     gpu::TextureBarrier sampled = {
         .texture = texture,
@@ -949,14 +949,14 @@ fn void assert_present_barrier_emission(
     defer discard_test_commands(&commands)!!;
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    vk::TextureSlot* slot = state.textures.get(texture)!!;
+    vk::TextureSlot* slot = state.textures.get(texture);
     slot.swapchain_owned = true;
     TextureBarrierEmitCapture capture;
     vk::BarrierEmitOps ops = {
         .user_data = &capture,
         .emit      = &capture_texture_barrier_emit,
     };
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
 
     gpu::TextureBarrier barrier = {
         .texture = texture,
@@ -1052,7 +1052,7 @@ fn void attachment_views_own_exact_subresources_and_retain_textures() @test {
     )!!;
 
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    vk::AttachmentViewSlot* slot = state.attachment_views.get(view)!!;
+    vk::AttachmentViewSlot* slot = state.attachment_views.get(view);
     assert(slot.texture == texture && slot.width == 8 && slot.height == 4,
         "attachment slots pin exact immutable subresource metadata");
     assert(slot.owns_native,
@@ -1082,9 +1082,9 @@ fn void default_attachment_view_aliases_texture_native_view() @test {
         &view_desc,
     )!!;
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    vk::AttachmentViewSlot* slot = state.attachment_views.get(view)!!;
+    vk::AttachmentViewSlot* slot = state.attachment_views.get(view);
     assert(!slot.owns_native
-        && slot.native == state.textures.get(texture)!!.default_view,
+        && slot.native == state.textures.get(texture).default_view,
         "single-subresource attachments alias the texture-owned default view");
     gpu::destroy_attachment_view(&device, view)!!;
     gpu::destroy_texture(&device, texture)!!;
@@ -1107,13 +1107,13 @@ fn void swapchain_owned_attachment_view_rejects_caller_destruction() @test {
         &view_desc,
     )!!;
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    vk::AttachmentViewSlot* slot = state.attachment_views.get(view)!!;
+    vk::AttachmentViewSlot* slot = state.attachment_views.get(view);
     slot.swapchain_owned = true;
 
     assert(@catch(gpu::destroy_attachment_view(&device, view))
         == gpu::INVALID_RESOURCE_STATE,
         "borrowed swapchain attachment views reject caller destruction");
-    assert(state.attachment_views.get(view)!! == slot,
+    assert(state.attachment_views.get(view) == slot,
         "rejected borrowed-view destruction preserves the handle");
 
     slot.swapchain_owned = false;
@@ -1139,7 +1139,7 @@ fn void attachment_view_publication_failure_rolls_back_cold_view() @test {
         .mip_level = 1,
     };
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    vk::TextureSlot* texture_slot = state.textures.get(texture)!!;
+    vk::TextureSlot* texture_slot = state.textures.get(texture);
     uint references_before = texture_slot.internal_references.load(
         AtomicOrdering.RELAXED,
     );
@@ -1778,7 +1778,7 @@ fn void placed_texture_publication_rolls_back_native_failures() @test {
         && fixture.probe.view_calls == 1
         && fixture.allocations[0].value.live_placements == 1,
         "successful placement publishes once and retains its allocation");
-    vk::TextureSlot* slot = fixture.state.textures.get(texture)!!;
+    vk::TextureSlot* slot = fixture.state.textures.get(texture);
     ops.destroy_view(ops.user_data, fixture.state.device, slot.default_view);
     ops.destroy_image(ops.user_data, fixture.state.device, slot.image);
     fixture.state.textures.free(texture)!!;
@@ -1803,7 +1803,7 @@ fn void placed_transfer_only_texture_omits_default_view() @test {
         requirements: requirements,
         ops:          &ops,
     )!!;
-    vk::TextureSlot* slot = fixture.state.textures.get(texture)!!;
+    vk::TextureSlot* slot = fixture.state.textures.get(texture);
     assert(fixture.probe.create_calls == 1
         && fixture.probe.view_calls == 0
         && slot.default_view == null

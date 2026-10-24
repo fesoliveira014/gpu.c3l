@@ -207,7 +207,7 @@ fn gpu::Surface? create_context_surface(
 ) @private {
     gpu::Surface surface = settings.create_surface(runtime, settings.surface_user_data)!;
     // Reject a foreign callback result before any call could destroy it.
-    gpu::internal::SurfaceData* data = gpu::internal::require_surface(&surface)!;
+    gpu::internal::SurfaceData* data = gpu::internal::require_surface(&surface);
     if ((ulong)data.runtime != (ulong)*runtime) {
         abort("gpu: mismatched Surface");
     }

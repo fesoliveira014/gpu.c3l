@@ -1026,7 +1026,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     gpu::cmd_end_render_pass(&commands)!!;
 
     bind_test_compute_pipeline(&commands, dispatch_pipeline);
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
     uint dispatch_preprocess_count =
         record.scratch.generated_preprocess_count;
     gpu::cmd_dispatch_generated(

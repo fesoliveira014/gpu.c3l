@@ -24,7 +24,7 @@ fn void assert_device_ownership(
     Adapter expected_adapter,
     Surface expected_surface,
 ) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     assert(
         (ulong)operation.data.adapter == (ulong)expected_adapter,
