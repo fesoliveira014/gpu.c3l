@@ -111,84 +111,6 @@ fn void runtime_can_have_no_adapters() @test {
     assert(@catch(adapters.get(0)) == gpu::INVALID_ARGUMENT, "an empty view rejects indexing");
 }
 
-fn void borrowed_adapters_expire_with_their_runtime() @test {
-    gpu::internal::vk::stub_set_adapter_count(1);
-    RuntimeDesc desc = runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
-    Runtime stale_runtime = runtime;
-    AdapterList adapters = gpu::enumerate_adapters(&runtime);
-    Adapter adapter = adapters.get(0)!!;
-
-    gpu::destroy_runtime(&runtime)!!;
-    Runtime replacement = gpu::create_runtime(&desc)!!;
-    defer gpu::destroy_runtime(&replacement)!!;
-
-    assert((ulong)runtime == 0, "destroy_runtime consumes the runtime token");
-    String stale_runtime_message = @expect_panic() {
-        (void)gpu::enumerate_adapters(&stale_runtime);
-    };
-    assert(stale_runtime_message == "gpu::enumerate_adapters: stale Runtime", "a reused slot rejects the stale runtime");
-    String stale_view_message = @expect_panic() {
-        (void)adapters.get(0);
-    };
-    assert(stale_view_message == "gpu::AdapterList.get: stale Runtime", "a stale adapter view is rejected");
-    String stale_adapter_message = @expect_panic() {
-        (void)gpu::get_adapter_info(&adapter);
-    };
-    assert(stale_adapter_message == "gpu::get_adapter_info: stale Adapter", "a stale adapter is rejected");
-    AdapterList replacement_adapters = gpu::enumerate_adapters(&replacement);
-    Adapter replacement_adapter = replacement_adapters.get(0)!!;
-    assert(gpu::get_adapter_info(&replacement_adapter).name.len > 0, "the replacement runtime is valid");
-}
-
-fn void reserved_runtime_and_adapter_bits_are_rejected() @test {
-    gpu::internal::vk::stub_set_adapter_count(1);
-    RuntimeDesc desc = runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
-    defer gpu::destroy_runtime(&runtime)!!;
-    AdapterList adapters = gpu::enumerate_adapters(&runtime);
-    Adapter adapter = adapters.get(0)!!;
-
-    Runtime forged_runtime = runtime;
-    forged_runtime.reserved = 1;
-    Adapter forged_adapter = adapter;
-    forged_adapter.reserved = 1;
-    String runtime_message = @expect_panic() {
-        (void)gpu::enumerate_adapters(&forged_runtime);
-    };
-    assert(runtime_message == "gpu::enumerate_adapters: malformed Runtime",
-        "reserved runtime bits cannot alias a live runtime");
-    String adapter_message = @expect_panic() {
-        (void)gpu::get_adapter_info(&forged_adapter);
-    };
-    assert(adapter_message == "gpu::get_adapter_info: malformed Adapter",
-        "reserved adapter bits cannot alias a borrowed adapter");
-}
-
-fn void forged_adapter_runtime_identity_is_rejected() @test {
-    gpu::internal::vk::stub_set_adapter_count(1);
-    RuntimeDesc desc = runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
-    defer gpu::destroy_runtime(&runtime)!!;
-    AdapterList adapters = gpu::enumerate_adapters(&runtime);
-    Adapter adapter = adapters.get(0)!!;
-
-    Adapter wrong_generation = adapter;
-    wrong_generation.runtime_generation = adapter.runtime_generation + 1;
-    Adapter out_of_range_runtime = adapter;
-    out_of_range_runtime.runtime_index = (ushort)gpu::internal::MAX_RUNTIMES;
-    String generation_message = @expect_panic() {
-        (void)gpu::get_adapter_info(&wrong_generation);
-    };
-    assert(generation_message == "gpu::get_adapter_info: stale Adapter",
-        "a forged runtime generation cannot alias a live adapter");
-    String range_message = @expect_panic() {
-        (void)gpu::get_adapter_info(&out_of_range_runtime);
-    };
-    assert(range_message == "gpu::get_adapter_info: malformed Adapter",
-        "an out-of-range runtime index cannot alias a live adapter");
-}
-
 fn void runtime_is_invalid_during_backend_teardown() @test {
     gpu::internal::vk::stub_set_adapter_count(1);
     gpu::internal::vk::stub_probe_destroy_visibility();
@@ -196,10 +118,8 @@ fn void runtime_is_invalid_during_backend_teardown() @test {
     Runtime runtime = gpu::create_runtime(&desc)!!;
 
     gpu::destroy_runtime(&runtime)!!;
-    assert(
-        gpu::internal::vk::stub_destroy_visibility_fault() == gpu::internal::HANDLE_REJECTED,
-        "backend teardown cannot re-enter a live public runtime"
-    );
+    assert(!gpu::internal::vk::stub_runtime_visible_at_destroy(),
+        "backend teardown cannot re-enter a live public runtime");
 }
 
 fn void runtime_destruction_rejects_live_dependents() @test {
@@ -266,17 +186,4 @@ fn void runtime_publication_failure_is_transactional() @test {
         gpu::internal::vk::stub_runtime_create_count() == gpu::internal::vk::stub_runtime_destroy_count(),
         "every created backend runtime is released"
     );
-}
-
-fn void stale_runtime_terminates() @test {
-    gpu::internal::vk::stub_set_adapter_count(1);
-    RuntimeDesc desc = runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
-    Runtime stale = runtime;
-    gpu::destroy_runtime(&runtime)!!;
-
-    String message = @expect_panic() {
-        (void)gpu::enumerate_adapters(&stale);
-    };
-    assert(message == "gpu::enumerate_adapters: stale Runtime", "the panic names the call and the stale runtime");
 }

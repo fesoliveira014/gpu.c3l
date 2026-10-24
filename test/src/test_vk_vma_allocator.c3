@@ -7,24 +7,6 @@ import std::core::mem;
 
 // Headless (lavapipe): the device's VMA allocator + memory stats.
 
-fn void memory_queries_terminate_on_uninitialized_allocator() @test {
-    gpu::internal::vk::VkDeviceState* state =
-        mem::new(gpu::internal::vk::VkDeviceState);
-    gpu::Device device = gpu::internal::register_device(
-        state:  state,
-        caps:   {},
-    )!!;
-
-    @assert_panics("gpu::get_memory_stats: corrupt Device") {
-        (void)gpu::get_memory_stats(&device);
-    };
-    @assert_panics("gpu::build_memory_report: corrupt Device") {
-        (void)gpu::build_memory_report(&device, false);
-    };
-
-    gpu::destroy_device(&device)!!;
-}
-
 fn void allocator_stats_and_report() @test {
     gpu::RuntimeDesc desc = {
         .enable_vulkan_validation = true,

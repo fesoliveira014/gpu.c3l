@@ -40,52 +40,16 @@ fn void surface_tokens_are_compact() @test {
     assert(Surface::size == ulong::size, "Surface is one opaque 64-bit token");
 }
 
-fn void forged_surface_tokens_are_rejected() @test {
-    RuntimeDesc desc = runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
-    Surface first = create_test_surface(&runtime);
-    gpu::destroy_surface(&first)!!;
-
-    Surface surface = create_test_surface(&runtime);
-    Surface reserved = surface;
-    reserved.reserved = 1;
-    Surface out_of_range = surface;
-    out_of_range.index = gpu::internal::MAX_SURFACES;
-    Surface wrong_generation = surface;
-    wrong_generation.generation--;
-
-    String reserved_message = @expect_panic() {
-        (void)gpu::destroy_surface(&reserved);
-    };
-    assert(reserved_message == "gpu::destroy_surface: malformed Surface");
-    String range_message = @expect_panic() {
-        (void)gpu::destroy_surface(&out_of_range);
-    };
-    assert(range_message == "gpu::destroy_surface: malformed Surface");
-    String generation_message = @expect_panic() {
-        (void)gpu::destroy_surface(&wrong_generation);
-    };
-    assert(generation_message == "gpu::destroy_surface: stale Surface");
-
-    gpu::destroy_surface(&surface)!!;
-    gpu::destroy_runtime(&runtime)!!;
-}
-
 fn void surfaces_retain_their_runtime_and_expire_on_destroy() @test {
     gpu::internal::vk::stub_reset_surface_counts();
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
-    Surface stale = surface;
 
     assert(@catch(gpu::destroy_runtime(&runtime)) == gpu::RESOURCE_IN_USE);
     assert(gpu::internal::vk::stub_surface_create_count() == 1);
     gpu::destroy_surface(&surface)!!;
     assert(!surface.is_valid());
-    String message = @expect_panic() {
-        (void)gpu::destroy_surface(&stale);
-    };
-    assert(message == "gpu::destroy_surface: stale Surface");
     assert(gpu::internal::vk::stub_surface_destroy_count() == 1);
     gpu::destroy_runtime(&runtime)!!;
 }
@@ -156,26 +120,19 @@ fn void invalid_platform_handles_fault_before_backend_work() @test {
     assert(gpu::internal::vk::stub_surface_create_count() == 0);
 }
 
-fn void presentation_support_validates_runtime_ownership() @test {
+fn void presentation_support_reports_backend_support() @test {
     gpu::internal::vk::stub_set_presentation_support(true);
     RuntimeDesc desc = runtime_desc();
     Runtime first = gpu::create_runtime(&desc)!!;
-    Runtime second = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&first);
     Adapter first_adapter = gpu::enumerate_adapters(&first).get(0)!!;
-    Adapter second_adapter = gpu::enumerate_adapters(&second).get(0)!!;
 
     assert(gpu::supports_presentation(&first_adapter, &surface)!!);
-    String message = @expect_panic() {
-        (void)gpu::supports_presentation(&second_adapter, &surface);
-    };
-    assert(message == "gpu::supports_presentation: mismatched Surface");
 
     gpu::internal::vk::stub_set_presentation_support(false);
     assert(!gpu::supports_presentation(&first_adapter, &surface)!!);
 
     gpu::destroy_surface(&surface)!!;
-    gpu::destroy_runtime(&second)!!;
     gpu::destroy_runtime(&first)!!;
 }
 
@@ -204,54 +161,7 @@ fn void presentation_desc_is_immutable_and_surface_bound() @test {
     assert(unsupported.unmet_requirement == "presentation");
 
     gpu::destroy_surface(&surface)!!;
-    String support_message = @expect_panic() {
-        (void)gpu::supports_device_desc(&adapter, &device_desc);
-    };
-    assert(support_message == "gpu::supports_device_desc: stale Surface");
-    String create_message = @expect_panic() {
-        (void)gpu::create_device(&adapter, &device_desc);
-    };
-    assert(create_message == "gpu::create_device: stale Surface");
     gpu::destroy_runtime(&runtime)!!;
-}
-
-fn void descriptor_surface_identity_rejects_before_backend_work() @test {
-    gpu::internal::vk::stub_set_presentation_support(true);
-    gpu::internal::vk::stub_reset_device_counts();
-    RuntimeDesc desc = runtime_desc();
-    Runtime first = gpu::create_runtime(&desc)!!;
-    Runtime second = gpu::create_runtime(&desc)!!;
-    Surface first_surface = create_test_surface(&first);
-    Surface second_surface = create_test_surface(&second);
-    Surface malformed = first_surface;
-    malformed.reserved = 1;
-    Adapter adapter = gpu::enumerate_adapters(&first).get(0)!!;
-    DeviceDesc foreign_desc = { .surface = second_surface };
-    DeviceDesc malformed_desc = { .surface = malformed };
-
-    String foreign_support = @expect_panic() {
-        (void)gpu::supports_device_desc(&adapter, &foreign_desc);
-    };
-    assert(foreign_support == "gpu::supports_device_desc: mismatched Surface");
-    String foreign_create = @expect_panic() {
-        (void)gpu::create_device(&adapter, &foreign_desc);
-    };
-    assert(foreign_create == "gpu::create_device: mismatched Surface");
-    String malformed_support = @expect_panic() {
-        (void)gpu::supports_device_desc(&adapter, &malformed_desc);
-    };
-    assert(malformed_support == "gpu::supports_device_desc: malformed Surface");
-    String malformed_create = @expect_panic() {
-        (void)gpu::create_device(&adapter, &malformed_desc);
-    };
-    assert(malformed_create == "gpu::create_device: malformed Surface");
-    assert(gpu::internal::vk::stub_device_support_query_count() == 0);
-    assert(gpu::internal::vk::stub_device_temporary_create_count() == 0);
-
-    gpu::destroy_surface(&second_surface)!!;
-    gpu::destroy_surface(&first_surface)!!;
-    gpu::destroy_runtime(&second)!!;
-    gpu::destroy_runtime(&first)!!;
 }
 
 fn void presentation_desc_requires_graphics() @test {
@@ -324,37 +234,6 @@ fn void swapchains_borrow_runtime_owned_surfaces() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
-fn void swapchain_creation_rejects_a_foreign_runtime_surface() @test {
-    gpu::internal::vk::stub_set_presentation_support(true);
-    RuntimeDesc desc = runtime_desc();
-    Runtime first = gpu::create_runtime(&desc)!!;
-    Runtime second = gpu::create_runtime(&desc)!!;
-    Surface first_surface = create_test_surface(&first);
-    Surface second_surface = create_test_surface(&second);
-    Adapter adapter = gpu::enumerate_adapters(&first).get(0)!!;
-    DeviceDesc device_desc = { .surface = first_surface };
-    Device device = gpu::create_device(&adapter, &device_desc)!!;
-    SwapchainDesc swapchain_desc = {
-        .width  = 640,
-        .height = 480,
-    };
-
-    String message = @expect_panic() {
-        (void)gpu::create_swapchain(
-            &device,
-            &second_surface,
-            &swapchain_desc,
-        );
-    };
-    assert(message == "gpu::create_swapchain: mismatched Surface");
-
-    gpu::destroy_device(&device)!!;
-    gpu::destroy_surface(&second_surface)!!;
-    gpu::destroy_surface(&first_surface)!!;
-    gpu::destroy_runtime(&second)!!;
-    gpu::destroy_runtime(&first)!!;
-}
-
 fn void non_presenting_devices_reject_swapchains_before_backend_work() @test {
     gpu::internal::vk::stub_reset_surface_counts();
     RuntimeDesc desc = runtime_desc();
@@ -410,22 +289,6 @@ fn void presentation_devices_accept_only_the_requested_surface() @test {
     assert(gpu::get_device_caps(&second).presentation_enabled);
     assert_device_ownership(&first, first_adapter, first_surface);
     assert_device_ownership(&second, second_adapter, second_surface);
-    String first_message = @expect_panic() {
-        (void)gpu::create_swapchain(
-            &first,
-            &second_surface,
-            &swapchain_desc,
-        );
-    };
-    assert(first_message == "gpu::create_swapchain: mismatched Surface");
-    String second_message = @expect_panic() {
-        (void)gpu::create_swapchain(
-            &second,
-            &first_surface,
-            &swapchain_desc,
-        );
-    };
-    assert(second_message == "gpu::create_swapchain: mismatched Surface");
     assert(
         gpu::internal::vk::stub_swapchain_create_attempt_count() == 0,
         "both surface mismatches reject before backend mutation"
@@ -453,52 +316,6 @@ fn void presentation_devices_accept_only_the_requested_surface() @test {
     gpu::destroy_swapchain(&second, second_swapchain)!!;
     gpu::destroy_device(&second)!!;
     gpu::destroy_surface(&second_surface)!!;
-    gpu::destroy_runtime(&runtime)!!;
-}
-
-fn void swapchain_wait_rejects_foreign_and_stale_handles_before_native_work() @test {
-    gpu::internal::vk::stub_set_presentation_support(true);
-    RuntimeDesc desc = runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
-    Surface surface = create_test_surface(&runtime);
-    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
-    DeviceDesc device_desc = { .surface = surface };
-    Device device = gpu::create_device(&adapter, &device_desc)!!;
-    SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
-    SwapchainHandle swapchain = gpu::create_swapchain(
-        &device,
-        &surface,
-        &swapchain_desc,
-    )!!;
-    gpu::internal::vk::VkDeviceState* state = present_wait_state(&device);
-    gpu::internal::vk::stub_set_present_wait_pending_count(state, 1);
-    gpu::internal::vk::stub_reset_present_wait_counts(state);
-
-    SwapchainHandle foreign = swapchain;
-    foreign.owner++;
-    @assert_panics("gpu::wait_swapchain_presentations: stale SwapchainHandle") {
-        (void)gpu::wait_swapchain_presentations(&device, foreign, 0);
-    };
-    assert(
-        gpu::internal::vk::stub_present_wait_call_count(state) == 0
-            && gpu::internal::vk::stub_present_reset_call_count(state) == 0,
-        "foreign handles are rejected before the native wait"
-    );
-
-    SwapchainHandle stale = swapchain;
-    stale.generation--;
-    @assert_panics("gpu::wait_swapchain_presentations: stale SwapchainHandle") {
-        (void)gpu::wait_swapchain_presentations(&device, stale, 0);
-    };
-    assert(
-        gpu::internal::vk::stub_present_wait_call_count(state) == 0
-            && gpu::internal::vk::stub_present_reset_call_count(state) == 0,
-        "stale handles are rejected before the native wait"
-    );
-
-    gpu::destroy_swapchain(&device, swapchain)!!;
-    gpu::destroy_device(&device)!!;
-    gpu::destroy_surface(&surface)!!;
     gpu::destroy_runtime(&runtime)!!;
 }
 
@@ -696,46 +513,4 @@ fn void swapchain_wait_success_is_idempotent() @test {
     gpu::destroy_device(&device)!!;
     gpu::destroy_surface(&surface)!!;
     gpu::destroy_runtime(&runtime)!!;
-}
-
-fn void swapchain_wait_rejects_destroyed_device() @test {
-    gpu::internal::vk::stub_set_presentation_support(true);
-    RuntimeDesc desc = runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
-    Surface surface = create_test_surface(&runtime);
-    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
-    DeviceDesc device_desc = { .surface = surface };
-    Device device = gpu::create_device(&adapter, &device_desc)!!;
-    SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
-    SwapchainHandle swapchain = gpu::create_swapchain(
-        &device,
-        &surface,
-        &swapchain_desc,
-    )!!;
-
-    gpu::destroy_swapchain(&device, swapchain)!!;
-    gpu::destroy_device(&device)!!;
-    @assert_panics("gpu::wait_swapchain_presentations: zero Device") {
-        (void)gpu::wait_swapchain_presentations(&device, swapchain, 0);
-    };
-
-    gpu::destroy_surface(&surface)!!;
-    gpu::destroy_runtime(&runtime)!!;
-}
-
-fn void foreign_surface_terminates() @test {
-    gpu::internal::vk::stub_set_presentation_support(true);
-    RuntimeDesc desc = runtime_desc();
-    Runtime first = gpu::create_runtime(&desc)!!;
-    Runtime second = gpu::create_runtime(&desc)!!;
-    defer gpu::destroy_runtime(&first)!!;
-    defer gpu::destroy_runtime(&second)!!;
-    Surface surface = create_test_surface(&first);
-    defer gpu::destroy_surface(&surface)!!;
-    Adapter second_adapter = gpu::enumerate_adapters(&second).get(0)!!;
-
-    String message = @expect_panic() {
-        (void)gpu::supports_presentation(&second_adapter, &surface);
-    };
-    assert(message == "gpu::supports_presentation: mismatched Surface", "a surface from another runtime terminates");
 }

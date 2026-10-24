@@ -14,9 +14,9 @@ struct ResolvedSpan {
 }
 
 fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
-    if (state == null || span == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.GPU_SPAN, gpu::internal::HandleCause.INVARIANT)~;
+    if (state == null || span == null) abort("gpu: corrupt GpuSpan");
 
-    if (span.owner != state.allocations.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.GPU_SPAN, gpu::internal::HandleCause.FOREIGN)~;
+    if (span.owner != state.allocations.owner) abort("gpu: foreign GpuSpan");
     gpu::GpuAllocation allocation = {
         .owner      = span.owner,
         .index      = span.index,
@@ -87,35 +87,23 @@ fn ResolvedSpan? resolve_span_slot(
     ResolvedSpan? result = resolve_span(state, span);
     if (catch span_fault = result) {
         if (operation == null) return span_fault~;
-        bool allocation_owner = span != null
-            && span.owner == state.allocations.owner;
-        bool has_identity = span_fault != gpu::internal::HANDLE_REJECTED;
-        ZString debug_name;
-        if (has_identity && allocation_owner) {
-            gpu::GpuAllocation allocation = {
-                .owner      = span.owner,
-                .index      = span.index,
-                .generation = span.generation,
-            };
-            if (try slot = state.allocations.get(allocation)) {
-                debug_name = slot_name(&slot.backing.debug_name[0]);
-            }
-        }
+        gpu::GpuAllocation allocation = {
+            .owner      = span.owner,
+            .index      = span.index,
+            .generation = span.generation,
+        };
+        AllocationSlot* slot = state.allocations.find(allocation);
         return report_contract_failure(
             state:               state,
             operation:           operation,
             public_fault:        span_fault,
             resource_kind:       span_resource_kind(state, span),
-            has_public_identity: has_identity,
-            index:               has_identity ? span.index : 0,
-            generation:          has_identity ? span.generation : 0,
-            debug_name:          debug_name,
-            rejected_field:      span_fault == gpu::internal::HANDLE_REJECTED
-                ? "GpuSpan.identity"
-                : rejected_field,
-            invariant:           span_fault == gpu::internal::HANDLE_REJECTED
-                ? "must identify one live span owner"
-                : "span range must fit its live owner",
+            has_public_identity: true,
+            index:               span.index,
+            generation:          span.generation,
+            debug_name:          slot != null ? slot_name(&slot.backing.debug_name[0]) : null,
+            rejected_field:      rejected_field,
+            invariant:           "span range must fit its live owner",
             backend_text:        null,
         )~;
     }

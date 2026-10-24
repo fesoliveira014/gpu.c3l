@@ -149,10 +149,10 @@ fn ulong? allocate_device_resource_owner() @private {
 
 <* Reject a device token whose bits can never name a live device. *>
 fn void? validate_device_token(Device* device) @private {
-    if (device == null) return reject_handle(HandleKind.DEVICE, HandleCause.NULL_POINTER)~;
-    if (!device.is_valid()) return reject_handle(HandleKind.DEVICE, HandleCause.ZERO)~;
+    if (device == null) abort("gpu: null Device");
+    if (!device.is_valid()) abort("gpu: zero Device");
     if (device.reserved != 0 || device.index >= MAX_DEVICES || device.generation == 0) {
-        return reject_handle(HandleKind.DEVICE, HandleCause.MALFORMED)~;
+        abort("gpu: malformed Device");
     }
 }
 
@@ -166,16 +166,16 @@ fn DeviceOperation? begin_device_operation(Device* device) @private {
     while (true) {
         DeviceSlotControl control = (DeviceSlotControl)packed;
         if (control.generation != device.generation) {
-            return reject_handle(HandleKind.DEVICE, HandleCause.STALE)~;
+            abort("gpu: stale Device");
         }
         if (control.state == DEVICE_SLOT_CLOSING) {
-            return reject_handle(HandleKind.DEVICE, HandleCause.DESTROY_OVERLAP)~;
+            abort("gpu: Device used concurrently with destroy_device");
         }
         if (control.state != DEVICE_SLOT_LIVE) {
-            return reject_handle(HandleKind.DEVICE, HandleCause.STALE)~;
+            abort("gpu: stale Device");
         }
         if (control.pins == MAX_DEVICE_OPERATION_PINS) {
-            return reject_handle(HandleKind.DEVICE, HandleCause.INVARIANT)~;
+            abort("gpu: corrupt Device");
         }
 
         DeviceSlotControl pinned = control;
@@ -208,15 +208,15 @@ fn DeviceOperation? borrow_retained_device_operation(Device* device) @private {
     DeviceSlotControl control =
         (DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
     if (control.generation != device.generation) {
-        return reject_handle(HandleKind.DEVICE, HandleCause.STALE)~;
+        abort("gpu: stale Device");
     }
     if (control.state == DEVICE_SLOT_CLOSING) {
-        return reject_handle(HandleKind.DEVICE, HandleCause.DESTROY_OVERLAP)~;
+        abort("gpu: Device used concurrently with destroy_device");
     }
     if (control.state != DEVICE_SLOT_LIVE) {
-        return reject_handle(HandleKind.DEVICE, HandleCause.STALE)~;
+        abort("gpu: stale Device");
     }
-    if (control.pins == 0) return reject_handle(HandleKind.DEVICE, HandleCause.INVARIANT)~;
+    if (control.pins == 0) abort("gpu: corrupt Device");
     return {
         .slot   = slot,
         .data   = &slot.data,
@@ -360,10 +360,10 @@ fn void? validate_reported_resource_owner(
     HandleKind handle_kind,
 ) @private {
     if (operation == null || !operation.active) {
-        return reject_handle(handle_kind, HandleCause.INVARIANT)~;
+        abort("gpu: corrupt %s", handle_kind.type_name);
     }
     if (owner != resource_owner_tag(operation.data.resource_owner, kind)) {
-        return reject_handle(handle_kind, HandleCause.FOREIGN)~;
+        abort("gpu: foreign %s", handle_kind.type_name);
     }
 }
 
@@ -438,7 +438,7 @@ fn Device? register_device(
         runtime_data = require_runtime(retained_runtime)!;
         RuntimeData* adapter_data = require_adapter(adapter)!;
         if (adapter_data != runtime_data) {
-            return reject_handle(HandleKind.ADAPTER, HandleCause.MISMATCHED)~;
+            abort("gpu: mismatched Adapter");
         }
         if (runtime_data.live_device_count.load(AtomicOrdering.ACQUIRE) == 0) return gpu::INVALID_RESOURCE_STATE~;
         runtime = *retained_runtime;
@@ -451,7 +451,7 @@ fn Device? register_device(
         SurfaceData* surface_data = require_surface(presentation_surface)!;
         RuntimeData* surface_runtime = resolve_runtime(&surface_data.runtime);
         if (surface_runtime != runtime_data) {
-            return reject_handle(HandleKind.SURFACE, HandleCause.MISMATCHED)~;
+            abort("gpu: mismatched Surface");
         }
         registered_surface = *presentation_surface;
     }

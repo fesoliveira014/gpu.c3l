@@ -82,7 +82,6 @@ fn DeviceContextDesc default_device_context_desc() {
    @param desc : "Call-scoped settings; never modified. Null is invalid."
    @return "A complete context, or the original fault after best-effort cleanup." *>
 fn DeviceContext? create_device_context(DeviceContextDesc* desc) {
-    defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     validate_context_desc(desc)!;
     DeviceContextDesc settings = *desc;
     gpu::DeviceDesc device_desc = settings.device;
@@ -210,7 +209,7 @@ fn gpu::Surface? create_context_surface(
     // Reject a foreign callback result before any call could destroy it.
     gpu::internal::SurfaceData* data = gpu::internal::require_surface(&surface)!;
     if ((ulong)data.runtime != (ulong)*runtime) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.SURFACE, gpu::internal::HandleCause.MISMATCHED)~;
+        abort("gpu: mismatched Surface");
     }
     gpu::Adapter first_adapter = adapters.get(0)!;
     if (catch err = gpu::supports_presentation(&first_adapter, &surface)) {
@@ -241,7 +240,7 @@ fn gpu::Adapter? select_context_adapter(
             }
             return selected;
         }
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.ADAPTER, gpu::internal::HandleCause.FOREIGN)~;
+        abort("gpu: foreign Adapter");
     }
 
     gpu::Adapter best;

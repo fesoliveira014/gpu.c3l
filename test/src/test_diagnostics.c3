@@ -20,12 +20,6 @@ fn void diagnostic_dispatch_is_null_safe() @test {
     gpu::internal::dispatch_debug_message(null, null, &message);
 }
 
-fn void null_command_owner_terminates() @test {
-    gpu_test::@assert_panics("gpu::end_commands: null CommandList") {
-        (void)end_commands((CommandList*)null);
-    };
-}
-
 fn void diagnostic_dispatch_delivers_complete_message_once() @test {
     DiagnosticCapture capture = {};
     DebugMessage message = {

@@ -9,14 +9,47 @@ fn usz? indirect_argument_bytes(usz argument_size, uint count) @private {
     return argument_size * size_count;
 }
 
+<* Look up a command token's record without terminating: null unless the
+   record is live on a live device. *>
+fn gpu::internal::vk::CommandRecord* find_command_record(
+    gpu::internal::vk::CommandRecord* record,
+    uint generation,
+    uint device_identity,
+) @private {
+    gpu::internal::CommandTokenDeviceIdentity identity =
+        (gpu::internal::CommandTokenDeviceIdentity)device_identity;
+    if (record == null
+        || generation == 0
+        || identity.reserved != 0
+        || identity.generation == 0
+        || identity.index >= gpu::internal::MAX_DEVICES) {
+        return null;
+    }
+    gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[identity.index];
+    gpu::internal::DeviceSlotControl control =
+        (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+    if (control.generation != identity.generation
+        || control.state != gpu::internal::DEVICE_SLOT_LIVE) {
+        return null;
+    }
+    Device device = {
+        .index      = identity.index,
+        .generation = identity.generation,
+    };
+    if (record.device != device || record.identity.generation != generation) return null;
+    return record;
+}
+
 fn gpu::internal::vk::CommandRecord*? direct_command_record(
     gpu::internal::vk::CommandRecord* record,
     uint generation,
     uint device_identity,
     HandleKind kind,
 ) @private {
+    gpu::internal::vk::CommandRecord* found = find_command_record(record, generation, device_identity);
+    if (found != null) return found;
     if (record == null && generation == 0 && device_identity == 0) {
-        return reject_handle(kind, HandleCause.ZERO)~;
+        abort("gpu: zero %s", kind.type_name);
     }
     gpu::internal::CommandTokenDeviceIdentity identity =
         (gpu::internal::CommandTokenDeviceIdentity)device_identity;
@@ -25,34 +58,16 @@ fn gpu::internal::vk::CommandRecord*? direct_command_record(
         || identity.reserved != 0
         || identity.generation == 0
         || identity.index >= gpu::internal::MAX_DEVICES) {
-        return reject_handle(kind, HandleCause.MALFORMED)~;
+        abort("gpu: malformed %s", kind.type_name);
     }
-
-    gpu::internal::DeviceSlot* slot =
-        &gpu::internal::device_slots[identity.index];
+    gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[identity.index];
     gpu::internal::DeviceSlotControl control =
-        (gpu::internal::DeviceSlotControl)slot.control.load(
-            AtomicOrdering.ACQUIRE,
-        );
-    if (control.generation != identity.generation) {
-        return reject_handle(kind, HandleCause.STALE)~;
+        (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
+    if (control.generation == identity.generation
+        && control.state == gpu::internal::DEVICE_SLOT_CLOSING) {
+        abort("gpu: %s used concurrently with destroy_device", kind.type_name);
     }
-    if (control.state == gpu::internal::DEVICE_SLOT_CLOSING) {
-        return reject_handle(kind, HandleCause.DESTROY_OVERLAP)~;
-    }
-    if (control.state != gpu::internal::DEVICE_SLOT_LIVE) {
-        return reject_handle(kind, HandleCause.STALE)~;
-    }
-
-    Device device = {
-        .index      = identity.index,
-        .generation = identity.generation,
-    };
-    if (record.device != device
-        || record.identity.generation != generation) {
-        return reject_handle(kind, HandleCause.STALE)~;
-    }
-    return record;
+    abort("gpu: stale %s", kind.type_name);
 }
 
 <* Resolve a recording token. A record that has moved past recording was
@@ -60,7 +75,7 @@ fn gpu::internal::vk::CommandRecord*? direct_command_record(
 fn gpu::internal::vk::CommandRecord*? recording_command(
     CommandList* commands,
 ) @private {
-    if (commands == null) return reject_handle(HandleKind.COMMAND_LIST, HandleCause.NULL_POINTER)~;
+    if (commands == null) abort("gpu: null CommandList");
     gpu::internal::vk::CommandRecord* record = direct_command_record(
         commands.record,
         commands.generation,
@@ -74,22 +89,10 @@ fn gpu::internal::vk::CommandRecord*? recording_command(
         case gpu::internal::CommandState.EXECUTABLE:
         case gpu::internal::CommandState.SUBMITTING:
         case gpu::internal::CommandState.SUBMITTED:
-            return reject_handle(HandleKind.COMMAND_LIST, HandleCause.CONSUMED)~;
+            abort("gpu: consumed CommandList");
         default:
-            return reject_handle(HandleKind.COMMAND_LIST, HandleCause.STALE)~;
+            abort("gpu: stale CommandList");
     }
-}
-
-fn gpu::internal::vk::CommandRecord* required_recording_command(
-    CommandList* commands,
-    String operation,
-) @private {
-    gpu::internal::vk::CommandRecord*? record = recording_command(commands);
-    if (catch err = record) {
-        terminate_rejected_handle(err, operation);
-        abort("gpu::%s: invalid recording command: %s", operation, err);
-    }
-    return record;
 }
 
 <* Resolve an executable token. A submitted record was consumed through
@@ -98,7 +101,7 @@ fn gpu::internal::vk::CommandRecord*? executable_command(
     ExecutableCommandList* commands,
 ) @private {
     if (commands == null) {
-        return reject_handle(HandleKind.EXECUTABLE_COMMAND_LIST, HandleCause.NULL_POINTER)~;
+        abort("gpu: null ExecutableCommandList");
     }
     gpu::internal::vk::CommandRecord* record = direct_command_record(
         commands.record,
@@ -116,9 +119,9 @@ fn gpu::internal::vk::CommandRecord*? executable_record_phase(
         case gpu::internal::CommandState.EXECUTABLE:
             return record;
         case gpu::internal::CommandState.SUBMITTED:
-            return reject_handle(HandleKind.EXECUTABLE_COMMAND_LIST, HandleCause.CONSUMED)~;
+            abort("gpu: consumed ExecutableCommandList");
         case gpu::internal::CommandState.INACTIVE:
-            return reject_handle(HandleKind.EXECUTABLE_COMMAND_LIST, HandleCause.STALE)~;
+            abort("gpu: stale ExecutableCommandList");
         default:
             return gpu::COMMAND_RECORDING_ERROR~;
     }
@@ -147,7 +150,7 @@ fn void publish_executable_command_list(
 fn gpu::internal::DeviceOperation? command_operation(
     gpu::internal::vk::CommandRecord* record,
 ) @private {
-    if (record == null) return reject_handle(HandleKind.COMMAND_LIST, HandleCause.INVARIANT)~;
+    if (record == null) abort("gpu: corrupt CommandList");
     return gpu::internal::borrow_retained_device_operation(&record.device);
 }
 
@@ -167,10 +170,10 @@ fn void? validate_command_allocator(
     CommandAllocator* allocator,
 ) @private {
     if (allocator == null) {
-        return reject_handle(HandleKind.COMMAND_ALLOCATOR, HandleCause.NULL_POINTER)~;
+        abort("gpu: null CommandAllocator");
     }
     if (!allocator.handle.is_valid()) {
-        return reject_handle(HandleKind.COMMAND_ALLOCATOR, HandleCause.ZERO)~;
+        abort("gpu: zero CommandAllocator");
     }
     validate_queue(operation, &allocator.device, allocator.queue)!;
     gpu::internal::validate_resource_owner(

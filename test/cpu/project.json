@@ -29,7 +29,7 @@
     "../../gpu/internal/render_pass.c3",
     "../../gpu/internal/sync.c3",
     "../../gpu/internal/queue.c3",
-    "../../gpu/internal/rejection.c3",
+    "../../gpu/internal/handle_kind.c3",
     "../../gpu/internal/vk/internal.c3",
     "vk_stub.c3"
   ],
@@ -48,7 +48,6 @@
     "unit": {
       "type": "test",
       "sources": [
-        "../src/expect_panic.c3",
         "../src/test_internal_helpers.c3",
         "../src/test_vk_internal_helpers.c3",
         "../src/test_handles.c3",

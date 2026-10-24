@@ -24,7 +24,7 @@ fn void attachment_view_table_is_generation_checked() @test {
     assert(table.get(first)!!.width == 16,
         "attachment metadata remains immutable while live");
     table.free(first)!!;
-    assert(@catch(table.get(first)) == gpu::internal::HANDLE_REJECTED,
+    assert(table.find(first) == null,
         "destroyed attachment generations are stale");
 
     gpu::AttachmentViewHandle second = table.alloc(slot)!!;
@@ -45,7 +45,7 @@ fn void attachment_view_table_rejects_foreign_and_full_handles() @test {
 
     gpu::AttachmentViewHandle foreign = live;
     foreign.owner++;
-    assert(@catch(table.get(foreign)) == gpu::internal::HANDLE_REJECTED,
+    assert(table.find(foreign) == null,
         "foreign attachment owners cannot alias local slots");
 }
 

@@ -68,18 +68,19 @@ fn gpu::AttachmentViewHandle? AttachmentViewTable.alloc(
     };
 }
 
-fn AttachmentViewSlot*? AttachmentViewTable.get(
-    &self,
-    gpu::AttachmentViewHandle handle,
-) {
-    if (handle.owner != self.owner || handle.index >= self.slots.len) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.ATTACHMENT_VIEW, gpu::internal::HandleCause.FOREIGN)~;
-    }
-    AttachmentViewCell* cell = &self.slots[handle.index];
-    if (!cell.used || cell.generation != handle.generation) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.ATTACHMENT_VIEW, gpu::internal::HandleCause.STALE)~;
-    }
-    return &cell.value;
+<* Look up a slot without terminating: null unless `handle` is live. *>
+fn AttachmentViewSlot* AttachmentViewTable.find(&self, gpu::AttachmentViewHandle handle) {
+    if (handle.owner != self.owner || handle.index >= self.slots.len) return null;
+    if (!self.slots[handle.index].used
+        || self.slots[handle.index].generation != handle.generation) return null;
+    return &self.slots[handle.index].value;
+}
+
+fn AttachmentViewSlot*? AttachmentViewTable.get(&self, gpu::AttachmentViewHandle handle) {
+    if (handle.owner != self.owner) abort("gpu: foreign AttachmentViewHandle");
+    AttachmentViewSlot* slot = self.find(handle);
+    if (slot == null) abort("gpu: stale AttachmentViewHandle");
+    return slot;
 }
 
 fn void? AttachmentViewTable.free(

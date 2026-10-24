@@ -1413,7 +1413,7 @@ fn void adapter_desc_creation_reuses_runtime_discovery() @test {
             gpu::supports_device_desc(&adapter)!!;
         if (!support.supported) continue;
 
-        gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(&adapter);
+        gpu::internal::RuntimeData* runtime_data = gpu::internal::require_adapter(&adapter)!!;
         gpu::internal::vk::VkRuntimeState* runtime_state =
             runtime_data.state;
         gpu::Device device = gpu::create_device(&adapter)!!;
@@ -1840,7 +1840,7 @@ fn void runtime_devices_destroy_independently() @test {
             io::eprintfn("runtime_devices: distinct-adapter=N/A (one baseline-compatible adapter)");
         }
 
-        gpu::internal::RuntimeData* runtime_data = gpu::internal::resolve_adapter(&adapter);
+        gpu::internal::RuntimeData* runtime_data = gpu::internal::require_adapter(&adapter)!!;
         gpu::internal::vk::VkRuntimeState* runtime_state =
             runtime_data.state;
         gpu::Device first = gpu::create_device(&adapter)!!;

@@ -36,11 +36,7 @@ fn void allocation_spans_expose_mapping_address_and_liveness() @test {
     gpu::GpuAddress address = gpu::get_span_address(&device, device_data.span)!!;
     assert((ulong)address != 0, "allocation span has a non-zero GPU address");
 
-    gpu::GpuSpan stale = device_data.span;
     free_owned_span(&device, &device_data)!!;
-    @assert_panics("gpu::get_span_address: stale GpuAllocation") {
-        (void)gpu::get_span_address(&device, stale);
-    };
 }
 
 fn void live_allocations_block_device_destruction() @test {

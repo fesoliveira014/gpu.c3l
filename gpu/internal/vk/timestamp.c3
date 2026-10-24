@@ -130,19 +130,19 @@ fn gpu::TimestampPoolHandle? TimestampPoolTable.alloc(
     };
 }
 
-fn TimestampPoolSlot*? TimestampPoolTable.get(
-    &self,
-    gpu::TimestampPoolHandle handle,
-) {
-    if (handle.owner != self.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.TIMESTAMP_POOL, gpu::internal::HandleCause.FOREIGN)~;
-    uint index = handle.index;
-    if (index >= self.slots.len || !self.slots[index].used) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.TIMESTAMP_POOL, gpu::internal::HandleCause.STALE)~;
-    }
-    if (self.slots[index].generation != handle.generation) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.TIMESTAMP_POOL, gpu::internal::HandleCause.STALE)~;
-    }
-    return &self.slots[index].value;
+<* Look up a slot without terminating: null unless `handle` is live. *>
+fn TimestampPoolSlot* TimestampPoolTable.find(&self, gpu::TimestampPoolHandle handle) {
+    if (handle.owner != self.owner || handle.index >= self.slots.len) return null;
+    if (!self.slots[handle.index].used
+        || self.slots[handle.index].generation != handle.generation) return null;
+    return &self.slots[handle.index].value;
+}
+
+fn TimestampPoolSlot*? TimestampPoolTable.get(&self, gpu::TimestampPoolHandle handle) {
+    if (handle.owner != self.owner) abort("gpu: foreign TimestampPoolHandle");
+    TimestampPoolSlot* slot = self.find(handle);
+    if (slot == null) abort("gpu: stale TimestampPoolHandle");
+    return slot;
 }
 
 fn void? TimestampPoolTable.free(

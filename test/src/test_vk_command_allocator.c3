@@ -221,7 +221,7 @@ fn void command_allocator_table_recycles_generation_checked_slots() @test {
         "allocation publishes exact owner and slot state");
 
     table.free(first)!!;
-    assert(@catch(table.get(first)) == gpu::internal::HANDLE_REJECTED,
+    assert(table.find(first) == null,
         "freed allocator generation is stale");
     gpu::CommandAllocatorHandle second = table.alloc(allocator_slot(5))!!;
     assert(second.index == first.index
@@ -239,7 +239,7 @@ fn void command_allocator_table_rejects_foreign_owner() @test {
     defer mem::free(table.slots.ptr);
     gpu::CommandAllocatorHandle handle = table.alloc(allocator_slot(1))!!;
     handle.owner++;
-    assert(@catch(table.get(handle)) == gpu::internal::HANDLE_REJECTED,
+    assert(table.find(handle) == null,
         "allocator table rejects a coincident foreign slot");
 }
 

@@ -672,7 +672,7 @@ fn gpu::Device? create_vk_device_with_probe(
         gpu::internal::normalize_device_desc(device_desc)!;
     gpu::internal::RuntimeData* runtime_data = gpu::internal::require_adapter(adapter)!;
     VkRuntimeState* runtime_state = runtime_data.state;
-    if (runtime_state == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.ADAPTER, gpu::internal::HandleCause.INVARIANT)~;
+    if (runtime_state == null) abort("gpu: corrupt Adapter");
 
     VkAdapterState* adapter_state = &runtime_state.adapters[adapter.adapter_index];
     gpu::Surface requested_surface = normalized.surface;
@@ -682,7 +682,7 @@ fn gpu::Device? create_vk_device_with_probe(
             gpu::internal::require_surface(&requested_surface)!;
         gpu::internal::RuntimeData* surface_runtime =
             gpu::internal::resolve_runtime(&surface_data.runtime);
-        if (surface_runtime != runtime_data) return gpu::internal::reject_handle(gpu::internal::HandleKind.SURFACE, gpu::internal::HandleCause.MISMATCHED)~;
+        if (surface_runtime != runtime_data) abort("gpu: mismatched Surface");
         presentation_surface = (vk::SurfaceKHR)surface_data.backend_surface;
         if (!runtime_state.instance_capabilities.surface_maintenance) {
             return gpu::UNSUPPORTED_FEATURE~;
@@ -716,8 +716,8 @@ fn void? validate_device_baseline_support(
     VkRuntimeState* runtime_state,
     uint adapter_index,
 ) {
-    if (runtime_state == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.ADAPTER, gpu::internal::HandleCause.INVARIANT)~;
-    if (adapter_index >= runtime_state.adapters.len) return gpu::internal::reject_handle(gpu::internal::HandleKind.ADAPTER, gpu::internal::HandleCause.INVARIANT)~;
+    if (runtime_state == null) abort("gpu: corrupt Adapter");
+    if (adapter_index >= runtime_state.adapters.len) abort("gpu: corrupt Adapter");
 
     VkShaderHeapState shader_heap =
         resolve_shader_heap_state(&runtime_state.config)!;

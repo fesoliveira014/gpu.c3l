@@ -22,20 +22,27 @@ struct RuntimeData @private {
 RuntimeData[MAX_RUNTIMES] runtime_slots @private;
 
 fn RuntimeData*? require_runtime(Runtime* runtime) @private {
-    if (runtime == null) return reject_handle(HandleKind.RUNTIME, HandleCause.NULL_POINTER)~;
-    if (!runtime.is_valid()) return reject_handle(HandleKind.RUNTIME, HandleCause.ZERO)~;
+    if (runtime == null) abort("gpu: null Runtime");
+    if (!runtime.is_valid()) abort("gpu: zero Runtime");
     if (runtime.reserved != 0 || runtime.index >= MAX_RUNTIMES) {
-        return reject_handle(HandleKind.RUNTIME, HandleCause.MALFORMED)~;
+        abort("gpu: malformed Runtime");
     }
     RuntimeData* data = &runtime_slots[runtime.index];
     if (!data.used || data.generation != runtime.generation) {
-        return reject_handle(HandleKind.RUNTIME, HandleCause.STALE)~;
+        abort("gpu: stale Runtime");
     }
     return data;
 }
 
+<* Look up a runtime without terminating: null unless it is live. *>
 fn RuntimeData* resolve_runtime(Runtime* runtime) @private {
-    return require_runtime(runtime) ?? null;
+    if (runtime == null || !runtime.is_valid()
+        || runtime.reserved != 0 || runtime.index >= MAX_RUNTIMES) {
+        return null;
+    }
+    RuntimeData* data = &runtime_slots[runtime.index];
+    if (!data.used || data.generation != runtime.generation) return null;
+    return data;
 }
 
 fn Runtime? register_runtime(

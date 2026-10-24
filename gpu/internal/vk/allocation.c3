@@ -117,16 +117,19 @@ fn gpu::GpuAllocation? AllocationTable.alloc(&self, AllocationSlot value) {
     };
 }
 
+<* Look up a slot without terminating: null unless `allocation` is live. *>
+fn AllocationSlot* AllocationTable.find(&self, gpu::GpuAllocation allocation) {
+    if (allocation.owner != self.owner || allocation.index >= self.slots.len) return null;
+    if (!self.slots[allocation.index].used
+        || self.slots[allocation.index].generation != allocation.generation) return null;
+    return &self.slots[allocation.index].value;
+}
+
 fn AllocationSlot*? AllocationTable.get(&self, gpu::GpuAllocation allocation) {
-    if (allocation.owner != self.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.ALLOCATION, gpu::internal::HandleCause.FOREIGN)~;
-    uint index = allocation.index;
-    if (index >= self.slots.len || !self.slots[index].used) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.ALLOCATION, gpu::internal::HandleCause.STALE)~;
-    }
-    if (self.slots[index].generation != allocation.generation) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.ALLOCATION, gpu::internal::HandleCause.STALE)~;
-    }
-    return &self.slots[index].value;
+    if (allocation.owner != self.owner) abort("gpu: foreign GpuAllocation");
+    AllocationSlot* slot = self.find(allocation);
+    if (slot == null) abort("gpu: stale GpuAllocation");
+    return slot;
 }
 
 fn void? AllocationTable.free(&self, gpu::GpuAllocation allocation) {
@@ -652,8 +655,8 @@ fn AllocationSlot*? resolve_mapped_allocation_span(
     VkDeviceState* state,
     gpu::GpuSpan* span,
 ) {
-    if (state == null || span == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.GPU_SPAN, gpu::internal::HandleCause.INVARIANT)~;
-    if (span.owner != state.allocations.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.GPU_SPAN, gpu::internal::HandleCause.FOREIGN)~;
+    if (state == null || span == null) abort("gpu: corrupt GpuSpan");
+    if (span.owner != state.allocations.owner) abort("gpu: foreign GpuSpan");
     gpu::GpuAllocation allocation = {
         .owner      = span.owner,
         .index      = span.index,
@@ -675,7 +678,7 @@ fn NonCoherentRange? mapped_allocation_range(
     gpu::GpuSpan* span,
 ) {
     if (state == null || slot == null || span == null) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.GPU_SPAN, gpu::internal::HandleCause.INVARIANT)~;
+        abort("gpu: corrupt GpuSpan");
     }
     vk::DeviceSize native_size = slot.backing.allocation_info.size;
     usz allocation_size = (usz)native_size;

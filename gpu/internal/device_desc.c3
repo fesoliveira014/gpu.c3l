@@ -115,7 +115,7 @@ fn DeviceSupport? evaluate_device_desc_support(
         SurfaceData* surface_data = require_surface(&normalized.surface)!;
         RuntimeData* surface_runtime = resolve_runtime(&surface_data.runtime);
         if (surface_runtime != data) {
-            return reject_handle(HandleKind.SURFACE, HandleCause.MISMATCHED)~;
+            abort("gpu: mismatched Surface");
         }
         backend_surface = surface_data.backend_surface;
         if (!gpu::internal::vk::vk_supports_presentation(

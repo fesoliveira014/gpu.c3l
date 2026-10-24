@@ -87,14 +87,28 @@ fn gpu::GpuAddress test_span_address(gpu::Device* device, gpu::GpuSpan span) {
 <* Discard a recording token unless another copy already consumed it. *>
 fn void? discard_test_commands(gpu::CommandList* commands) {
     if (commands == null || !commands.is_valid()) return;
-    if (@catch(gpu::internal::recording_command(commands))) return;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::find_command_record(
+        commands.record,
+        commands.generation,
+        commands.device_identity,
+    );
+    if (record == null
+        || (record.state != gpu::internal::CommandState.RECORDING
+            && record.state != gpu::internal::CommandState.RECORDING_RENDER_PASS)) {
+        return;
+    }
     return gpu::discard_commands(commands);
 }
 
 <* Discard an executable token unless it was submitted or discarded through a copy. *>
 fn void? discard_test_executable(gpu::ExecutableCommandList* commands) {
     if (commands == null || !commands.is_valid()) return;
-    if (@catch(gpu::internal::executable_command(commands))) return;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::find_command_record(
+        commands.record,
+        commands.generation,
+        commands.device_identity,
+    );
+    if (record == null || record.state != gpu::internal::CommandState.EXECUTABLE) return;
     return gpu::discard_executable_commands(commands);
 }
 

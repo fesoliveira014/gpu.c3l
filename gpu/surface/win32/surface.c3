@@ -17,7 +17,6 @@ fn gpu::Surface? create_surface(
     InstanceHandle instance,
     WindowHandle window,
 ) {
-    defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     void* native_instance = (void*)instance;
     void* native_window = (void*)window;
     if (native_instance == null || native_window == null) {

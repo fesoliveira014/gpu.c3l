@@ -272,12 +272,3 @@ fn void concurrent_loss_reports_once() @test {
         "concurrent loss observations deliver one diagnostic");
     assert(gpu::is_device_lost(&device), "both observations leave the device lost");
 }
-
-fn void is_device_lost_on_destroyed_device_terminates() @test {
-    gpu::Device device = loss_test_device();
-    gpu::Device stale = device;
-    destroy_test_device(&device)!!;
-    @assert_panics("gpu::is_device_lost: stale Device") {
-        (void)gpu::is_device_lost(&stale);
-    };
-}

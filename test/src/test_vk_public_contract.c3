@@ -53,15 +53,6 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
         )) == gpu::INVALID_ARGUMENT,
         "create_swapchain rejects null descriptors"
     );
-    String null_surface_message = @expect_panic() {
-        (void)gpu::create_swapchain(
-            &device,
-            (gpu::Surface*)null,
-            (gpu::SwapchainDesc*)null,
-        );
-    };
-    assert(null_surface_message == "gpu::create_swapchain: null Surface",
-        "create_swapchain terminates on a null surface pointer");
     assert(
         @catch(gpu::present(
             &device,

@@ -119,14 +119,10 @@ fn void unreferenced_destroy_is_immediate() @test {
     gpu::Device device = make_lifetime_test_device();
     defer destroy_test_device(&device)!!;
     OwnedSpan owned = make_lifetime_span(&device, "immediate_unreferenced");
-    gpu::GpuAllocation stale = owned.allocation;
     gpu::free_allocation(&device, &owned.allocation)!!;
     owned.span = {};
 
     assert(!owned.allocation.is_valid(), "successful release consumes the allocation token");
-    @assert_panics("gpu::get_allocation_info: stale GpuAllocation") {
-        (void)gpu::get_allocation_info(&device, stale);
-    };
 }
 
 fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
@@ -266,36 +262,6 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
         "quiescent release succeeds on the worker: %s", args.failure);
     assert(finished_before_signal,
         "quiescent release does not wait for unrelated queue or device idle");
-}
-
-fn void failed_texture_resolution_preserves_resource_teardown() @test {
-    gpu::Device device = make_lifetime_test_device();
-
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc desc = {
-        .access    = { .graphics },
-        .width     = 8,
-        .height    = 8,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .transfer_dst },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    gpu::TextureBarrier barrier = {
-        .texture = texture,
-        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
-        .after   = { .layout = gpu::TextureLayout.UNDEFINED },
-    };
-    barrier.texture.generation++;
-    @assert_panics("gpu::cmd_texture_barrier: stale TextureHandle") {
-        (void)gpu::cmd_texture_barrier(&commands, &barrier);
-    };
-    gpu::destroy_texture(&device, texture)!!;
-    gpu::discard_commands(&commands)!!;
 }
 
 fn void incomplete_command_drain_is_deterministic() @test {

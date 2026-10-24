@@ -17,7 +17,6 @@ fn gpu::Surface? create_surface(
     DisplayHandle display,
     WindowHandle window,
 ) {
-    defer (catch err) gpu::internal::@terminate_rejected_handle(err);
     void* native_display = (void*)display;
     ulong native_window = (ulong)window;
     if (native_display == null || native_window == 0) {

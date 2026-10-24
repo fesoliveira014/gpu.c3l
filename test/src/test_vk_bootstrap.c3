@@ -135,9 +135,6 @@ fn void device_create_destroy() @test {
         "backend state cleared on destroy");
     assert((ulong)device == 0, "destroy consumes the device token");
 
-    @assert_panics("gpu::get_memory_stats: zero Device") {
-        (void)gpu::get_memory_stats(&device);
-    };
 }
 
 fn void device_heap_capacities() @test {

@@ -114,12 +114,19 @@ fn gpu::SwapchainHandle? SwapchainTable.alloc(&self, SwapchainSlot value) {
     };
 }
 
+<* Look up a slot without terminating: null unless `h` is live. *>
+fn SwapchainSlot* SwapchainTable.find(&self, gpu::SwapchainHandle h) {
+    if (h.owner != self.owner || h.index >= self.slots.len) return null;
+    if (!self.slots[h.index].used
+        || self.slots[h.index].generation != h.generation) return null;
+    return &self.slots[h.index].value;
+}
+
 fn SwapchainSlot*? SwapchainTable.get(&self, gpu::SwapchainHandle h) {
-    if (h.owner != self.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.SWAPCHAIN, gpu::internal::HandleCause.FOREIGN)~;
-    uint idx = h.index;
-    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::internal::reject_handle(gpu::internal::HandleKind.SWAPCHAIN, gpu::internal::HandleCause.STALE)~;
-    if (self.slots[idx].generation != h.generation) return gpu::internal::reject_handle(gpu::internal::HandleKind.SWAPCHAIN, gpu::internal::HandleCause.STALE)~;
-    return &self.slots[idx].value;
+    if (h.owner != self.owner) abort("gpu: foreign SwapchainHandle");
+    SwapchainSlot* slot = self.find(h);
+    if (slot == null) abort("gpu: stale SwapchainHandle");
+    return slot;
 }
 
 fn void? SwapchainTable.free(&self, gpu::SwapchainHandle h) {
@@ -209,7 +216,7 @@ fn gpu::SwapchainReadiness? make_swapchain_readiness(
         || swapchain.generation == 0
         || swapchain.generation > READINESS_SWAPCHAIN_GENERATION_MASK
         || acquisition == 0) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.SWAPCHAIN_READINESS, gpu::internal::HandleCause.INVARIANT)~;
+        abort("gpu: corrupt SwapchainReadiness");
     }
     return {
         .device = device,
@@ -242,7 +249,7 @@ fn gpu::SwapchainHandle? swapchain_handle_from_readiness(
     uint generation = swapchain_readiness_generation(readiness);
     uint acquisition = swapchain_readiness_acquisition(readiness);
     if (!readiness.is_valid() || generation == 0 || acquisition == 0) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.SWAPCHAIN_READINESS, gpu::internal::HandleCause.MALFORMED)~;
+        abort("gpu: malformed SwapchainReadiness");
     }
     return {
         .owner = gpu::internal::resource_owner_tag(
@@ -962,10 +969,11 @@ fn void release_swapchain_images_locked(
     SwapchainSlot* slot,
 ) @private {
     for (uint i = 0; i < slot.image_count; i++) {
-        if (try state.attachment_views.get(slot.attachment_views[i])) {
+        if (state.attachment_views.find(slot.attachment_views[i]) != null) {
             (void)state.attachment_views.free(slot.attachment_views[i]);
         }
-        if (try texture = state.textures.get(slot.textures[i])) {
+        TextureSlot* texture = state.textures.find(slot.textures[i]);
+        if (texture != null) {
             vk::destroy_image_view(state.device, texture.default_view, null);
             destroy_cached_views(state, texture);
             (void)state.textures.free(slot.textures[i]);
@@ -1468,7 +1476,7 @@ fn void? vk_present_with(
 ) {
     if (!image.readiness.is_valid()
         || image.readiness.device != state.owner) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.ACQUIRED_IMAGE, gpu::internal::HandleCause.FOREIGN)~;
+        abort("gpu: foreign AcquiredImage");
     }
     gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
         state,

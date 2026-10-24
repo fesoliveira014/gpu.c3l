@@ -45,10 +45,9 @@ discarding or releasing the zero handle is a no-op. One-shot tokens
 receives a handle or token that is zero (where zero does not mean "none"),
 stale, malformed, from another device or runtime, or already consumed; a null
 object pointer; or two handles that do not belong together. The panic message
-names the call and the handle type, for example `gpu::create_texture_view:
-stale TextureHandle`. These checks are not compiled out. When a debug callback
-is installed, diagnostics that describe the rejected handle are delivered
-first, with `has_fault` false.
+names the handle type, for example `gpu: stale TextureHandle`, and the
+backtrace that follows shows the call. These checks are not compiled out;
+builds that turn panic messages off terminate without printing them.
 
 **Device loss.** Calls on a lost device keep succeeding without GPU effect:
 submissions complete immediately, waits return, and presentation consumes

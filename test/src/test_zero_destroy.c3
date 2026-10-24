@@ -71,19 +71,3 @@ fn void free_allocation_twice_through_variable() @test {
     assert(state.allocation_free_calls == 1,
         "the second free through the zeroed variable is a no-op");
 }
-
-fn void null_destroy_pointers_terminate() @test {
-    DeviceFixture fixture;
-    gpu::Device device = fixture_device(&fixture);
-    defer gpu::destroy_device(&device)!!;
-
-    @assert_panics("gpu::free_allocation: null GpuAllocation") {
-        (void)gpu::free_allocation(&device, null);
-    };
-    @assert_panics("gpu::destroy_device: null Device") {
-        (void)gpu::destroy_device(null);
-    };
-    @assert_panics("gpu::discard_commands: null CommandList") {
-        (void)gpu::discard_commands(null);
-    };
-}

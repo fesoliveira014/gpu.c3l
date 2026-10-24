@@ -128,8 +128,8 @@ fn fault report_contract_failure(
         .severity       = gpu::DebugMessageSeverity.ERROR,
         .category       = { .public_contract },
         .operation      = operation,
-        .has_fault      = public_fault != gpu::internal::HANDLE_REJECTED,
-        .public_fault   = public_fault != gpu::internal::HANDLE_REJECTED ? public_fault : {},
+        .has_fault      = true,
+        .public_fault   = public_fault,
         .resource       = {
             .kind                = resource_kind,
             .has_public_identity = has_public_identity,

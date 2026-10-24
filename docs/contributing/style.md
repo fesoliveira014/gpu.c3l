@@ -69,11 +69,12 @@ when no category applies.
 
 Faults are for conditions an application can act on. A rejected handle,
 null object pointer, or broken internal invariant is a programming error:
-return `gpu::internal::reject_handle(kind, cause)~` from internal code, and
-let the public boundary terminate with a message naming the call and the
-handle type. A public function with no remaining fault returns `T` or
-`void` and unwraps its single internal call with
-`gpu::internal::@require_valid`.
+`abort("gpu: stale TextureHandle")` where it is detected; the panic backtrace
+shows the public call. A check that must not terminate, such as a liveness
+probe, uses the non-terminating lookup (`find` on a slot table,
+`resolve_runtime`, `find_command_record`), which returns null. A public
+function with no remaining fault returns `T` or `void` and unwraps internal
+optionals with `!!`.
 
 ## 7. Handles
 

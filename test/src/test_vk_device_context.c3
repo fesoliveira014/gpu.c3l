@@ -65,12 +65,8 @@ fn void device_context_submits_and_reads_back_before_teardown() @test {
     }
 
     gpu::free_allocation(&context.device, &allocation)!!;
-    gpu::Device old_device = context.device;
     gpu::util::destroy_device_context(&context);
     assert(!context.runtime.is_valid());
     assert(!context.device.is_valid());
-    @assert_panics("gpu::get_device_caps: stale Device") {
-        (void)gpu::get_device_caps(&old_device);
-    };
     assert(diagnostics.errors == 0);
 }

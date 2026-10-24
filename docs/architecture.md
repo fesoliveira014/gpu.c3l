@@ -84,8 +84,8 @@ cleanup with its own failure contract.
   Destroying the zero handle is a no-op.
 - **Handle misuse terminates.** A zero, stale, malformed, foreign, or consumed
   handle, or a null object pointer, terminates the process with a message
-  naming the call and the handle type. Applications do not handle it as a
-  fault.
+  naming the handle type and a backtrace to the call. Applications do not
+  handle it as a fault.
 - **Completion is the only fence.** `submit` returns a `CompletionPoint`.
   Reusing memory, reusing a command allocator, destroying a resource, and
   freeing an allocation all wait on the point that covers the last use.

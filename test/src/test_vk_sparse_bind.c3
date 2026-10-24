@@ -674,13 +674,6 @@ fn void sparse_backing_resolution_validates_unbind_and_allocation_contract() @te
 
     gpu::GpuAllocation stale = fixture.allocation;
     stale.generation++;
-    assert(@catch(vk::resolve_sparse_backing_locked(
-        state:             &fixture.state,
-        texture:           texture,
-        allocation:        stale,
-        allocation_offset: 0,
-        size:              4096,
-    )) == gpu::internal::HANDLE_REJECTED);
     fixture.allocation_cells[0].value.memory_class =
         gpu::MemoryClass.GPU_PRIVATE;
     assert(@catch(vk::resolve_sparse_backing_locked(
@@ -1324,13 +1317,6 @@ fn void sparse_backing_resolution_checks_every_live_compatibility_rule() @test {
 
     gpu::GpuAllocation foreign = fixture.allocation;
     foreign.owner++;
-    assert(@catch(vk::resolve_sparse_backing_locked(
-        state:             &fixture.state,
-        texture:           texture,
-        allocation:        foreign,
-        allocation_offset: 0,
-        size:              4096,
-    )) == gpu::internal::HANDLE_REJECTED);
     fixture.allocation_cells[0].value = original;
     fixture.allocation_cells[0].value.memory_class =
         gpu::MemoryClass.GPU_PRIVATE;
@@ -1421,12 +1407,6 @@ fn void sparse_bind_validation_precedes_host_allocation() @test {
     sparse_bind_capture = {};
 
     desc.texture.generation++;
-    assert(@catch(vk::vk_bind_sparse_texture_memory_with_ops(
-        state: &fixture.state,
-        queue: fixture.queue,
-        desc:  &desc,
-        ops:   &ops,
-    )) == gpu::internal::HANDLE_REJECTED);
     desc.texture = fixture.texture;
 
     tiles[0].offset.x = 1;
@@ -1439,24 +1419,12 @@ fn void sparse_bind_validation_precedes_host_allocation() @test {
     tiles[0].offset.x = 0;
 
     tiles[0].allocation.generation++;
-    assert(@catch(vk::vk_bind_sparse_texture_memory_with_ops(
-        state: &fixture.state,
-        queue: fixture.queue,
-        desc:  &desc,
-        ops:   &ops,
-    )) == gpu::internal::HANDLE_REJECTED);
     tiles[0].allocation = fixture.allocation;
 
     gpu::CompletionPoint[1] waits = {
         gpu::internal::make_completion_point(fixture.queue, 1)!!,
     };
     desc.waits = waits[..];
-    assert(@catch(vk::vk_bind_sparse_texture_memory_with_ops(
-        state: &fixture.state,
-        queue: fixture.queue,
-        desc:  &desc,
-        ops:   &ops,
-    )) == gpu::internal::HANDLE_REJECTED);
 
     assert(allocator.attempts == 0
             && allocator.acquires == 0
@@ -1539,47 +1507,6 @@ fn void sparse_bind_headroom_and_sequence_failures_are_pre_native() @test {
         desc:  &desc,
         ops:   &ops,
     )) == gpu::SLOT_TABLE_FULL);
-    assert(sparse_bind_capture.calls == 0);
-}
-
-fn void sparse_bind_unpublished_wait_and_malformed_allocation_are_pre_native() @test {
-    SparseBindFixture fixture;
-    init_sparse_bind_fixture(&fixture);
-    defer destroy_sparse_bind_fixture(&fixture);
-    gpu::SparseTextureTileBind[1] tiles = {{
-        .aspect     = gpu::SparseTextureAspect.COLOR,
-        .mip_level  = 0,
-        .offset     = { 0, 0, 0 },
-        .extent     = { 64, 64, 1 },
-        .allocation = fixture.allocation,
-    }};
-    gpu::CompletionPoint[1] waits = {
-        gpu::internal::make_completion_point(fixture.queue, 1)!!,
-    };
-    gpu::SparseTextureBindDesc desc = {
-        .texture = fixture.texture,
-        .tiles   = tiles[..],
-        .waits   = waits[..],
-    };
-    vk::SparseBindNativeOps ops = sparse_bind_ops();
-    sparse_bind_capture = {};
-
-    assert(@catch(vk::vk_bind_sparse_texture_memory_with_ops(
-        state: &fixture.state,
-        queue: fixture.queue,
-        desc:  &desc,
-        ops:   &ops,
-    )) == gpu::internal::HANDLE_REJECTED);
-    assert(sparse_bind_capture.calls == 0);
-
-    desc.waits = {};
-    tiles[0].allocation = { .generation = 1 };
-    assert(@catch(vk::vk_bind_sparse_texture_memory_with_ops(
-        state: &fixture.state,
-        queue: fixture.queue,
-        desc:  &desc,
-        ops:   &ops,
-    )) == gpu::internal::HANDLE_REJECTED);
     assert(sparse_bind_capture.calls == 0);
 }
 

@@ -45,8 +45,8 @@ fn fault report_wsi_backend_failure(
         .severity             = gpu::DebugMessageSeverity.ERROR,
         .category             = { .backend },
         .operation            = context.operation,
-        .has_fault            = public_fault != gpu::internal::HANDLE_REJECTED,
-        .public_fault         = public_fault != gpu::internal::HANDLE_REJECTED ? public_fault : {},
+        .has_fault            = true,
+        .public_fault         = public_fault,
         .resource             = {
             .kind                = gpu::DebugResourceKind.SWAPCHAIN,
             .has_public_identity = context.has_public_identity,
@@ -102,16 +102,7 @@ fn SwapchainSlot*? resolve_swapchain_for_operation(
     WsiDiagnosticContext* context,
     gpu::SwapchainHandle handle,
 ) {
-    SwapchainSlot*? resolved = context.state.presentation.swapchains.get(handle);
-    if (catch lookup_fault = resolved) {
-        return report_wsi_contract(
-            context:        context,
-            public_fault:   lookup_fault,
-            rejected_field: "SwapchainHandle",
-            invariant:      "must identify a live swapchain",
-        )~;
-    }
-    SwapchainSlot* slot = resolved;
+    SwapchainSlot* slot = context.state.presentation.swapchains.get(handle)!;
     context.has_public_identity = true;
     context.index = handle.index;
     context.generation = handle.generation;
@@ -123,15 +114,9 @@ fn TextureSlot*? resolve_swapchain_texture_for_operation(
     WsiDiagnosticContext* context,
     gpu::TextureHandle handle,
 ) {
-    TextureSlot*? resolved = context.state.textures.get(handle);
-    if (catch lookup_fault = resolved) {
-        return report_wsi_backend_failure(
-            context:      context,
-            public_fault: lookup_fault,
-            backend_text: "swapchain image table invariant failed",
-        )~;
-    }
-    return resolved;
+    TextureSlot* slot = context.state.textures.find(handle);
+    if (slot == null) abort("gpu: corrupt SwapchainHandle");
+    return slot;
 }
 
 fn void? check_swapchain_acquire_lifecycle(

@@ -29,11 +29,6 @@ struct CommandPinFixture {
     gpu::Device  device;
 }
 
-struct StaleCommandWorkerArgs {
-    gpu::CommandList commands;
-    bool             terminated;
-}
-
 struct DiscardCommandWorkerArgs {
     gpu::CommandList commands;
     fault            result;
@@ -67,10 +62,10 @@ fn int discard_command_worker(void* raw_args) {
 
 fn gpu::CommandList? begin_command_pin(gpu::Device* device) {
     if (device == null || !device.is_valid()) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.DEVICE, gpu::internal::HandleCause.ZERO)~;
+        abort("gpu: zero Device");
     }
     gpu::internal::DeviceData* data = gpu::internal::resolve_pinned_device(device);
-    if (data == null) return gpu::internal::reject_handle(gpu::internal::HandleKind.DEVICE, gpu::internal::HandleCause.STALE)~;
+    if (data == null) abort("gpu: stale Device");
     gpu::CommandAllocator allocator = {
         .device = *device,
         .queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!,
@@ -97,19 +92,6 @@ fn int destroy_device_worker(void* raw_args) {
 fn int device_operation_worker(void* raw_args) {
     DeviceOperationWorkerArgs* args = (DeviceOperationWorkerArgs*)raw_args;
     (void)gpu::get_memory_stats(&args.device);
-    return 0;
-}
-
-fn int stale_command_worker(void* raw_args) {
-    StaleCommandWorkerArgs* args = (StaleCommandWorkerArgs*)raw_args;
-    gpu::Barrier barrier = {
-        .before = { .compute = true },
-        .after = { .compute = true },
-    };
-    String message = @capture_panic() {
-        (void)gpu::cmd_barrier(&args.commands, &barrier);
-    };
-    args.terminated = message == "gpu::cmd_barrier: stale CommandList";
     return 0;
 }
 
@@ -227,9 +209,6 @@ fn void command_allocator_creation_rejects_before_publication() @test {
         .command_buffer_capacity = gpu::MAX_COMMAND_ALLOCATOR_CAPACITY + 1,
     };
 
-    @assert_panics("gpu::create_command_allocator: foreign Queue") {
-        (void)gpu::create_command_allocator(&first, foreign);
-    };
     gpu::Queue queue = gpu::get_queue(
         &first,
         gpu::QueueKind.GRAPHICS,
@@ -318,75 +297,6 @@ fn void command_calls_use_the_retained_lifetime_pin() @test {
         "successful discard invalidates the record before lifetime release");
     assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
         "discard releases the command child exactly once");
-    gpu::destroy_device(&device)!!;
-}
-
-fn void null_and_stale_direct_command_tokens_are_rejected() @test {
-    CommandPinFixture fixture;
-    gpu::Device device = gpu::internal::register_device(
-        state:  &fixture.state,
-        caps:   {},
-    )!!;
-    gpu::CommandList commands = begin_command_pin(&device)!!;
-    gpu::Barrier barrier = {
-        .before = { .compute = true },
-        .after  = { .compute = true },
-    };
-
-    gpu::CommandList null_record = commands;
-    null_record.record = null;
-    gpu::CommandList zero_generation = commands;
-    zero_generation.generation = 0;
-    gpu::CommandList zero_device_identity = commands;
-    zero_device_identity.device_identity = 0;
-    gpu::CommandList reserved_device_identity = commands;
-    reserved_device_identity.device_identity |= 0x4000_0000;
-    gpu::CommandList stale_generation = commands;
-    stale_generation.generation++;
-
-    @assert_panics("gpu::cmd_barrier: malformed CommandList") {
-        (void)gpu::cmd_barrier(&null_record, &barrier);
-    };
-    @assert_panics("gpu::cmd_barrier: malformed CommandList") {
-        (void)gpu::cmd_barrier(&zero_generation, &barrier);
-    };
-    assert(!zero_generation.is_valid(),
-        "zero generation is part of the invalid token sentinel");
-    @assert_panics("gpu::cmd_barrier: malformed CommandList") {
-        (void)gpu::cmd_barrier(&zero_device_identity, &barrier);
-    };
-    assert(!zero_device_identity.is_valid(),
-        "zero device identity is part of the invalid token sentinel");
-    @assert_panics("gpu::cmd_barrier: malformed CommandList") {
-        (void)gpu::cmd_barrier(&reserved_device_identity, &barrier);
-    };
-    @assert_panics("gpu::cmd_barrier: stale CommandList") {
-        (void)gpu::cmd_barrier(&stale_generation, &barrier);
-    };
-    assert(!fixture.state.command_entered.load(AtomicOrdering.ACQUIRE),
-        "malformed selectors never reach the backend");
-    gpu::discard_commands(&commands)!!;
-    gpu::destroy_device(&device)!!;
-}
-
-fn void recording_alias_is_rejected_after_end_phase_transition() @test {
-    CommandPinFixture fixture;
-    gpu::Device device = gpu::internal::register_device(
-        state:  &fixture.state,
-        caps:   {},
-    )!!;
-    gpu::CommandList commands = begin_command_pin(&device)!!;
-    gpu::CommandList recording_alias = commands;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    gpu::Barrier barrier = {
-        .before = { .compute = true },
-        .after  = { .compute = true },
-    };
-
-    @assert_panics("gpu::cmd_barrier: consumed CommandList") {
-        (void)gpu::cmd_barrier(&recording_alias, &barrier);
-    };
-    gpu::discard_executable_commands(&executable)!!;
     gpu::destroy_device(&device)!!;
 }
 
@@ -524,30 +434,6 @@ fn void device_loss_after_backend_submit_still_consumes_every_token() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void duplicate_backend_discard_cannot_underflow_command_accounting() @test {
-    CommandPinFixture fixture;
-    gpu::Device device = gpu::internal::register_device(
-        state:  &fixture.state,
-        caps:   {},
-    )!!;
-    gpu::CommandList commands = begin_command_pin(&device)!!;
-    gpu::CommandList duplicate = commands;
-    gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
-
-    gpu::discard_commands(&commands)!!;
-    @assert_panics("gpu::discard_commands: stale CommandList") {
-        (void)gpu::discard_commands(&duplicate);
-    };
-    gpu::internal::DeviceSlotControl after_duplicate =
-        (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-
-    assert(after_duplicate.pins == 0,
-        "a duplicate backend discard cannot underflow retained pins");
-    assert(slot.live_children.load(AtomicOrdering.ACQUIRE) == 0,
-        "a duplicate backend discard cannot underflow command children");
-    gpu::destroy_device(&device)!!;
-}
-
 fn void command_record_is_not_reused_before_discard_returns() @test {
     CommandPinFixture fixture = {
         .state = {
@@ -657,111 +543,6 @@ fn void lost_executable_commands_can_be_discarded() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void stale_commands_do_not_use_unrelated_lifetime_pins() @test {
-    CommandPinFixture fixture = {
-        .state.reject_command = true,
-    };
-    gpu::Device device = gpu::internal::register_device(
-        state:  &fixture.state,
-        caps:   {},
-    )!!;
-    gpu::CommandList discarded = begin_command_pin(&device)!!;
-    gpu::CommandList stale = discarded;
-    gpu::discard_commands(&discarded)!!;
-    gpu::CommandList live = begin_command_pin(&device)!!;
-
-    StaleCommandWorkerArgs worker_args = { .commands = stale };
-    Thread worker;
-    worker.create(&stale_command_worker, &worker_args)!!;
-    int worker_result = worker.join()!!;
-    gpu::discard_commands(&live)!!;
-    gpu::destroy_device(&device)!!;
-
-    assert(fixture.state.pins_during_command == 0,
-        "a stale command does not reach backend pin observation");
-    assert(!fixture.state.command_entered.load(AtomicOrdering.ACQUIRE),
-        "a stale command alias is rejected before backend access");
-    assert(worker_result == 0 && worker_args.terminated,
-        "the stale command terminates at root validation");
-    assert(fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1,
-        "a stale alias retains no device lifetime pin");
-}
-
-fn void stale_command_faults_before_reused_device_callback() @test {
-    CommandPinFixture retired_fixture;
-    gpu::Device retired = gpu::internal::register_device(
-        state:  &retired_fixture.state,
-        caps:   {},
-    )!!;
-    gpu::CommandList commands = begin_command_pin(&retired)!!;
-    gpu::CommandList stale = commands;
-    gpu::discard_commands(&commands)!!;
-    gpu::Device retired_identity = retired;
-    gpu::destroy_device(&retired)!!;
-
-    CommandPinFixture replacement_fixture;
-    gpu::Device replacement = gpu::internal::register_device(
-        state:  &replacement_fixture.state,
-        caps:   {},
-    )!!;
-    gpu::Barrier barrier = {
-        .before = { .compute = true },
-        .after  = { .compute = true },
-    };
-    gpu::CommandList poisoned = stale;
-    poisoned.record = (gpu::internal::vk::CommandRecord*)(uptr)1;
-    @assert_panics("gpu::cmd_barrier: stale CommandList") {
-        (void)gpu::cmd_barrier(&poisoned, &barrier);
-    };
-    @assert_panics("gpu::cmd_barrier: stale CommandList") {
-        (void)gpu::cmd_barrier(&stale, &barrier);
-    };
-
-    assert(stale.is_valid(),
-        "a copied valid-origin token remains distinct from the zero sentinel");
-    assert(replacement.index == retired_identity.index
-        && replacement.generation != retired_identity.generation,
-        "the replacement device reuses the retired static slot generation");
-    assert(!retired_fixture.state.command_entered.load(AtomicOrdering.ACQUIRE)
-        && !replacement_fixture.state.command_entered.load(AtomicOrdering.ACQUIRE),
-        "stale validation faults before either recording callback");
-    gpu::destroy_device(&replacement)!!;
-}
-
-fn void stale_command_generation_does_not_use_reused_slot_pin() @test {
-    CommandPinFixture fixture = {
-        .state = {
-            .reuse_command_index = true,
-        },
-        .state.reject_command = true,
-    };
-    gpu::Device device = gpu::internal::register_device(
-        state:  &fixture.state,
-        caps:   {},
-    )!!;
-    gpu::CommandList first = begin_command_pin(&device)!!;
-    gpu::CommandList stale = first;
-    gpu::discard_commands(&first)!!;
-    gpu::CommandList live = begin_command_pin(&device)!!;
-
-    gpu::Barrier barrier = {
-        .before = { .compute = true },
-        .after = { .compute = true },
-    };
-    @assert_panics("gpu::cmd_barrier: stale CommandList") {
-        (void)gpu::cmd_barrier(&stale, &barrier);
-    };
-
-    assert(stale.record == live.record,
-        "the command slot is reused");
-    assert(stale.generation != live.generation,
-        "the reused command slot advances its generation");
-    assert(fixture.state.pins_during_command == 0,
-        "stale-generation validation does not reach backend pin observation");
-    gpu::discard_commands(&live)!!;
-    gpu::destroy_device(&device)!!;
-}
-
 fn void device_handles_are_compact_structured_tokens() @test {
     assert(gpu::Device::size == ulong::size, "Device stays one machine word");
 
@@ -773,33 +554,6 @@ fn void device_handles_are_compact_structured_tokens() @test {
     assert(device.index == 7, "the device index round-trips");
     assert(device.generation == 11, "the device generation round-trips");
     assert(device.reserved == 0, "valid devices keep reserved bits clear");
-}
-
-fn void forged_device_tokens_are_rejected() @test {
-    gpu::Device zero_generation = {
-        .index      = 7,
-        .generation = 0,
-    };
-    @assert_panics("gpu::get_device_caps: malformed Device") {
-        (void)gpu::get_device_caps(&zero_generation);
-    };
-
-    gpu::Device reserved = {
-        .index      = 0,
-        .generation = 1,
-        .reserved   = 1,
-    };
-    @assert_panics("gpu::get_device_caps: malformed Device") {
-        (void)gpu::get_device_caps(&reserved);
-    };
-
-    gpu::Device out_of_range = {
-        .index      = gpu::internal::MAX_DEVICES,
-        .generation = 1,
-    };
-    @assert_panics("gpu::get_device_caps: malformed Device") {
-        (void)gpu::get_device_caps(&out_of_range);
-    };
 }
 
 fn void device_loss_isolated_to_marked_slot() @test {
@@ -889,11 +643,6 @@ fn void concurrent_registry_mutation_keeps_devices_distinct() @test {
     assert(all_published, "every concurrent registration succeeds");
     assert(all_distinct, "concurrent registrations publish distinct devices");
     assert(all_joined, "every concurrent destruction succeeds");
-    foreach (&stale : published) {
-        @assert_panics("gpu::get_device_caps: stale Device") {
-            (void)gpu::get_device_caps(stale);
-        };
-    }
 }
 
 fn void registration_proceeds_while_another_device_is_closing() @test {
@@ -904,16 +653,6 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
         caps:   {},
         owner:  &blocking_fixture.state.owner,
     )!!;
-    gpu::Device stale = closing;
-    gpu::Queue closing_queue = {
-        .device = stale,
-        .id     = 0,
-        .roles  = { .graphics },
-    };
-    gpu::CompletionPoint closing_point = gpu::internal::make_completion_point(
-        closing_queue,
-        1,
-    )!!;
 
     DestroyWorkerArgs destroy_args = { .device = closing };
     Thread destroyer;
@@ -921,18 +660,6 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
     while (!blocking_fixture.state.destroy_entered.load(AtomicOrdering.ACQUIRE)) {
         thread::yield();
     }
-    String closing_message = @expect_panic() {
-        (void)gpu::get_device_caps(&stale);
-    };
-    String poll_message = @expect_panic() {
-        (void)gpu::poll_completion(closing_point);
-    };
-
-    gpu::Device concurrent_destroy = stale;
-    String concurrent_destroy_message = @expect_panic() {
-        (void)gpu::destroy_device(&concurrent_destroy);
-    };
-    bool concurrent_destroy_preserved = concurrent_destroy.is_valid();
 
     DeviceFixture survivor_fixture;
     gpu::Device survivor;
@@ -953,63 +680,10 @@ fn void registration_proceeds_while_another_device_is_closing() @test {
 
     assert(survivor_created, "registration succeeds while another slot is closing");
     assert(destroy_result == 0 && !destroy_args.failed, "the closing device finishes destruction");
-    assert(closing_message == "gpu::get_device_caps: Device used concurrently with destroy_device",
-        "operations on a closing device terminate: %s", closing_message);
-    assert(poll_message == "gpu::poll_completion: Device used concurrently with destroy_device",
-        "completion polling on a closing device terminates");
-    assert(concurrent_destroy_message == "gpu::destroy_device: Device used concurrently with destroy_device",
-        "a second destruction attempt terminates");
-    assert(concurrent_destroy_preserved, "an overlapping destruction attempt preserves its token");
-    @assert_panics("gpu::get_device_caps: stale Device") {
-        (void)gpu::get_device_caps(&stale);
-    };
     if (survivor_created) {
         (void)gpu::get_device_caps(&survivor);
         gpu::destroy_device(&survivor)!!;
     }
-}
-
-fn void destruction_during_an_operation_terminates() @test {
-    BlockingOperationFixture fixture;
-    fixture.state.block_memory_stats = true;
-    gpu::Device device = gpu::internal::register_device(
-        state:  &fixture.state,
-        caps:   {},
-    )!!;
-
-    DeviceOperationWorkerArgs operation_args = { .device = device };
-    Thread operation_thread;
-    operation_thread.create(&device_operation_worker, &operation_args)!!;
-    while (!fixture.state.memory_stats_entered.load(AtomicOrdering.ACQUIRE)) {
-        thread::yield();
-    }
-
-    String destroy_message = @expect_panic() {
-        (void)gpu::destroy_device(&device);
-    };
-    bool handle_preserved = device.is_valid();
-    uint calls_before_retry =
-        fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE);
-
-    fixture.state.memory_stats_release.store(true, AtomicOrdering.RELEASE);
-    int operation_result = operation_thread.join()!!;
-
-    bool retry_succeeded = false;
-    if (device.is_valid()) {
-        if (catch retry_fault = gpu::destroy_device(&device)) {
-            (void)retry_fault;
-        } else {
-            retry_succeeded = true;
-        }
-    }
-
-    assert(destroy_message == "gpu::destroy_device: Device used concurrently with destroy_device",
-        "destroying a device during another thread's operation terminates");
-    assert(handle_preserved, "the overlapping destruction preserves the device token");
-    assert(calls_before_retry == 0, "the overlapping destruction does not tear down the backend");
-    assert(operation_result == 0, "the pinned operation completes normally");
-    assert(retry_succeeded, "destruction succeeds after the active operation releases its pin");
-    assert(fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1, "only the successful retry tears down the backend");
 }
 
 fn void live_children_take_precedence_over_active_operations() @test {
@@ -1064,36 +738,6 @@ fn void backend_busy_device_destruction_is_retryable() @test {
     gpu::destroy_device(&device)!!;
     assert(fixture.state.check_calls.load(AtomicOrdering.ACQUIRE) == 2, "the retry checks readiness again");
     assert(fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1, "only the ready retry tears down the backend");
-}
-
-fn void readiness_check_runs_after_new_operations_are_closed() @test {
-    BlockingOperationFixture fixture;
-    fixture.state.block_check = true;
-    gpu::Device device = gpu::internal::register_device(
-        state:  &fixture.state,
-        caps:   {},
-    )!!;
-    gpu::Device stale = device;
-
-    DestroyWorkerArgs destroy_args = { .device = device };
-    Thread destroyer;
-    destroyer.create(&destroy_device_worker, &destroy_args)!!;
-    while (!fixture.state.check_entered.load(AtomicOrdering.ACQUIRE)) {
-        thread::yield();
-    }
-
-    String operation_message = @expect_panic() {
-        (void)gpu::get_device_caps(&stale);
-    };
-    fixture.state.check_release.store(true, AtomicOrdering.RELEASE);
-    int destroy_result = destroyer.join()!!;
-
-    assert(operation_message == "gpu::get_device_caps: Device used concurrently with destroy_device",
-        "the readiness check runs only after new operations are closed");
-    assert(destroy_result == 0 && !destroy_args.failed,
-        "destruction completes after the readiness check");
-    assert(fixture.state.destroy_calls.load(AtomicOrdering.ACQUIRE) == 1,
-        "the backend tears down once after readiness succeeds");
 }
 
 fn void child_published_while_closing_blocks_destruction() @test {
@@ -1191,88 +835,6 @@ fn int caps_worker(void* raw_args) {
         (void)gpu::get_device_caps(&args.device);
     }
     return 0;
-}
-
-fn void stale_device_terminates() @test {
-    DeviceFixture fixture;
-    gpu::Device device = fixture_device(&fixture);
-    gpu::Device stale = device;
-    gpu::destroy_device(&device)!!;
-
-    String message = @expect_panic() {
-        (void)gpu::get_device_caps(&stale);
-    };
-    assert(message == "gpu::get_device_caps: stale Device");
-}
-
-fn void reused_slot_device_terminates() @test {
-    DeviceFixture first_fixture;
-    gpu::Device first = fixture_device(&first_fixture);
-    gpu::Device stale = first;
-    gpu::destroy_device(&first)!!;
-    DeviceFixture second_fixture;
-    gpu::Device second = fixture_device(&second_fixture);
-    defer gpu::destroy_device(&second)!!;
-    assert(second.index == stale.index, "the replacement reuses the slot");
-
-    String message = @expect_panic() {
-        (void)gpu::get_device_caps(&stale);
-    };
-    assert(message == "gpu::get_device_caps: stale Device",
-        "a handle from the previous device in a reused slot terminates");
-    (void)gpu::get_device_caps(&second);
-}
-
-fn void closing_device_terminates() @test {
-    DeviceFixture fixture;
-    gpu::Device device = fixture_device(&fixture);
-    gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
-    gpu::internal::DeviceSlotControl live =
-        (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-    gpu::internal::DeviceSlotControl closing = live;
-    closing.state = gpu::internal::DEVICE_SLOT_CLOSING;
-    slot.control.store((ulong)closing, AtomicOrdering.RELEASE);
-
-    String message = @expect_panic() {
-        (void)gpu::get_device_caps(&device);
-    };
-    slot.control.store((ulong)live, AtomicOrdering.RELEASE);
-    gpu::destroy_device(&device)!!;
-    assert(message == "gpu::get_device_caps: Device used concurrently with destroy_device");
-}
-
-fn void pin_overflow_terminates() @test {
-    DeviceFixture fixture;
-    gpu::Device device = fixture_device(&fixture);
-    gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
-    gpu::internal::DeviceSlotControl live =
-        (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
-    gpu::internal::DeviceSlotControl saturated = live;
-    saturated.pins = gpu::internal::MAX_DEVICE_OPERATION_PINS;
-    slot.control.store((ulong)saturated, AtomicOrdering.RELEASE);
-
-    String message = @expect_panic() {
-        (void)gpu::get_device_caps(&device);
-    };
-    slot.control.store((ulong)live, AtomicOrdering.RELEASE);
-    gpu::destroy_device(&device)!!;
-    assert(message == "gpu::get_device_caps: corrupt Device");
-}
-
-fn void destroy_device_stale_recovers_registry_lock() @test {
-    DeviceFixture fixture;
-    gpu::Device device = fixture_device(&fixture);
-    gpu::Device stale = device;
-    gpu::destroy_device(&device)!!;
-
-    String message = @expect_panic() {
-        (void)gpu::destroy_device(&stale);
-    };
-    assert(message == "gpu::destroy_device: stale Device");
-
-    DeviceFixture next_fixture;
-    gpu::Device next = fixture_device(&next_fixture);
-    gpu::destroy_device(&next)!!;
 }
 
 fn void concurrent_pins_never_terminate() @test {

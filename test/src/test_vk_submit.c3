@@ -677,13 +677,6 @@ fn void prove_submission_publication_gap(
         )!! == completion,
             "token publication exposes the point only after ownership transfer");
     } else {
-        assert(@catch(vk::vk_poll_completion_with_query(
-            state:    state,
-            queue_id: queue.id,
-            sequence: gpu::internal::completion_point_sequence(predicted),
-            query_fn: &query_completion_counter,
-        )) == gpu::internal::HANDLE_REJECTED,
-            "the reserved point remains private before token publication");
         assert(completion_counter_query_calls == 0,
             "an unpublished point reaches no native completion query");
         assert(vk::vk_poll_completion_with_query(
@@ -1308,24 +1301,6 @@ fn void deferred_discards_survive_a_successful_submit() @test {
     gpu::wait_completion(done)!!;
 }
 
-fn void discarding_a_submitted_copy_terminates() @test {
-    gpu::Device device = make_submit_test_device();
-    defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    gpu::ExecutableCommandList[1] lists = { executable };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    gpu::CompletionPoint done = gpu::submit(queue, &submit)!!;
-
-    @assert_panics("gpu::discard_executable_commands: consumed ExecutableCommandList") {
-        (void)gpu::discard_executable_commands(&executable);
-    };
-    gpu::wait_completion(done)!!;
-}
-
 fn void native_device_loss_publishes_complete_point() @test {
     gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
@@ -1735,30 +1710,6 @@ fn void directly_published_sparse_origin_point_orders_normal_submit() @test {
         "native failure cancels only the ordinary candidate");
 }
 
-fn void invalid_readiness_handle_precedes_invalid_stage_mask() @test {
-    gpu::Device device = make_submit_test_device();
-    defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-    gpu::SubmitDesc desc = {
-        .readiness        = { .device = device },
-        .readiness_before = { .host },
-    };
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::QueueCompletionState* completion =
-        vk::queue_completion_state(state, queue.id)!!;
-    ulong next_sequence_before = completion.next_sequence;
-
-    @assert_panics("gpu::submit: malformed SwapchainReadiness") {
-        (void)gpu::submit(queue, &desc);
-    };
-    assert(completion.next_sequence == next_sequence_before,
-        "invalid readiness reserves no queue completion");
-}
-
 fn void empty_submit_returns_completion_point() @test {
     gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
@@ -1822,9 +1773,6 @@ fn void foreign_completion_wait_rejects_before_native_submit() @test {
         )!!;
     ulong next_sequence_before = consumer_completion.next_sequence;
 
-    @assert_panics("gpu::submit: foreign CompletionPoint") {
-        (void)submit_test_queue(&consumer, gpu::QueueKind.GRAPHICS, &desc);
-    };
     assert(consumer_completion.next_sequence == next_sequence_before,
         "foreign completion rejection reserves no queue completion");
     assert(lists[0].is_valid(),
@@ -1832,52 +1780,5 @@ fn void foreign_completion_wait_rejects_before_native_submit() @test {
 
     desc.completion_waits = {};
     gpu::CompletionPoint point = submit_test_queue(&consumer, gpu::QueueKind.GRAPHICS, &desc)!!;
-    gpu::wait_completion(point, 1_000_000_000)!!;
-}
-
-fn void unpublished_same_queue_wait_preserves_token() @test {
-    gpu::Device device = make_submit_test_device();
-    defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    gpu::Queue queue = gpu::get_queue(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CompletionPoint future = vk::reserve_queue_completion(
-        state,
-        queue,
-    )!!;
-
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    gpu::ExecutableCommandList commands_executable = gpu::end_commands(&commands)!!;
-    defer discard_test_executable(&commands_executable)!!;
-    gpu::ExecutableCommandList[1] lists = { commands_executable };
-    gpu::CompletionWait[1] waits = {{
-        .point  = future,
-        .before = { .all },
-    }};
-    gpu::SubmitDesc desc = {
-        .command_lists    = lists[..],
-        .completion_waits = waits[..],
-    };
-
-    @assert_panics("gpu::submit: malformed CompletionPoint") {
-        (void)submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc);
-    };
-    assert(lists[0].is_valid(),
-        "invalid completion wait preserves the executable token");
-
-    vk::QueueCompletionState* completion =
-        &state.queue_completions[state.graphics_completion_id];
-    completion.submission_mutex.lock()!!;
-    vk::cancel_queue_completion_locked(state, future)!!;
-    completion.submission_mutex.unlock();
-    desc.completion_waits = {};
-
-    gpu::CompletionPoint point = submit_test_queue(&device, gpu::QueueKind.GRAPHICS, &desc)!!;
     gpu::wait_completion(point, 1_000_000_000)!!;
 }

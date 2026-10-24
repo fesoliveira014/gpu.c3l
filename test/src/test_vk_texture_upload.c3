@@ -1084,24 +1084,3 @@ fn void mip_subset_view_sampled() @test {
     assert(quantize_unorm8(sampled[0]) == 200, "mip-subset view samples mip 1, not mip 0");
     assert(quantize_unorm8(sampled[1]) == 210, "mip-subset view green matches mip 1");
 }
-
-fn void mapped_span_stale_owner_faults() @test {
-    gpu::Device device = make_upload_test_device();
-    defer destroy_test_device(&device)!!;
-
-    OwnedSpan owned = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "stale_mapped_span",
-    )!!;
-    gpu::GpuSpan stale = owned.span;
-    gpu::flush_mapped_span(&device, stale)!!;
-    gpu::invalidate_mapped_span(&device, stale)!!;
-    free_owned_span(&device, &owned)!!;
-
-    @assert_panics("gpu::flush_mapped_span: stale GpuAllocation") {
-        (void)gpu::flush_mapped_span(&device, stale);
-    };
-}

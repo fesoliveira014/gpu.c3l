@@ -923,31 +923,3 @@ fn void callback_reports_leaks_without_validation() @test {
     gpu::free_allocation(&device, &allocation)!!;
     destroy_test_device(&device)!!;
 }
-
-fn void contract_failure_helper_reports_rejected_handles_without_fault() @test {
-    DebugCapture capture;
-    vk::VkDeviceState state = {
-        .debug_callback  = &capture_debug_message,
-        .debug_user_data = &capture,
-    };
-
-    fault returned = vk::report_contract_failure(
-        state:               &state,
-        operation:           "get_span_address",
-        public_fault:        gpu::internal::HANDLE_REJECTED,
-        resource_kind:       gpu::DebugResourceKind.GPU_SPAN,
-        has_public_identity: false,
-        index:               0,
-        generation:          0,
-        debug_name:          null,
-        rejected_field:      "GpuSpan.identity",
-        invariant:           "must identify a live allocation",
-        backend_text:        null,
-    );
-
-    assert(returned == gpu::internal::HANDLE_REJECTED,
-        "the helper returns the rejection for the public boundary");
-    assert(capture.calls == 1, "the diagnostic is delivered before termination");
-    assert(!capture.last.has_fault,
-        "a rejected handle is not reported as a public fault");
-}

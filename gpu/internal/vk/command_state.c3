@@ -109,15 +109,19 @@ fn CommandRecord*? CommandTable.claim(
     return &self.slots[idx].record;
 }
 
-fn CommandRecord*? CommandTable.get(
-    &self,
-    gpu::internal::CommandListHandle handle,
-) {
-    if (handle.owner != self.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_LIST, gpu::internal::HandleCause.FOREIGN)~;
-    uint idx = handle.index;
-    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_LIST, gpu::internal::HandleCause.STALE)~;
-    if (self.slots[idx].generation != handle.generation) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMMAND_LIST, gpu::internal::HandleCause.STALE)~;
-    return &self.slots[idx].record;
+<* Look up a slot without terminating: null unless `handle` is live. *>
+fn CommandRecord* CommandTable.find(&self, gpu::internal::CommandListHandle handle) {
+    if (handle.owner != self.owner || handle.index >= self.slots.len) return null;
+    if (!self.slots[handle.index].used
+        || self.slots[handle.index].generation != handle.generation) return null;
+    return &self.slots[handle.index].record;
+}
+
+fn CommandRecord*? CommandTable.get(&self, gpu::internal::CommandListHandle handle) {
+    if (handle.owner != self.owner) abort("gpu: foreign CommandList");
+    CommandRecord* slot = self.find(handle);
+    if (slot == null) abort("gpu: stale CommandList");
+    return slot;
 }
 
 fn void? CommandTable.free(&self, gpu::internal::CommandListHandle handle) {
@@ -154,7 +158,7 @@ fn void release_command(
     VkDeviceState* state,
     gpu::internal::CommandListHandle handle,
 ) {
-    if (try record = state.commands.get(handle)) {
+    if (state.commands.find(handle) != null) {
         (void)state.commands.free(handle);
     }
 }

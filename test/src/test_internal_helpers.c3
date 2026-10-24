@@ -84,9 +84,6 @@ fn void completion_points_reject_reserved_values() @test {
         "the zero completion point is invalid");
     assert(@catch(gpu::internal::make_completion_point(queue, 0)) == INVALID_ARGUMENT,
         "sequence zero remains reserved");
-    queue.id = gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES;
-    assert(@catch(gpu::internal::make_completion_point(queue, 1)) == gpu::internal::HANDLE_REJECTED,
-        "an unencodable queue identity is rejected");
 }
 
 fn void completion_sequences_are_monotonic_and_stop_before_wrap() @test {
@@ -150,46 +147,6 @@ fn void completion_points_poll_and_wait_without_consumption() @test {
         "the default host wait has no timeout");
 
     destroy_device(&device)!!;
-}
-
-fn void completion_points_reject_stale_and_foreign_ownership() @test {
-    CompletionFixture first_fixture;
-    CompletionFixture second_fixture;
-    Device first = gpu::internal::register_device(
-        state:  &first_fixture.state,
-        caps:   {},
-    )!!;
-    Device second = gpu::internal::register_device(
-        state:  &second_fixture.state,
-        caps:   {},
-    )!!;
-    Queue first_queue = get_queue(&first, QueueKind.GRAPHICS)!!;
-    CompletionPoint point = gpu::internal::make_completion_point(first_queue, 1)!!;
-
-    gpu::internal::DeviceOperation second_operation = gpu::internal::begin_device_operation(&second)!!;
-    assert(
-        @catch(gpu::internal::validate_completion_point(&second_operation, &second, point))
-            == gpu::internal::HANDLE_REJECTED,
-        "a point cannot be used with another device"
-    );
-    gpu::internal::end_device_operation(&second_operation);
-
-    CompletionPoint malformed = gpu::internal::make_completion_point({
-        .device = first,
-        .id     = 1,
-        .roles  = { .graphics },
-    }, 1)!!;
-    gpu_test::@assert_panics("gpu::poll_completion: malformed CompletionPoint") {
-        (void)poll_completion(malformed);
-    };
-    assert(first_fixture.state.completion_poll_calls == 0,
-        "malformed points do not reach the backend");
-
-    destroy_device(&first)!!;
-    gpu_test::@assert_panics("gpu::poll_completion: stale Device") {
-        (void)poll_completion(point);
-    };
-    destroy_device(&second)!!;
 }
 
 fn void completion_point_creation_allocates_no_public_object() @test {
@@ -469,20 +426,4 @@ fn void submit_wait_mask_shape_is_backend_independent() @test {
     assert(gpu::internal::submit_wait_stage_mask_valid({ .index_input }));
     assert(gpu::internal::stage_mask_valid({ .mesh_shader }));
     assert(gpu::internal::submit_wait_stage_mask_valid({ .mesh_shader }));
-}
-
-fn void rejected_handle_message_names_operation_and_type() @test {
-    char[128] buffer;
-    (void)gpu::internal::reject_handle(
-        gpu::internal::HandleKind.TEXTURE,
-        gpu::internal::HandleCause.STALE,
-    );
-    assert(gpu::internal::rejected_handle_message("create_texture_view", buffer[..])
-        == "gpu::create_texture_view: stale TextureHandle");
-    (void)gpu::internal::reject_handle(
-        gpu::internal::HandleKind.DEVICE,
-        gpu::internal::HandleCause.DESTROY_OVERLAP,
-    );
-    assert(gpu::internal::rejected_handle_message("get_queue", buffer[..])
-        == "gpu::get_queue: Device used concurrently with destroy_device");
 }

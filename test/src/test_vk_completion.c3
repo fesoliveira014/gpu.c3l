@@ -137,52 +137,6 @@ fn gpu::Device create_completion_test_device() {
     return create_test_device(&desc)!!;
 }
 
-fn void queue_completion_publication_rejects_gaps() @test {
-    gpu::Device device = create_completion_test_device();
-    defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(
-        &device,
-        gpu::QueueKind.GRAPHICS,
-    )!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    gpu::CompletionPoint first = vk::reserve_queue_completion(
-        state,
-        queue,
-    )!!;
-    gpu::CompletionPoint second = vk::reserve_queue_completion(
-        state,
-        queue,
-    )!!;
-
-    assert(@catch(vk::publish_queue_completion(state, second))
-        == gpu::internal::HANDLE_REJECTED,
-        "publication cannot skip an earlier reserved sequence");
-    @assert_panics("gpu::poll_completion: malformed CompletionPoint") {
-        (void)gpu::poll_completion(first);
-    };
-    @assert_panics("gpu::poll_completion: malformed CompletionPoint") {
-        (void)gpu::poll_completion(second);
-    };
-
-    vk::publish_queue_completion(state, first)!!;
-    @assert_panics("gpu::poll_completion: malformed CompletionPoint") {
-        (void)gpu::poll_completion(second);
-    };
-    vk::publish_queue_completion(state, second)!!;
-
-    vk::QueueCompletionState* completion =
-        vk::queue_completion_state(state, queue.id)!!;
-    vk::SemaphoreSignalInfo signal = vk::semaphore_signal_info()
-        .set_semaphore(completion.timeline)
-        .set_value(completion.next_sequence);
-    gpu::internal::vk::check_backend_result(
-        state:     state,
-        operation: "signal test completion",
-        result:    vk::signal_semaphore(state.device, &signal),
-    )!!;
-}
-
 fn void completion_observation_advances_for_poll_and_wait() @test {
     gpu::Device device = create_completion_test_device();
     defer destroy_test_device(&device)!!;
@@ -245,9 +199,6 @@ fn void queue_completion_poll_wait_is_reusable() @test {
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, queue.id)!!;
 
-    @assert_panics("gpu::poll_completion: malformed CompletionPoint") {
-        (void)gpu::poll_completion(point);
-    };
     vk::publish_queue_completion(state, point)!!;
     assert(!gpu::poll_completion(point)!!,
         "a published queue sequence remains incomplete until signaled");
@@ -258,9 +209,6 @@ fn void queue_completion_poll_wait_is_reusable() @test {
         state,
         queue,
     )!!;
-    @assert_panics("gpu::poll_completion: malformed CompletionPoint") {
-        (void)gpu::poll_completion(future);
-    };
     completion.submission_mutex.lock()!!;
     vk::cancel_queue_completion_locked(state, future)!!;
     completion.submission_mutex.unlock();

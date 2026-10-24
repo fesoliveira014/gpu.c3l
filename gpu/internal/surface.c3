@@ -17,22 +17,18 @@ SurfaceData[MAX_SURFACES] surface_slots @private;
 
 
 fn SurfaceData*? require_surface(Surface* surface) @private {
-    if (surface == null) return reject_handle(HandleKind.SURFACE, HandleCause.NULL_POINTER)~;
-    if (!surface.is_valid()) return reject_handle(HandleKind.SURFACE, HandleCause.ZERO)~;
+    if (surface == null) abort("gpu: null Surface");
+    if (!surface.is_valid()) abort("gpu: zero Surface");
     if (surface.reserved != 0 || surface.index >= MAX_SURFACES) {
-        return reject_handle(HandleKind.SURFACE, HandleCause.MALFORMED)~;
+        abort("gpu: malformed Surface");
     }
     SurfaceData* data = &surface_slots[surface.index];
     if (!data.used
         || data.generation != surface.generation
         || resolve_runtime(&data.runtime) == null) {
-        return reject_handle(HandleKind.SURFACE, HandleCause.STALE)~;
+        abort("gpu: stale Surface");
     }
     return data;
-}
-
-fn SurfaceData* resolve_surface(Surface* surface) @private {
-    return require_surface(surface) ?? null;
 }
 
 fn Surface? register_surface(Runtime* runtime, void* backend_surface) @private {

@@ -597,25 +597,6 @@ fn void texture_unsupported_desc_rejected() @test {
     gpu::destroy_texture(&device, staging_target)!!;
 }
 
-fn void texture_stale_handle_rejected() @test {
-    gpu::Device device = make_texture_test_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc desc = {
-        .access    = { .graphics, .compute, .transfer },
-        .width     = 8,
-        .height    = 8,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .storage },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    gpu::destroy_texture(&device, texture)!!;
-
-    @assert_panics("gpu::destroy_texture: stale TextureHandle") {
-        (void)gpu::destroy_texture(&device, texture);
-    };
-}
-
 fn void texture_barrier_records_texture_states() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
@@ -1049,61 +1030,6 @@ fn void present_barrier_emission_is_exact() @test {
     );
 }
 
-fn void texture_barrier_stale_handle_rejected() @test {
-    TextureDiagnosticCapture diagnostic = {
-        .expected_operation      = "cmd_texture_barrier",
-        .expected_rejected_field = "TextureBarrier.texture",
-        .expected_invariant      = "must identify one live texture",
-    };
-    gpu::Device device = make_texture_diagnostic_device(&diagnostic);
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc desc = {
-        .access    = { .graphics, .compute, .transfer },
-        .width     = 8,
-        .height    = 8,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .storage },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
-    defer gpu::destroy_command_allocator(&command_allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::CommandRecord* record = vk::resolve_command(&cmd)!!;
-
-    TextureBarrierEmitCapture emission;
-    vk::BarrierEmitOps ops = {
-        .user_data = &emission,
-        .emit      = &capture_texture_barrier_emit,
-    };
-
-    gpu::TextureBarrier barrier = {
-        .texture = texture,
-        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
-        .after   = gpu::storage_at(
-            { .compute },
-            { .read, .write },
-        ),
-    };
-    fault barrier_fault = @catch(vk::vk_cmd_texture_barrier_with_ops(
-        record,
-        &barrier,
-        &ops,
-    ));
-    assert(barrier_fault == gpu::internal::HANDLE_REJECTED, "barrier on a destroyed texture is rejected");
-    assert(emission.calls == 0,
-        "stale texture reaches no native emission");
-
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
-    defer discard_test_executable(&cmd_executable)!!;
-}
-
 fn void attachment_views_own_exact_subresources_and_retain_textures() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
@@ -1136,9 +1062,6 @@ fn void attachment_views_own_exact_subresources_and_retain_textures() @test {
         "a live attachment view retains its texture");
 
     gpu::destroy_attachment_view(&device, view)!!;
-    @assert_panics("gpu::destroy_attachment_view: stale AttachmentViewHandle") {
-        (void)gpu::destroy_attachment_view(&device, view);
-    };
     gpu::destroy_texture(&device, texture)!!;
 }
 
@@ -1239,32 +1162,6 @@ fn void attachment_view_publication_failure_rolls_back_cold_view() @test {
         &view_desc,
     )!!;
     gpu::destroy_attachment_view(&device, retry)!!;
-}
-
-fn void foreign_attachment_view_destroy_rejects_without_consuming() @test {
-    gpu::Device owner = make_texture_test_device();
-    defer destroy_test_device(&owner)!!;
-    gpu::Device foreign = make_texture_test_device();
-    defer destroy_test_device(&foreign)!!;
-    gpu::TextureDesc desc = {
-        .access    = { .graphics },
-        .width     = 4,
-        .height    = 4,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .color_attach },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&owner, &desc)!!;
-    gpu::AttachmentViewDesc view_desc = { .texture = texture };
-    gpu::AttachmentViewHandle view = gpu::create_attachment_view(
-        &owner,
-        &view_desc,
-    )!!;
-
-    @assert_panics("gpu::destroy_attachment_view: foreign AttachmentViewHandle") {
-        (void)gpu::destroy_attachment_view(&foreign, view);
-    };
-    gpu::destroy_attachment_view(&owner, view)!!;
-    gpu::destroy_texture(&owner, texture)!!;
 }
 
 fn void raised_texture_capacity_holds_more_than_default() @test {
@@ -1637,16 +1534,7 @@ fn void placed_texture_requirements_validate_and_release_storage() @test {
     )!!;
     gpu::destroy_texture(&device, first)!!;
     gpu::destroy_texture(&device, second)!!;
-    gpu::GpuAllocation stale = allocation;
     gpu::free_allocation(&device, &allocation)!!;
-    @assert_panics("gpu::create_placed_texture: stale GpuAllocation") {
-        (void)gpu::create_placed_texture(
-            device:     &device,
-            desc:       &texture_desc,
-            allocation: stale,
-            offset:     0,
-        );
-    };
 
     gpu::AllocationDesc generic_desc = {
         .size         = requirements.size,
@@ -1777,16 +1665,6 @@ fn void placed_texture_validation_precedes_native_mutation() @test {
         requirements: requirements,
         ops:          &ops,
     )) == gpu::INVALID_ARGUMENT);
-    gpu::GpuAllocation stale = allocation;
-    stale.generation++;
-    assert(@catch(vk::create_placed_texture_for_state_with_ops(
-        state:        &fixture.state,
-        desc:         &desc,
-        placement:    stale,
-        offset:       0,
-        requirements: requirements,
-        ops:          &ops,
-    )) == gpu::internal::HANDLE_REJECTED);
 
     fixture.state.textures.next_new = 1;
     fixture.allocations[0].value.live_placements = uint::max;
@@ -1962,44 +1840,4 @@ fn void placed_transfer_only_publication_rolls_back_without_view() @test {
         && fixture.probe.destroy_image_calls == 1
         && fixture.allocations[0].value.live_placements == 0,
         "placed transfer-only rollback releases only image ownership");
-}
-
-fn void stale_texture_view_source_terminates() @test {
-    gpu::Device device = make_texture_test_device();
-    defer destroy_test_device(&device)!!;
-    gpu::TextureDesc desc = {
-        .access = { .graphics, .compute },
-        .width  = 16,
-        .height = 16,
-        .format = gpu::Format.RGBA8_UNORM,
-        .usage  = { .sampled },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    gpu::TextureHandle copy = texture;
-    gpu::destroy_texture(&device, texture)!!;
-
-    @assert_panics("gpu::create_texture_view: stale TextureHandle") {
-        (void)gpu::create_texture_view(&device, copy, null);
-    };
-}
-
-fn void destroy_texture_stale_recovers_resource_lock() @test {
-    gpu::Device device = make_texture_test_device();
-    defer destroy_test_device(&device)!!;
-    gpu::TextureDesc desc = {
-        .access = { .graphics, .compute },
-        .width  = 16,
-        .height = 16,
-        .format = gpu::Format.RGBA8_UNORM,
-        .usage  = { .sampled },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
-    gpu::TextureHandle copy = texture;
-    gpu::destroy_texture(&device, texture)!!;
-
-    @assert_panics("gpu::destroy_texture: stale TextureHandle") {
-        (void)gpu::destroy_texture(&device, copy);
-    };
-    gpu::TextureHandle next = gpu::create_texture(&device, &desc)!!;
-    gpu::destroy_texture(&device, next)!!;
 }

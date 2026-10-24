@@ -778,7 +778,7 @@ fn bool? vk_supports_queue_request(
     bool require_ray_tracing = false,
 ) {
     if (state == null || request == null || adapter_index >= state.adapters.len) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.ADAPTER, gpu::internal::HandleCause.INVARIANT)~;
+        abort("gpu: corrupt Adapter");
     }
 
     vk::PhysicalDevice physical_device = state.adapters[adapter_index].physical_device;
@@ -1032,11 +1032,11 @@ fn QueueCompletionState*? queue_completion_state(
     if (state == null
         || state.queue_completions.ptr == null
         || queue_id >= state.queue_completions.len) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.QUEUE, gpu::internal::HandleCause.MALFORMED)~;
+        abort("gpu: malformed Queue");
     }
     QueueCompletionState* completion = &state.queue_completions[queue_id];
     if (!completion.bound || completion.timeline == null) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.QUEUE, gpu::internal::HandleCause.MALFORMED)~;
+        abort("gpu: malformed Queue");
     }
     return completion;
 }
@@ -1066,7 +1066,7 @@ fn QueueCompletionState*? queue_completion_for_kind(
         case gpu::QueueKind.COMPUTE:  supported = completion.roles.compute;
         case gpu::QueueKind.TRANSFER: supported = completion.roles.transfer;
     }
-    if (!supported) return gpu::internal::reject_handle(gpu::internal::HandleKind.QUEUE, gpu::internal::HandleCause.MISMATCHED)~;
+    if (!supported) abort("gpu: mismatched Queue");
     return completion;
 }
 
@@ -1122,14 +1122,14 @@ fn gpu::CompletionPoint? reserve_queue_completion_locked(
     gpu::Queue queue,
 ) @private {
     if (state == null || queue.device != state.owner) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.QUEUE, gpu::internal::HandleCause.FOREIGN)~;
+        abort("gpu: foreign Queue");
     }
     QueueCompletionState* completion = queue_completion_state(
         state,
         queue.id,
     )!;
     if ((uint)completion.roles != (uint)queue.roles) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.QUEUE, gpu::internal::HandleCause.MISMATCHED)~;
+        abort("gpu: mismatched Queue");
     }
     return gpu::internal::next_completion_point(queue, &completion.next_sequence);
 }
@@ -1152,7 +1152,7 @@ fn void? cancel_queue_completion_locked(
     gpu::CompletionPoint point,
 ) @private {
     if (state == null || point.device != state.owner || !point.is_valid()) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.COMPLETION_POINT, gpu::internal::HandleCause.FOREIGN)~;
+        abort("gpu: foreign CompletionPoint");
     }
     QueueCompletionState* completion = queue_completion_state(
         state,
@@ -1163,7 +1163,7 @@ fn void? cancel_queue_completion_locked(
         AtomicOrdering.ACQUIRE,
     );
     if (sequence != completion.next_sequence || sequence <= published) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.COMPLETION_POINT, gpu::internal::HandleCause.INVARIANT)~;
+        abort("gpu: corrupt CompletionPoint");
     }
     completion.next_sequence--;
 }
@@ -1174,7 +1174,7 @@ fn void? publish_queue_completion_locked(
     gpu::CompletionPoint point,
 ) @private {
     if (state == null || point.device != state.owner || !point.is_valid()) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.COMPLETION_POINT, gpu::internal::HandleCause.FOREIGN)~;
+        abort("gpu: foreign CompletionPoint");
     }
     uint queue_id = gpu::internal::completion_point_queue_id(point);
     ulong sequence = gpu::internal::completion_point_sequence(point);
@@ -1186,7 +1186,7 @@ fn void? publish_queue_completion_locked(
         AtomicOrdering.ACQUIRE,
     );
     if (sequence != published + 1 || sequence > completion.next_sequence) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.COMPLETION_POINT, gpu::internal::HandleCause.INVARIANT)~;
+        abort("gpu: corrupt CompletionPoint");
     }
     completion.published_sequence.store(sequence, AtomicOrdering.RELEASE);
 }
@@ -1217,7 +1217,7 @@ fn QueueCompletionState*? published_queue_completion_state(
         || sequence > completion.published_sequence.load(
             AtomicOrdering.ACQUIRE,
         )) {
-        return gpu::internal::reject_handle(gpu::internal::HandleKind.COMPLETION_POINT, gpu::internal::HandleCause.MALFORMED)~;
+        abort("gpu: malformed CompletionPoint");
     }
     return completion;
 }
@@ -1289,7 +1289,7 @@ fn CommandRecord*[]? claim_submit_records_locked(
             )!;
         if (record.device != queue.device
             || record.device_state != state) {
-            return gpu::internal::reject_handle(gpu::internal::HandleKind.EXECUTABLE_COMMAND_LIST, gpu::internal::HandleCause.FOREIGN)~;
+            abort("gpu: foreign ExecutableCommandList");
         }
         gpu::internal::executable_record_phase(record)!;
         CommandRecord* backend = record;
@@ -1408,7 +1408,7 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
     if (has_readiness) {
         if (!desc.readiness.is_valid()
             || desc.readiness.device != device) {
-            return gpu::internal::reject_handle(gpu::internal::HandleKind.SWAPCHAIN_READINESS, gpu::internal::HandleCause.FOREIGN)~;
+            abort("gpu: foreign SwapchainReadiness");
         }
         if (state.unified_layouts) {
             inputs.readiness_stages =
@@ -1449,7 +1449,7 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
         ];
         foreach (i, wait : desc.completion_waits) {
             gpu::CompletionPoint point = wait.point;
-            if (point.device != device) return gpu::internal::reject_handle(gpu::internal::HandleKind.COMPLETION_POINT, gpu::internal::HandleCause.FOREIGN)~;
+            if (point.device != device) abort("gpu: foreign CompletionPoint");
             ulong sequence = gpu::internal::completion_point_sequence(point);
             QueueCompletionState* source = published_queue_completion_state(
                 state,

@@ -75,21 +75,11 @@ c3c test shader_abi --path test/cpu
 `consumer_compile` imports `gpu` and every `gpu::surface::*` module from
 consumer modules and compiles one file per operation set.
 
-Calls that terminate on a programming error are tested with the helpers in
-`test/src/expect_panic.c3`. `@assert_panics` runs its body with the panic
-handler swapped, recovers the panic, and compares the exact message;
-`@expect_panic` returns the message instead, and worker threads use the
-allocation-free `@capture_panic`:
-
-```c3
-@assert_panics("gpu::destroy_texture: stale TextureHandle") {
-    (void)gpu::destroy_texture(&device, stale);
-};
-```
-
-The public boundary turns a rejected handle into a panic only after the call
-has released its locks and device pins, so the next call stays usable after a
-recovered panic.
+A call that terminates on a programming error is not exercised by the test
+suites. Test the identity checks through the non-terminating lookups instead,
+for example `assert(table.find(stale) == null)`. A test that aborts by
+mistake can leave locks and device pins held, so read the first failure of a
+run, not the ones that follow.
 
 Compiler visibility and type checking define the public surface; there is no
 symbol inventory.

@@ -4,23 +4,19 @@ import gpu;
 
 
 fn RuntimeData*? require_adapter(Adapter* adapter) @private {
-    if (adapter == null) return reject_handle(HandleKind.ADAPTER, HandleCause.NULL_POINTER)~;
-    if (!adapter.is_valid()) return reject_handle(HandleKind.ADAPTER, HandleCause.ZERO)~;
+    if (adapter == null) abort("gpu: null Adapter");
+    if (!adapter.is_valid()) abort("gpu: zero Adapter");
     if (adapter.reserved != 0 || adapter.runtime_index >= MAX_RUNTIMES) {
-        return reject_handle(HandleKind.ADAPTER, HandleCause.MALFORMED)~;
+        abort("gpu: malformed Adapter");
     }
     Runtime runtime = {
         .index      = adapter.runtime_index,
         .generation = adapter.runtime_generation,
     };
     RuntimeData* data = resolve_runtime(&runtime);
-    if (data == null) return reject_handle(HandleKind.ADAPTER, HandleCause.STALE)~;
+    if (data == null) abort("gpu: stale Adapter");
     if (adapter.adapter_index >= data.adapter_count) {
-        return reject_handle(HandleKind.ADAPTER, HandleCause.MALFORMED)~;
+        abort("gpu: malformed Adapter");
     }
     return data;
-}
-
-fn RuntimeData* resolve_adapter(Adapter* adapter) @private {
-    return require_adapter(adapter) ?? null;
 }

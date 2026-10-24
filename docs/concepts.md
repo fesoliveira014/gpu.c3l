@@ -54,8 +54,8 @@ Public resources are named by handles: small copyable values such as
 the identity of its device and a generation counter. Copying a handle copies
 a name, not ownership; destroying the resource makes every copy stale, and
 passing a stale handle to the library terminates the process with a message
-naming the call and the handle type. Handle misuse is a programming error,
-not a fault to handle.
+naming the handle type and a backtrace to the call. Handle misuse is a
+programming error, not a fault to handle.
 
 Objects form a tree. A `Runtime` owns adapters and surfaces; a `Device` owns
 allocations, textures, pipelines, command allocators, and swapchains; a

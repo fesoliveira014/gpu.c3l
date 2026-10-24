@@ -79,12 +79,18 @@ fn gpu::PipelineHandle? PipelineTable.alloc(&self, PipelineSlot value) {
     };
 }
 
+<* Look up a slot without terminating: null unless `h` is live. *>
+fn PipelineCell* PipelineTable.find_cell(&self, gpu::PipelineHandle h) {
+    if (h.owner != self.owner || h.index >= self.slots.len) return null;
+    if (!self.slots[h.index].used || self.slots[h.index].generation != h.generation) return null;
+    return &self.slots[h.index];
+}
+
 fn PipelineCell*? PipelineTable.get_cell(&self, gpu::PipelineHandle h) {
-    if (h.owner != self.owner) return gpu::internal::reject_handle(gpu::internal::HandleKind.PIPELINE, gpu::internal::HandleCause.FOREIGN)~;
-    uint idx = h.index;
-    if (idx >= self.slots.len || !self.slots[idx].used) return gpu::internal::reject_handle(gpu::internal::HandleKind.PIPELINE, gpu::internal::HandleCause.STALE)~;
-    if (self.slots[idx].generation != h.generation) return gpu::internal::reject_handle(gpu::internal::HandleKind.PIPELINE, gpu::internal::HandleCause.STALE)~;
-    return &self.slots[idx];
+    if (h.owner != self.owner) abort("gpu: foreign PipelineHandle");
+    PipelineCell* cell = self.find_cell(h);
+    if (cell == null) abort("gpu: stale PipelineHandle");
+    return cell;
 }
 
 fn PipelineSlot*? PipelineTable.get(&self, gpu::PipelineHandle h) {

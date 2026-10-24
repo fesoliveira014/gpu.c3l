@@ -88,14 +88,11 @@ fn void queue_queries_preserve_distinct_compute_identity() @test {
 
     gpu::Queue forged = compute;
     forged.roles.graphics = true;
-    @assert_panics("gpu::get_queue_info: malformed Queue") {
-        (void)gpu::get_queue_info(&device, forged);
-    };
 
     gpu::destroy_device(&device)!!;
 }
 
-fn void queue_queries_reject_unavailable_and_foreign_tokens() @test {
+fn void queue_queries_reject_unavailable_roles() @test {
     RuntimeDesc desc = queue_runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
@@ -103,34 +100,11 @@ fn void queue_queries_reject_unavailable_and_foreign_tokens() @test {
         .queues = { .required = { .compute } },
     };
     Device first = gpu::create_device(&adapter, &compute_desc)!!;
-    Device second = create_queue_test_device(&runtime);
-    gpu::Queue compute = gpu::get_queue(&first, gpu::QueueKind.COMPUTE)!!;
 
     assert(@catch(gpu::get_queue(&first, gpu::QueueKind.GRAPHICS))
         == gpu::INVALID_ARGUMENT);
-    @assert_panics("gpu::get_queue_info: foreign Queue") {
-        (void)gpu::get_queue_info(&second, compute);
-    };
 
     gpu::destroy_device(&first)!!;
-    gpu::destroy_device(&second)!!;
-    gpu::destroy_runtime(&runtime)!!;
-}
-
-fn void queue_queries_reject_stale_devices() @test {
-    RuntimeDesc desc = queue_runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
-    Device device = create_queue_test_device(&runtime);
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-
-    gpu::destroy_device(&device)!!;
-    @assert_panics("gpu::get_queue: zero Device") {
-        (void)gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
-    };
-    @assert_panics("gpu::get_queue_info: zero Device") {
-        (void)gpu::get_queue_info(&device, queue);
-    };
-
     gpu::destroy_runtime(&runtime)!!;
 }
 

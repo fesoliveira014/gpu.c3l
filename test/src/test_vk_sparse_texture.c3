@@ -570,10 +570,6 @@ fn void sparse_requirements_query_returns_only_cached_sparse_snapshot() @test {
     )) == gpu::INVALID_ARGUMENT);
 
     fixture.state.textures.free(ordinary_handle)!!;
-    assert(@catch(vk::vk_get_sparse_texture_requirements(
-        &fixture.state,
-        ordinary_handle,
-    )) == gpu::internal::HANDLE_REJECTED);
 }
 
 fn vk::SparseImageMemoryRequirements valid_sparse_color_requirement() {

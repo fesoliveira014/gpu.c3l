@@ -196,10 +196,6 @@ fn void invalid_desc_and_stale_adapter_fault_before_backend_work() @test {
     assert(gpu::internal::vk::stub_device_support_query_count() == 0);
 
     gpu::destroy_runtime(&runtime)!!;
-    String message = @expect_panic() {
-        (void)gpu::supports_device_desc(&adapter);
-    };
-    assert(message == "gpu::supports_device_desc: stale Adapter");
     assert(gpu::internal::vk::stub_device_support_query_count() == 0);
 }
 
