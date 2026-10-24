@@ -140,7 +140,7 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
         gpu::QueueKind.GRAPHICS,
     )!!;
     vk::QueueCompletionState* completion =
-        vk::queue_completion_state(state, queue.id)!!;
+        vk::queue_completion_state(state, queue.id);
     vk::Semaphore blocker;
     vk::Fence fence;
     Thread worker;
@@ -295,7 +295,7 @@ fn void incomplete_command_drain_is_deterministic() @test {
         .in_flight_buffers = 1,
     })!!;
     vk::CommandAllocatorSlot* allocator_slot =
-        state.command_allocators.get(allocator)!!;
+        state.command_allocators.get(allocator);
     allocator_slot.mutex.init()!!;
     defer (void)allocator_slot.mutex.destroy();
     vk::CommandCell[1] command_cells;
@@ -404,7 +404,7 @@ fn void successful_observation_drains_distinct_upstream_identity() @test {
     })!!;
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator,
-    )!!;
+    );
     slot.mutex.init()!!;
     defer (void)slot.mutex.destroy();
     vk::CommandCell[1] command_cells;
@@ -532,9 +532,9 @@ fn void completed_submission_release_boundary_is_exact() @test {
         .in_flight_buffers             = 2,
     })!!;
     vk::CommandAllocatorSlot* first_allocator_slot =
-        state.command_allocators.get(first_allocator)!!;
+        state.command_allocators.get(first_allocator);
     vk::CommandAllocatorSlot* second_allocator_slot =
-        state.command_allocators.get(second_allocator)!!;
+        state.command_allocators.get(second_allocator);
     first_allocator_slot.mutex.init()!!;
     defer (void)first_allocator_slot.mutex.destroy();
     second_allocator_slot.mutex.init()!!;
@@ -686,9 +686,9 @@ fn void device_loss_teardown_returns_each_in_flight_allocator_unit() @test {
         .in_flight_buffers             = 1,
     })!!;
     vk::CommandAllocatorSlot* first_slot =
-        state.command_allocators.get(first_allocator)!!;
+        state.command_allocators.get(first_allocator);
     vk::CommandAllocatorSlot* second_slot =
-        state.command_allocators.get(second_allocator)!!;
+        state.command_allocators.get(second_allocator);
     first_slot.mutex.init()!!;
     defer (void)first_slot.mutex.destroy();
     second_slot.mutex.init()!!;
@@ -778,7 +778,7 @@ fn void threshold_drain_queries_once_and_publishes_retirement() @test {
         .in_flight_buffers = vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD,
     })!!;
     vk::CommandAllocatorSlot* allocator_slot =
-        state.command_allocators.get(allocator)!!;
+        state.command_allocators.get(allocator);
     allocator_slot.mutex.init()!!;
     defer (void)allocator_slot.mutex.destroy();
     for (uint i = 0; i < vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD; i++) {

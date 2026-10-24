@@ -301,12 +301,12 @@ fn void? enumerate_vk_adapters(VkRuntimeState* state) {
     }
 }
 
-fn gpu::AdapterInfo? vk_get_adapter_info(VkRuntimeState* state, uint index) {
+fn gpu::AdapterInfo vk_get_adapter_info(VkRuntimeState* state, uint index) {
     if (state == null || index >= state.adapters.len) abort("gpu: corrupt Adapter");
     return state.adapters[index].info;
 }
 
-fn gpu::AdapterDiagnostics? vk_get_adapter_diagnostics(
+fn gpu::AdapterDiagnostics vk_get_adapter_diagnostics(
     VkRuntimeState* state,
     uint index,
 ) {

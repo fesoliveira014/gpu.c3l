@@ -267,7 +267,7 @@ fn void? retire_observed_completion_and_drain_with_ops(
             ops.before_retirement(ops.user_data);
         }
     $endif
-    (void)queue_completion_state(state, observed_queue_id)!;
+    (void)queue_completion_state(state, observed_queue_id);
     query_pending_queues_before_retirement(
         state:              state,
         has_observed:       true,
@@ -298,7 +298,7 @@ fn void? retire_queue_latest_with_query(
     uint queue_id,
     SemaphoreCounterQueryFn query_fn,
 ) {
-    QueueCompletionState* completion = queue_completion_state(state, queue_id)!;
+    QueueCompletionState* completion = queue_completion_state(state, queue_id);
     ulong current;
     check_backend_result(
         state:     state,

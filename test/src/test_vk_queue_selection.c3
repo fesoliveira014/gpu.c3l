@@ -938,11 +938,11 @@ fn void allocator_pool_ownership_is_exact() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::CommandAllocatorSlot* graphics_slot =
-        state.command_allocators.get(graphics_allocator.handle)!!;
+        state.command_allocators.get(graphics_allocator.handle);
     vk::CommandAllocatorSlot* compute_slot =
-        state.command_allocators.get(compute_allocator.handle)!!;
+        state.command_allocators.get(compute_allocator.handle);
     vk::CommandAllocatorSlot* transfer_slot =
-        state.command_allocators.get(transfer_allocator.handle)!!;
+        state.command_allocators.get(transfer_allocator.handle);
 
     assert(graphics_slot.queue == graphics);
     assert(compute_slot.queue == compute);

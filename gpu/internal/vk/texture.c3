@@ -203,7 +203,7 @@ fn TextureSlot* TextureTable.find(&self, gpu::TextureHandle h) {
     return &self.slots[h.index].value;
 }
 
-fn TextureSlot*? TextureTable.get(&self, gpu::TextureHandle h) {
+fn TextureSlot* TextureTable.get(&self, gpu::TextureHandle h) {
     if (h.owner != self.owner) abort("gpu: foreign TextureHandle");
     TextureSlot* slot = self.find(h);
     if (slot == null) abort("gpu: stale TextureHandle");
@@ -211,7 +211,7 @@ fn TextureSlot*? TextureTable.get(&self, gpu::TextureHandle h) {
 }
 
 fn void? TextureTable.free(&self, gpu::TextureHandle h) {
-    self.get(h)!;
+    self.get(h);
     uint idx = h.index;
     self.slots[idx].used = false;
     if (!should_recycle_handle_generation(self.slots[idx].generation)) {
@@ -1233,7 +1233,7 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
 
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    AllocationSlot* allocation = state.allocations.get(placement)!;
+    AllocationSlot* allocation = state.allocations.get(placement);
     if (allocation.live_placements == uint::max) {
         return gpu::INVALID_RESOURCE_STATE~;
     }
@@ -1562,7 +1562,7 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
             texture = published;
         }
         note_pending_texture_init(state, texture);
-        state.allocations.get(allocation)!!.live_placements = 1;
+        state.allocations.get(allocation).live_placements = 1;
     }
     owns_view = false;
     owns_image = false;
@@ -1612,7 +1612,7 @@ fn void? vk_destroy_texture(
 ) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    TextureSlot* slot = state.textures.get(handle)!;
+    TextureSlot* slot = state.textures.get(handle);
     if (slot.swapchain_owned) return gpu::INVALID_ARGUMENT~;
     if (texture_has_live_descriptor_views(slot)) {
         return gpu::RESOURCE_IN_USE~;
@@ -1641,6 +1641,6 @@ fn void? vk_destroy_texture(
         allocation: allocation,
     );
     if (ownership == TextureImageOwnership.PLACED) {
-        state.allocations.get(placement)!!.live_placements--;
+        state.allocations.get(placement).live_placements--;
     }
 }

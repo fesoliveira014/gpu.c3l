@@ -16,7 +16,7 @@ struct SurfaceData @private {
 SurfaceData[MAX_SURFACES] surface_slots @private;
 
 
-fn SurfaceData*? require_surface(Surface* surface) @private {
+fn SurfaceData* require_surface(Surface* surface) @private {
     if (surface == null) abort("gpu: null Surface");
     if (!surface.is_valid()) abort("gpu: zero Surface");
     if (surface.reserved != 0 || surface.index >= MAX_SURFACES) {
@@ -32,7 +32,7 @@ fn SurfaceData*? require_surface(Surface* surface) @private {
 }
 
 fn Surface? register_surface(Runtime* runtime, void* backend_surface) @private {
-    require_runtime(runtime)!;
+    require_runtime(runtime);
     if (backend_surface == null) return gpu::INVALID_ARGUMENT~;
 
     for (uint i = 0; i < MAX_SURFACES; i++) {
@@ -53,19 +53,19 @@ fn Surface? register_surface(Runtime* runtime, void* backend_surface) @private {
     return gpu::SLOT_TABLE_FULL~;
 }
 
-fn void*? surface_backend_handle(Surface* surface) @private {
-    SurfaceData* data = require_surface(surface)!;
+fn void* surface_backend_handle(Surface* surface) @private {
+    SurfaceData* data = require_surface(surface);
     return data.backend_surface;
 }
 
 fn void? surface_retain_swapchain(Surface* surface) @private {
-    SurfaceData* data = require_surface(surface)!;
+    SurfaceData* data = require_surface(surface);
     if (data.live_swapchain_count == uint::max) return gpu::INVALID_RESOURCE_STATE~;
     data.live_swapchain_count++;
 }
 
 fn void? surface_release_swapchain(Surface* surface) @private {
-    SurfaceData* data = require_surface(surface)!;
+    SurfaceData* data = require_surface(surface);
     if (data.live_swapchain_count == 0) return gpu::INVALID_RESOURCE_STATE~;
     data.live_swapchain_count--;
 }

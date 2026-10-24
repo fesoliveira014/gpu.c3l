@@ -409,7 +409,7 @@ fn void dedicated_transfer_only_texture_omits_default_view() @test {
             ops:             &ops,
         )!!;
     vk::TextureSlot* slot =
-        fixture.state.textures.get(created.texture)!!;
+        fixture.state.textures.get(created.texture);
     assert(fixture.probe.create_calls == 1
         && fixture.probe.allocate_calls == 1
         && fixture.probe.bind_calls == 1
@@ -538,7 +538,7 @@ fn void dedicated_texture_reports_device_local_memory() @test {
 
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    vk::AllocationSlot* slot = state.allocations.get(created.allocation)!!;
+    vk::AllocationSlot* slot = state.allocations.get(created.allocation);
     vk::MemoryPropertyFlags properties;
     state.allocator.get_allocation_memory_properties(
         slot.raw_allocation,

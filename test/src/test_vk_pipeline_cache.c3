@@ -216,7 +216,7 @@ fn int record_generated_dispatch(void* raw_args) {
         (GeneratedDispatchRecordArgs*)raw_args;
     @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
         gpu::internal::vk::CommandRecord* record =
-            gpu::internal::recording_command(&args.commands)!!;
+            gpu::internal::recording_command(&args.commands);
         vk::GeneratedDispatchLayoutReadOps layout_read = {
             .user_data = args.gate,
             .read      = &capture_generated_layout_read,
@@ -1866,7 +1866,7 @@ fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test 
     bind_test_compute_pipeline(&commands, pipeline);
 
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(&commands)!!;
+        gpu::internal::recording_command(&commands);
     vk::IndirectCommandsLayoutEXT expected_layout =
         record.logical_pipeline.generated_dispatch_layout;
     GeneratedLayoutGate gate;

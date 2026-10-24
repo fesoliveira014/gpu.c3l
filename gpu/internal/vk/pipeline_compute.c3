@@ -86,19 +86,19 @@ fn PipelineCell* PipelineTable.find_cell(&self, gpu::PipelineHandle h) {
     return &self.slots[h.index];
 }
 
-fn PipelineCell*? PipelineTable.get_cell(&self, gpu::PipelineHandle h) {
+fn PipelineCell* PipelineTable.get_cell(&self, gpu::PipelineHandle h) {
     if (h.owner != self.owner) abort("gpu: foreign PipelineHandle");
     PipelineCell* cell = self.find_cell(h);
     if (cell == null) abort("gpu: stale PipelineHandle");
     return cell;
 }
 
-fn PipelineSlot*? PipelineTable.get(&self, gpu::PipelineHandle h) {
-    return &self.get_cell(h)!.value;
+fn PipelineSlot* PipelineTable.get(&self, gpu::PipelineHandle h) {
+    return &self.get_cell(h).value;
 }
 
 fn void? PipelineTable.free(&self, gpu::PipelineHandle h) {
-    self.get(h)!;
+    self.get(h);
     uint idx = h.index;
     self.slots[idx].used = false;
     if (!should_recycle_handle_generation(self.slots[idx].generation)) {
@@ -326,7 +326,7 @@ fn gpu::PipelineHandle? create_compute_pipeline_with_root_abi_evidence(
     gpu::ComputePipelineDesc* desc,
 ) @feat(TESTING) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return gpu::INVALID_ARGUMENT~;
     ComputePipelineCreateOps create_ops = compute_pipeline_create_ops_real();
@@ -346,7 +346,7 @@ fn void? vk_destroy_pipeline(
 ) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    PipelineSlot* slot = state.pipelines.get(handle)!;
+    PipelineSlot* slot = state.pipelines.get(handle);
     if (generated_scratch_references_pipeline(state, handle)) {
         return gpu::RESOURCE_IN_USE~;
     }

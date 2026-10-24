@@ -122,7 +122,7 @@ fn SwapchainSlot* SwapchainTable.find(&self, gpu::SwapchainHandle h) {
     return &self.slots[h.index].value;
 }
 
-fn SwapchainSlot*? SwapchainTable.get(&self, gpu::SwapchainHandle h) {
+fn SwapchainSlot* SwapchainTable.get(&self, gpu::SwapchainHandle h) {
     if (h.owner != self.owner) abort("gpu: foreign SwapchainHandle");
     SwapchainSlot* slot = self.find(h);
     if (slot == null) abort("gpu: stale SwapchainHandle");
@@ -130,7 +130,7 @@ fn SwapchainSlot*? SwapchainTable.get(&self, gpu::SwapchainHandle h) {
 }
 
 fn void? SwapchainTable.free(&self, gpu::SwapchainHandle h) {
-    self.get(h)!;
+    self.get(h);
     uint idx = h.index;
     self.slots[idx].used = false;
     if (!should_recycle_handle_generation(self.slots[idx].generation)) {
@@ -206,7 +206,7 @@ fn vk::Extent2D clamp_extent(vk::SurfaceCapabilitiesKHR* caps, uint width, uint 
     return extent;
 }
 
-fn gpu::SwapchainReadiness? make_swapchain_readiness(
+fn gpu::SwapchainReadiness make_swapchain_readiness(
     gpu::Device device,
     gpu::SwapchainHandle swapchain,
     uint acquisition,
@@ -242,7 +242,7 @@ fn uint swapchain_readiness_acquisition(
     return (uint)(readiness.payload >> READINESS_ACQUISITION_SHIFT);
 }
 
-fn gpu::SwapchainHandle? swapchain_handle_from_readiness(
+fn gpu::SwapchainHandle swapchain_handle_from_readiness(
     VkDeviceState* state,
     gpu::SwapchainReadiness readiness,
 ) {
@@ -1010,13 +1010,13 @@ fn void release_swapchain_images(
     release_swapchain_images_locked(state, slot);
 }
 
-fn bool? swapchain_images_referenced_locked(
+fn bool swapchain_images_referenced_locked(
     VkDeviceState* state,
     SwapchainSlot* slot,
 ) @private {
     for (uint i = 0; i < slot.image_count; i++) {
         gpu::TextureHandle handle = slot.textures[i];
-        TextureSlot* texture = state.textures.get(handle)!;
+        TextureSlot* texture = state.textures.get(handle);
         if (texture_has_live_descriptor_views(texture)) return true;
         if (texture.internal_references.load(AtomicOrdering.RELAXED) > 0) {
             return true;
@@ -1053,7 +1053,7 @@ fn void? release_swapchain_images_for_lifecycle_with(
     bool images_referenced = swapchain_images_referenced_locked(
         state,
         slot,
-    )!;
+    );
     if (presentations_pending) {
         return report_wsi_contract(
             context:        context,
@@ -1110,7 +1110,7 @@ fn gpu::SwapchainHandle? vk_create_swapchain(
     defer catch destroy_swapchain_slot(state, &slot);
     gpu::internal::surface_retain_swapchain(surface)!;
     slot.surface_owner = *surface;
-    slot.surface = (vk::SurfaceKHR)gpu::internal::surface_backend_handle(surface)!;
+    slot.surface = (vk::SurfaceKHR)gpu::internal::surface_backend_handle(surface);
 
     uint supported = 0;
     check_wsi_backend_result(
@@ -1205,7 +1205,7 @@ fn void? vk_wait_swapchain_presentations(
     SwapchainSlot* slot = resolve_swapchain_for_operation(
         &context,
         handle,
-    )!;
+    );
     return wait_present_fences(
         state:      state,
         slot:       slot,
@@ -1224,7 +1224,7 @@ fn void? vk_destroy_swapchain(
     SwapchainSlot* slot = resolve_swapchain_for_operation(
         &context,
         handle,
-    )!;
+    );
     release_swapchain_images_for_lifecycle(
         state,
         &context,
@@ -1255,7 +1255,7 @@ fn void? vk_resize_swapchain(
     SwapchainSlot* slot = resolve_swapchain_for_operation(
         &context,
         handle,
-    )!;
+    );
     release_swapchain_images_for_lifecycle(
         state,
         &context,
@@ -1302,12 +1302,12 @@ fn void? vk_resize_swapchain(
     }
 }
 
-fn gpu::SwapchainInfo? vk_get_swapchain_info(
+fn gpu::SwapchainInfo vk_get_swapchain_info(
     VkDeviceState* state,
     gpu::SwapchainHandle handle,
 ) {
     WsiDiagnosticContext context = { .state = state, .operation = "get_swapchain_info" };
-    SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
+    SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle);
     return slot.info;
 }
 
@@ -1337,7 +1337,7 @@ fn SwapchainAcquisitionCandidate? prepare_swapchain_acquisition(
         context.state.owner,
         handle,
         acquisition,
-    )!;
+    );
     if (slot.acquire_semaphores.len == 0
         || slot.acquire_semaphores.len != slot.acquire_retirements.len) {
         return report_wsi_backend_failure(
@@ -1396,7 +1396,7 @@ fn gpu::AcquiredImage? commit_acquired_image(
     TextureSlot* texture = resolve_swapchain_texture_for_operation(
         context: context,
         handle:  texture_handle,
-    )!;
+    );
     gpu::AcquiredImage image = make_acquired_image(
         texture:         texture,
         handle:          texture_handle,
@@ -1427,7 +1427,7 @@ fn gpu::AcquiredImage? vk_acquire_next_image_with(
     SwapchainAcquireFn acquire_fn,
 ) {
     WsiDiagnosticContext context = { .state = state, .operation = "acquire_next_image" };
-    SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
+    SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle);
     SwapchainAcquisitionCandidate candidate = prepare_swapchain_acquisition(
         context:  &context,
         slot:     slot,
@@ -1481,9 +1481,9 @@ fn void? vk_present_with(
     gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
         state,
         image.readiness,
-    )!;
+    );
     WsiDiagnosticContext context = { .state = state, .operation = "present" };
-    SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
+    SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle);
     check_swapchain_present_contract(
         context:           &context,
         slot:              slot,
@@ -1493,7 +1493,7 @@ fn void? vk_present_with(
     TextureSlot* image_slot = resolve_swapchain_texture_for_operation(
         context: &context,
         handle:  image.texture,
-    )!;
+    );
     uint image_index = slot.pending_image;
     prepare_present_fence(state, slot, image_index)!;
     if (device_lost(state)) {
@@ -1552,7 +1552,7 @@ fn gpu::PresentModeSupport? vk_get_present_mode_support(
     gpu::SwapchainHandle handle,
 ) {
     WsiDiagnosticContext context = { .state = state, .operation = "get_present_mode_support" };
-    SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle)!;
+    SwapchainSlot* slot = resolve_swapchain_for_operation(&context, handle);
 
     uint mode_count = 0;
     check_wsi_backend_result(

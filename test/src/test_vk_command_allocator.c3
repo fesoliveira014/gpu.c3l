@@ -217,7 +217,7 @@ fn void command_allocator_table_recycles_generation_checked_slots() @test {
     };
     defer mem::free(table.slots.ptr);
     gpu::CommandAllocatorHandle first = table.alloc(allocator_slot(3))!!;
-    assert(first.owner == 17 && table.get(first)!!.queue.id == 3,
+    assert(first.owner == 17 && table.get(first).queue.id == 3,
         "allocation publishes exact owner and slot state");
 
     table.free(first)!!;
@@ -227,7 +227,7 @@ fn void command_allocator_table_recycles_generation_checked_slots() @test {
     assert(second.index == first.index
         && second.generation != first.generation,
         "free-list reuse advances generation");
-    assert(table.get(second)!!.queue.id == 5,
+    assert(table.get(second).queue.id == 5,
         "recycled slot publishes replacement state");
 }
 
@@ -268,7 +268,7 @@ fn void command_claim_cancellation_preserves_concurrent_table_mutation() @test {
     gpu::internal::CommandListHandle concurrent_identity = concurrent.identity;
 
     table.cancel_claim(first_identity)!!;
-    assert(table.get(concurrent_identity)!! == concurrent,
+    assert(table.get(concurrent_identity) == concurrent,
         "cancelling an earlier claim preserves the concurrent record");
     gpu::internal::vk::CommandRecord* replacement = table.claim(
         device:       device,
@@ -280,7 +280,7 @@ fn void command_claim_cancellation_preserves_concurrent_table_mutation() @test {
     assert(replacement.identity.index == first_identity.index
         && replacement.identity.generation != first_identity.generation,
         "the cancelled cell rejoins the current free list with new identity");
-    assert(table.get(concurrent_identity)!! == concurrent
+    assert(table.get(concurrent_identity) == concurrent
         && concurrent.identity == concurrent_identity,
         "replacement publication leaves the interleaved claim unchanged");
     assert(@catch(table.claim(
@@ -656,7 +656,7 @@ fn void command_allocator_defaults_preallocate_exact_storage() @test {
     gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
-    )!!;
+    );
 
     assert(allocator.device == device && allocator.queue == queue,
         "public allocator preserves its exact selected queue");
@@ -707,7 +707,7 @@ fn void first_begin_allocates_one_command_buffer_per_index() @test {
     gpu::internal::vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot =
-        state.command_allocators.get(allocator.handle)!!;
+        state.command_allocators.get(allocator.handle);
     assert(slot.command_buffers[0] == null && slot.command_buffers[1] == null,
         "creation allocates no command buffers");
 
@@ -764,7 +764,7 @@ fn void first_begin_allocates_one_command_buffer_per_index() @test {
     )!!;
     defer gpu::destroy_command_allocator(&fresh)!!;
     gpu::internal::vk::CommandAllocatorSlot* fresh_slot =
-        state.command_allocators.get(fresh.handle)!!;
+        state.command_allocators.get(fresh.handle);
     pool_probe = { .fail_buffers = true };
     gpu::CommandList failed;
     assert(@catch(gpu::internal::vk::begin_commands_with_injected_ops(
@@ -799,7 +799,7 @@ fn void begin_observes_completed_work_without_application_poll() @test {
     gpu::internal::vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot =
-        state.command_allocators.get(allocator.handle)!!;
+        state.command_allocators.get(allocator.handle);
 
     gpu::ExecutableCommandList[2] lists;
     for (uint i = 0; i < 2; i++) {
@@ -878,7 +878,7 @@ fn void command_allocator_destroy_never_waits_for_an_active_operation() @test {
     gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
-    )!!;
+    );
 
     CommandAllocatorOperationArgs operation_args = {
         .state     = state,
@@ -935,7 +935,7 @@ fn void command_table_exhaustion_restores_allocator_claim() @test {
     gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
-    )!!;
+    );
     uint saved_next_new = state.commands.next_new;
     uint saved_free_head = state.commands.free_head;
     uint available_index = slot.available[0];
@@ -987,7 +987,7 @@ fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
     gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
-    )!!;
+    );
     uint available_index = slot.available[0];
     gpu::internal::vk::CommandScratch* scratch = &slot.scratch[available_index];
     gpu::CommandList token = {
@@ -1060,7 +1060,7 @@ fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
     gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
-    )!!;
+    );
     uint available_index = slot.available[0];
     gpu::internal::vk::CommandScratch* scratch = &slot.scratch[available_index];
     gpu::CommandList token = {
@@ -1133,7 +1133,7 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
     gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::internal::vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
-    )!!;
+    );
     uint available_index = slot.available[0];
     gpu::internal::vk::CommandScratch* scratch = &slot.scratch[available_index];
     CommandRecordingProbe probe;
@@ -1177,7 +1177,7 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
         "end failure preserves allocator, thread, and scratch ownership");
     assert(state.commands.next_new == next_new
         && state.commands.free_head == free_head
-        && state.commands.get(handle)!! == record
+        && state.commands.get(handle) == record
         && token.record == token_record
         && token.generation == token_generation,
         "end failure preserves the published recording token and table entry");
@@ -1268,7 +1268,7 @@ fn void mixed_held_and_in_flight_units_report_busy() @test {
     assert(@catch(gpu::begin_commands(&allocator)) == gpu::DEVICE_BUSY,
         "a unit still in flight makes begin report busy");
     gpu::internal::vk::QueueCompletionState* completion =
-        gpu::internal::vk::queue_completion_state(state, queue.id)!!;
+        gpu::internal::vk::queue_completion_state(state, queue.id);
     vk::SemaphoreSignalInfo signal = vk::semaphore_signal_info()
         .set_semaphore(completion.timeline)
         .set_value(gpu::internal::completion_point_sequence(point));

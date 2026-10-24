@@ -296,7 +296,7 @@ fn LoweredTextureBarrier? lower_texture_barrier(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    TextureSlot* slot = state.textures.get(barrier.texture)!;
+    TextureSlot* slot = state.textures.get(barrier.texture);
     vk::ImageSubresourceRange range = resolve_texture_barrier_range(
         barrier.view,
         slot,
@@ -437,7 +437,7 @@ fn bool? vk_poll_completion_with_query(
         state,
         queue_id,
         sequence,
-    )!;
+    );
     return poll_queue_completion_with_query(
         state:      state,
         completion: completion,
@@ -457,7 +457,7 @@ fn bool? vk_poll_completion_with_ops(
         state,
         queue_id,
         sequence,
-    )!;
+    );
     return poll_queue_completion_with_ops(
         state:      state,
         completion: completion,
@@ -499,7 +499,7 @@ fn void? vk_wait_completion_with_wait(
         state,
         queue_id,
         sequence,
-    )!;
+    );
     if (completion.retired_sequence.load(AtomicOrdering.ACQUIRE) >= sequence) {
         return;
     }

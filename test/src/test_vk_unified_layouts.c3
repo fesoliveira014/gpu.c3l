@@ -87,7 +87,7 @@ fn void unified_barrier_lowers_to_general() @test {
         before:  gpu::sampled_at({ .fragment_shader }),
         after:   gpu::storage_at({ .compute }, { .write }),
     )!!;
-    vk::vk_cmd_texture_barrier_with_ops(vk::resolve_command(&cmd)!!, &barrier, &ops)!!;
+    vk::vk_cmd_texture_barrier_with_ops(vk::resolve_command(&cmd), &barrier, &ops)!!;
     assert(capture.calls == 1
         && capture.native.old_layout == vk::ImageLayout.GENERAL
         && capture.native.new_layout == vk::ImageLayout.GENERAL,
@@ -103,7 +103,7 @@ fn void unified_barrier_lowers_to_general() @test {
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   gpu::storage_at({ .compute }, { .write }),
     )!!;
-    vk::vk_cmd_texture_barrier_with_ops(vk::resolve_command(&cmd)!!, &discard, &ops)!!;
+    vk::vk_cmd_texture_barrier_with_ops(vk::resolve_command(&cmd), &discard, &ops)!!;
     assert(capture.calls == 2
         && capture.native.old_layout == vk::ImageLayout.UNDEFINED
         && capture.native.new_layout == vk::ImageLayout.GENERAL,
@@ -114,7 +114,7 @@ fn void unified_barrier_lowers_to_general() @test {
         before:  gpu::storage_at({ .compute }, { .write }),
         after:   { .layout = gpu::TextureLayout.SAMPLED, .stages = { .compute }, .access = { .read, .write } },
     )!!;
-    vk::vk_cmd_texture_barrier_with_ops(vk::resolve_command(&cmd)!!, &sampled_write, &ops)!!;
+    vk::vk_cmd_texture_barrier_with_ops(vk::resolve_command(&cmd), &sampled_write, &ops)!!;
     assert(capture.calls == 3, "layout-specific access rules are lifted in the mode");
     assert(capture.native.dst_access_mask
             == ((vk::AccessFlags2)vk::AccessFlagBits2.ACCESS_2_MEMORY_READ_BIT

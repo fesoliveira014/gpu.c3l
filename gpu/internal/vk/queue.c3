@@ -1025,7 +1025,7 @@ fn void destroy_queue_completions(VkDeviceState* state) @private {
     state.queue_completions = {};
 }
 
-fn QueueCompletionState*? queue_completion_state(
+fn QueueCompletionState* queue_completion_state(
     VkDeviceState* state,
     uint queue_id,
 ) {
@@ -1052,14 +1052,14 @@ fn uint primary_completion_id(
     }
 }
 
-fn QueueCompletionState*? queue_completion_for_kind(
+fn QueueCompletionState* queue_completion_for_kind(
     VkDeviceState* state,
     gpu::QueueKind kind,
 ) @private {
     QueueCompletionState* completion = queue_completion_state(
         state,
         primary_completion_id(state, kind),
-    )!;
+    );
     bool supported;
     switch (kind) {
         case gpu::QueueKind.GRAPHICS: supported = completion.roles.graphics;
@@ -1070,11 +1070,11 @@ fn QueueCompletionState*? queue_completion_for_kind(
     return completion;
 }
 
-fn gpu::Queue? queue_token_for_kind(
+fn gpu::Queue queue_token_for_kind(
     VkDeviceState* state,
     gpu::QueueKind kind,
 ) @private {
-    QueueCompletionState* completion = queue_completion_for_kind(state, kind)!;
+    QueueCompletionState* completion = queue_completion_for_kind(state, kind);
     return {
         .device = state.owner,
         .id     = primary_completion_id(state, kind),
@@ -1127,7 +1127,7 @@ fn gpu::CompletionPoint? reserve_queue_completion_locked(
     QueueCompletionState* completion = queue_completion_state(
         state,
         queue.id,
-    )!;
+    );
     if ((uint)completion.roles != (uint)queue.roles) {
         abort("gpu: mismatched Queue");
     }
@@ -1141,13 +1141,13 @@ fn gpu::CompletionPoint? reserve_queue_completion(
     QueueCompletionState* completion = queue_completion_state(
         state,
         queue.id,
-    )!;
+    );
     completion.submission_mutex.lock()!!;
     defer completion.submission_mutex.unlock();
     return reserve_queue_completion_locked(state, queue);
 }
 
-fn void? cancel_queue_completion_locked(
+fn void cancel_queue_completion_locked(
     VkDeviceState* state,
     gpu::CompletionPoint point,
 ) @private {
@@ -1157,7 +1157,7 @@ fn void? cancel_queue_completion_locked(
     QueueCompletionState* completion = queue_completion_state(
         state,
         gpu::internal::completion_point_queue_id(point),
-    )!;
+    );
     ulong sequence = gpu::internal::completion_point_sequence(point);
     ulong published = completion.published_sequence.load(
         AtomicOrdering.ACQUIRE,
@@ -1169,7 +1169,7 @@ fn void? cancel_queue_completion_locked(
 }
 
 <* Publish a point only after its native queue submission succeeds. *>
-fn void? publish_queue_completion_locked(
+fn void publish_queue_completion_locked(
     VkDeviceState* state,
     gpu::CompletionPoint point,
 ) @private {
@@ -1181,7 +1181,7 @@ fn void? publish_queue_completion_locked(
     QueueCompletionState* completion = queue_completion_state(
         state,
         queue_id,
-    )!;
+    );
     ulong published = completion.published_sequence.load(
         AtomicOrdering.ACQUIRE,
     );
@@ -1191,20 +1191,20 @@ fn void? publish_queue_completion_locked(
     completion.published_sequence.store(sequence, AtomicOrdering.RELEASE);
 }
 
-fn void? publish_queue_completion(
+fn void publish_queue_completion(
     VkDeviceState* state,
     gpu::CompletionPoint point,
 ) {
     QueueCompletionState* completion = queue_completion_state(
         state,
         gpu::internal::completion_point_queue_id(point),
-    )!;
+    );
     completion.submission_mutex.lock()!!;
     defer completion.submission_mutex.unlock();
-    return publish_queue_completion_locked(state, point);
+    publish_queue_completion_locked(state, point);
 }
 
-fn QueueCompletionState*? published_queue_completion_state(
+fn QueueCompletionState* published_queue_completion_state(
     VkDeviceState* state,
     uint queue_id,
     ulong sequence,
@@ -1212,7 +1212,7 @@ fn QueueCompletionState*? published_queue_completion_state(
     QueueCompletionState* completion = queue_completion_state(
         state,
         queue_id,
-    )!;
+    );
     if (sequence == 0
         || sequence > completion.published_sequence.load(
             AtomicOrdering.ACQUIRE,
@@ -1240,7 +1240,7 @@ fn uint swapchain_idle_queues(
 
 <* Aliased semantic roles share the selected queue identity's submission mutex. *>
 fn Mutex* queue_mutex_for(VkDeviceState* state, gpu::QueueKind kind) @private {
-    QueueCompletionState* completion = queue_completion_for_kind(state, kind)!!;
+    QueueCompletionState* completion = queue_completion_for_kind(state, kind);
     return &completion.submission_mutex;
 }
 
@@ -1286,7 +1286,7 @@ fn CommandRecord*[]? claim_submit_records_locked(
                 token.generation,
                 token.device_identity,
                 gpu::internal::HandleKind.EXECUTABLE_COMMAND_LIST,
-            )!;
+            );
         if (record.device != queue.device
             || record.device_state != state) {
             abort("gpu: foreign ExecutableCommandList");
@@ -1430,8 +1430,8 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
         gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
             state,
             desc.readiness,
-        )!;
-        inputs.swapchain = state.presentation.swapchains.get(handle)!;
+        );
+        inputs.swapchain = state.presentation.swapchains.get(handle);
         swapchain_submit_guard(
             acquire_pending:      inputs.swapchain.acquire_pending,
             readiness_consumed:   inputs.swapchain.readiness_consumed,
@@ -1455,7 +1455,7 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
                 state,
                 gpu::internal::completion_point_queue_id(point),
                 sequence,
-            )!;
+            );
             vk::PipelineStageFlags2 stages = submit_wait_stages_to_vk(
                 stages:         wait.before,
                 flags:          target.queue_flags,
@@ -1523,7 +1523,7 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     QueueCompletionState* completion = queue_completion_state(
         state,
         queue.id,
-    )!;
+    );
     QueueSubmitScratch* scratch = completion.submit_scratch;
     if (scratch == null) unreachable();
     gpu::TextureHandle[] pending = state.unified_layouts
@@ -1659,7 +1659,7 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
         if (absorb_device_loss(state, "submit", result)) {
             lost = true;
         } else if (result != vk::Result.SUCCESS) {
-            cancel_queue_completion_locked(state, point)!!;
+            cancel_queue_completion_locked(state, point);
             check_backend_result(
                 state:     state,
                 operation: "submit",
@@ -1696,7 +1696,7 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     foreach (record : records) {
         record.state = gpu::internal::CommandState.SUBMITTED;
     }
-    publish_queue_completion_locked(state, point)!!;
+    publish_queue_completion_locked(state, point);
     if (lost) retire_observed_queue(state, completion, ulong::max);
     $if env::TESTING:
         reach_submission_checkpoint(

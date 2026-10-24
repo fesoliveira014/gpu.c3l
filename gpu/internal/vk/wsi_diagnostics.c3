@@ -98,11 +98,11 @@ fn void? check_wsi_backend_result(
     return public_fault~;
 }
 
-fn SwapchainSlot*? resolve_swapchain_for_operation(
+fn SwapchainSlot* resolve_swapchain_for_operation(
     WsiDiagnosticContext* context,
     gpu::SwapchainHandle handle,
 ) {
-    SwapchainSlot* slot = context.state.presentation.swapchains.get(handle)!;
+    SwapchainSlot* slot = context.state.presentation.swapchains.get(handle);
     context.has_public_identity = true;
     context.index = handle.index;
     context.generation = handle.generation;
@@ -110,7 +110,7 @@ fn SwapchainSlot*? resolve_swapchain_for_operation(
     return slot;
 }
 
-fn TextureSlot*? resolve_swapchain_texture_for_operation(
+fn TextureSlot* resolve_swapchain_texture_for_operation(
     WsiDiagnosticContext* context,
     gpu::TextureHandle handle,
 ) {

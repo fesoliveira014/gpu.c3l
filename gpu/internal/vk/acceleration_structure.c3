@@ -317,9 +317,9 @@ prepare_acceleration_structure_clone(
         return gpu::INVALID_ARGUMENT~;
     }
     AccelerationStructureSlot* source_slot =
-        state.acceleration_structures.get(source)!;
+        state.acceleration_structures.get(source);
     AccelerationStructureSlot* destination_slot =
-        state.acceleration_structures.get(destination)!;
+        state.acceleration_structures.get(destination);
     if (destination_slot.desc.requirements.storage_size
         < source_slot.desc.requirements.storage_size) {
         return gpu::INVALID_ARGUMENT~;
@@ -434,7 +434,7 @@ prepare_acceleration_structure_build_mode(
         return gpu::UNSUPPORTED_FEATURE~;
     }
     AccelerationStructureSlot* destination =
-        state.acceleration_structures.get(desc.destination)!;
+        state.acceleration_structures.get(desc.destination);
     if (update
         && (!destination.desc.flags.allow_update
             || destination.desc.requirements.update_scratch_size == 0)) {
@@ -724,7 +724,7 @@ fn AccelerationStructureSlot* AccelerationStructureTable.find(&self, gpu::Accele
     return &self.slots[handle.index].value;
 }
 
-fn AccelerationStructureSlot*? AccelerationStructureTable.get(&self, gpu::AccelerationStructureHandle handle) {
+fn AccelerationStructureSlot* AccelerationStructureTable.get(&self, gpu::AccelerationStructureHandle handle) {
     if (handle.owner != self.owner) abort("gpu: foreign AccelerationStructureHandle");
     AccelerationStructureSlot* slot = self.find(handle);
     if (slot == null) abort("gpu: stale AccelerationStructureHandle");
@@ -735,7 +735,7 @@ fn AccelerationStructureSlot? AccelerationStructureTable.free(
     &self,
     gpu::AccelerationStructureHandle handle,
 ) {
-    AccelerationStructureSlot released = *self.get(handle)!;
+    AccelerationStructureSlot released = *self.get(handle);
     uint index = handle.index;
     self.slots[index].value = {};
     self.slots[index].used = false;
@@ -1242,7 +1242,7 @@ fn gpu::AccelerationStructureHandle? vk_create_placed_acceleration_structure(
 
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    AllocationSlot* allocation_slot = state.allocations.get(allocation)!;
+    AllocationSlot* allocation_slot = state.allocations.get(allocation);
     if (allocation_slot.live_placements == uint::max) {
         return gpu::INVALID_RESOURCE_STATE~;
     }
@@ -1381,7 +1381,7 @@ fn gpu::GpuAddress? vk_get_acceleration_structure_address(
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     AccelerationStructureSlot* slot =
-        state.acceleration_structures.get(acceleration_structure)!;
+        state.acceleration_structures.get(acceleration_structure);
     if (slot.desc.kind != gpu::AccelerationStructureKind.BOTTOM_LEVEL) {
         return gpu::INVALID_ARGUMENT~;
     }

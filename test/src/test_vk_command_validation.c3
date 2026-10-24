@@ -82,7 +82,7 @@ fn void global_barrier_emits_no_texture_barrier() @test {
         .after  = { .compute },
     };
     vk::vk_cmd_barrier_with_ops(
-        vk::resolve_command(&commands)!!,
+        vk::resolve_command(&commands),
         &dependency,
         &ops,
     )!!;
@@ -104,7 +104,7 @@ fn void acceleration_structure_barrier_emits_exact_native_dependency() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
     bool previous_acceleration_structures = record.device_state.acceleration_structures_enabled;
     defer record.device_state.acceleration_structures_enabled = previous_acceleration_structures;
     bool previous_ray_queries = record.device_state.ray_queries_enabled;
@@ -158,7 +158,7 @@ fn void pipeline_only_compute_to_indirect_barrier_omits_ray_query_access() @test
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
     record.device_state.acceleration_structures_enabled = true;
     record.device_state.ray_tracing_pipelines_enabled = true;
     record.device_state.ray_queries_enabled = false;
@@ -195,7 +195,7 @@ fn void compute_to_index_input_barrier_lowers_index_read() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
 
     BarrierEmitCapture capture = {};
     vk::BarrierEmitOps ops = { .user_data = &capture, .emit = &capture_barrier_emit };
@@ -228,7 +228,7 @@ fn void pipeline_only_build_to_trace_barrier_keeps_acceleration_read() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
     record.device_state.acceleration_structures_enabled = true;
     record.device_state.ray_tracing_pipelines_enabled = true;
     record.device_state.ray_queries_enabled = false;
@@ -482,7 +482,7 @@ fn void bound_pipeline_borrow_uses_command_snapshot_storage() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
 
     assert(@catch(vk::borrow_bound_pipeline(record))
             == gpu::INVALID_RESOURCE_STATE,
@@ -538,7 +538,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
     gpu::cmd_bind_pipeline(&commands, compute.pipeline)!!;
     gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
 
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
     gpu::SamplerDesc sampler_desc = {};
     (void)gpu::intern_sampler(&device, &sampler_desc)!!;
     gpu::cmd_bind_pipeline(&commands, compute_alias.pipeline)!!;
@@ -683,7 +683,7 @@ fn void dispatch_uses_bind_time_pipeline_snapshot() @test {
     bool saved_used = bound_cell.used;
     assert(saved_layout != alternate_cell.value.layout,
         "the alternate pipeline provides a distinct backing layout");
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
     assert(record.logical_pipeline.layout == saved_layout,
         "binding snapshots the selected pipeline layout");
 
