@@ -638,7 +638,7 @@ fn gpu::RayTracingPipelineInfo? vk_get_ray_tracing_pipeline_info(
 ) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    PipelineSlot* slot = state.pipelines.get(pipeline)!;
+    PipelineSlot* slot = state.pipelines.get(pipeline);
     if (!pipeline_kind_matches(state, slot, PipelineKind.RAY_TRACING)) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -678,7 +678,7 @@ fn void? vk_get_ray_tracing_shader_group_handles_with_ops(
     }
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    PipelineSlot* slot = state.pipelines.get(pipeline)!;
+    PipelineSlot* slot = state.pipelines.get(pipeline);
     if (!pipeline_kind_matches(state, slot, PipelineKind.RAY_TRACING)) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -834,7 +834,7 @@ fn ulong? vk_get_ray_tracing_shader_group_stack_size_with_ops(
         lower_ray_tracing_group_shader(group_shader)!;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    PipelineSlot* slot = state.pipelines.get(pipeline)!;
+    PipelineSlot* slot = state.pipelines.get(pipeline);
     if (!pipeline_kind_matches(state, slot, PipelineKind.RAY_TRACING)) {
         return gpu::INVALID_ARGUMENT~;
     }

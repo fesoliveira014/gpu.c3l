@@ -147,12 +147,12 @@ fn void completion_observation_advances_for_poll_and_wait() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::QueueCompletionState* completion =
-        vk::queue_completion_state(state, queue.id)!!;
+        vk::queue_completion_state(state, queue.id);
 
     gpu::CompletionPoint first = vk::reserve_queue_completion(state, queue)!!;
-    vk::publish_queue_completion(state, first)!!;
+    vk::publish_queue_completion(state, first);
     gpu::CompletionPoint second = vk::reserve_queue_completion(state, queue)!!;
-    vk::publish_queue_completion(state, second)!!;
+    vk::publish_queue_completion(state, second);
 
     vk::SemaphoreSignalInfo signal = vk::semaphore_signal_info()
         .set_semaphore(completion.timeline)
@@ -197,9 +197,9 @@ fn void queue_completion_poll_wait_is_reusable() @test {
         queue,
     )!!;
     vk::QueueCompletionState* completion =
-        vk::queue_completion_state(state, queue.id)!!;
+        vk::queue_completion_state(state, queue.id);
 
-    vk::publish_queue_completion(state, point)!!;
+    vk::publish_queue_completion(state, point);
     assert(!gpu::poll_completion(point)!!,
         "a published queue sequence remains incomplete until signaled");
     assert(@catch(gpu::wait_completion(point, 0)) == gpu::WAIT_TIMEOUT,
@@ -210,7 +210,7 @@ fn void queue_completion_poll_wait_is_reusable() @test {
         queue,
     )!!;
     completion.submission_mutex.lock()!!;
-    vk::cancel_queue_completion_locked(state, future)!!;
+    vk::cancel_queue_completion_locked(state, future);
     completion.submission_mutex.unlock();
 
     vk::SemaphoreSignalInfo signal = vk::semaphore_signal_info()
@@ -238,7 +238,7 @@ fn void completion_cache_skips_native_and_locked_work() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint point = vk::reserve_queue_completion(state, queue)!!;
-    vk::publish_queue_completion(state, point)!!;
+    vk::publish_queue_completion(state, point);
     ulong sequence = gpu::internal::completion_point_sequence(point);
 
     completion_injected_counter = sequence;
@@ -256,7 +256,7 @@ fn void completion_cache_skips_native_and_locked_work() @test {
     completion_injected_wait_calls = 0;
     completion_injected_wait_result = vk::Result.ERROR_DEVICE_LOST;
     vk::QueueCompletionState* completion =
-        vk::queue_completion_state(state, queue.id)!!;
+        vk::queue_completion_state(state, queue.id);
     CompletionMutexHolderArgs holder_args = {
         .mutex = &completion.retirement_mutex,
     };
@@ -297,7 +297,7 @@ fn void concurrent_cached_waits_skip_native_work() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint point = vk::reserve_queue_completion(state, queue)!!;
-    vk::publish_queue_completion(state, point)!!;
+    vk::publish_queue_completion(state, point);
     ulong sequence = gpu::internal::completion_point_sequence(point);
     completion_injected_counter = sequence;
     assert(vk::vk_poll_completion_with_query(
@@ -338,11 +338,11 @@ fn void wait_retires_exact_sequence_and_timeout_preserves_state() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint first = vk::reserve_queue_completion(state, queue)!!;
-    vk::publish_queue_completion(state, first)!!;
+    vk::publish_queue_completion(state, first);
     gpu::CompletionPoint second = vk::reserve_queue_completion(state, queue)!!;
-    vk::publish_queue_completion(state, second)!!;
+    vk::publish_queue_completion(state, second);
     vk::QueueCompletionState* completion =
-        vk::queue_completion_state(state, queue.id)!!;
+        vk::queue_completion_state(state, queue.id);
 
     completion_injected_wait_calls = 0;
     completion_injected_wait_result = vk::Result.SUCCESS;
@@ -390,7 +390,7 @@ fn void concurrent_first_observers_retire_monotonically() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint point = vk::reserve_queue_completion(state, queue)!!;
-    vk::publish_queue_completion(state, point)!!;
+    vk::publish_queue_completion(state, point);
     ulong sequence = gpu::internal::completion_point_sequence(point);
 
     completion_injected_counter = sequence;
@@ -429,7 +429,7 @@ fn void concurrent_first_observers_retire_monotonically() @test {
     assert(completion_race_arrived.load(AtomicOrdering.ACQUIRE) == 2
             && gate.arrived.load(AtomicOrdering.ACQUIRE) == 2,
         "both first observers reach the query and retirement checkpoints");
-    assert(vk::queue_completion_state(state, queue.id)!!
+    assert(vk::queue_completion_state(state, queue.id)
             .retired_sequence.load(AtomicOrdering.ACQUIRE) == sequence,
         "the concurrent retired prefix is exact and monotonic");
 }

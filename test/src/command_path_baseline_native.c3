@@ -20,7 +20,7 @@ struct CommandPathNativeCopy {
 fn CommandPathNativeContext? command_path_native_context(
     gpu::CommandList* commands,
 ) {
-    CommandRecord* record = gpu::internal::recording_command(commands)!;
+    CommandRecord* record = gpu::internal::recording_command(commands);
     return {
         .record          = record,
         .pipeline_layout = record.logical_pipeline.layout,

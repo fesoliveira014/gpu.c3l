@@ -138,7 +138,7 @@ fn TimestampPoolSlot* TimestampPoolTable.find(&self, gpu::TimestampPoolHandle ha
     return &self.slots[handle.index].value;
 }
 
-fn TimestampPoolSlot*? TimestampPoolTable.get(&self, gpu::TimestampPoolHandle handle) {
+fn TimestampPoolSlot* TimestampPoolTable.get(&self, gpu::TimestampPoolHandle handle) {
     if (handle.owner != self.owner) abort("gpu: foreign TimestampPoolHandle");
     TimestampPoolSlot* slot = self.find(handle);
     if (slot == null) abort("gpu: stale TimestampPoolHandle");
@@ -149,7 +149,7 @@ fn void? TimestampPoolTable.free(
     &self,
     gpu::TimestampPoolHandle handle,
 ) {
-    self.get(handle)!;
+    self.get(handle);
     uint index = handle.index;
     self.slots[index].used = false;
     if (!should_recycle_handle_generation(self.slots[index].generation)) {
@@ -269,7 +269,7 @@ fn void? destroy_timestamp_pool_with(
     TimestampPoolNativeOps* ops,
 ) {
     if (table == null || ops == null) return gpu::INVALID_ARGUMENT~;
-    TimestampPoolSlot* slot = table.get(handle)!;
+    TimestampPoolSlot* slot = table.get(handle);
     vk::QueryPool pool = slot.pool;
     table.free(handle)!;
     ops.destroy(ops.user_data, device, pool);
@@ -287,7 +287,7 @@ fn void? read_timestamps_with(
     if (table == null || ops == null || out.ptr == null || out.len < count) {
         return gpu::INVALID_ARGUMENT~;
     }
-    TimestampPoolSlot* slot = table.get(pool)!;
+    TimestampPoolSlot* slot = table.get(pool);
     validate_timestamp_range(slot.capacity, first, count)!;
     usz data_size = timestamp_result_bytes(count)!;
     vk::Result result = ops.read(
@@ -366,7 +366,7 @@ fn void? vk_destroy_timestamp_pool(
 ) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    TimestampPoolSlot* slot = state.timestamp_pools.get(pool)!;
+    TimestampPoolSlot* slot = state.timestamp_pools.get(pool);
     vk::QueryPool native_pool = slot.pool;
     state.timestamp_pools.free(pool)!;
     vk::destroy_query_pool(state.device, native_pool, null);
@@ -382,7 +382,7 @@ fn void? vk_read_timestamps(
     if (out.ptr == null || out.len < count) return gpu::INVALID_ARGUMENT~;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    TimestampPoolSlot* slot = state.timestamp_pools.get(pool)!;
+    TimestampPoolSlot* slot = state.timestamp_pools.get(pool);
     validate_timestamp_range(slot.capacity, first, count)!;
     usz required = timestamp_result_bytes(count)!;
     if (device_lost(state)) {
@@ -436,7 +436,7 @@ fn TimestampPoolSlot*? lower_timestamp_pool_range(
     }
     if (!recording) return gpu::COMMAND_RECORDING_ERROR~;
     TimestampPoolSlot* slot =
-        record.device_state.timestamp_pools.get(pool)!;
+        record.device_state.timestamp_pools.get(pool);
     validate_timestamp_range(slot.capacity, first, count)!;
     return slot;
 }

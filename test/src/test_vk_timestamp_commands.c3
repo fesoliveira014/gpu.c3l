@@ -173,9 +173,9 @@ fn TimestampCommandFixture? create_timestamp_command_fixture(
     defer catch (void)gpu::destroy_command_allocator(&allocator);
     gpu::CommandList commands = gpu::begin_commands(&allocator)!;
     defer catch (void)gpu::discard_commands(&commands);
-    CommandRecord* record = resolve_command(&commands)!;
+    CommandRecord* record = resolve_command(&commands);
     QueueCompletionState* completion =
-        queue_completion_state(state, record.queue.id)!;
+        queue_completion_state(state, record.queue.id);
     completion.queue_flags = (vk::QueueFlags)(
         (uint)vk::QueueFlagBits.GRAPHICS_BIT
             | (uint)vk::QueueFlagBits.COMPUTE_BIT
@@ -262,9 +262,9 @@ fn void timestamp_commands_emit_exact_native_parameters() @test {
     TimestampCommandProbe probe;
     TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
     TimestampPoolSlot* pool_slot =
-        fixture.state.timestamp_pools.get(fixture.pool)!!;
+        fixture.state.timestamp_pools.get(fixture.pool);
     AllocationSlot* allocation_slot =
-        fixture.state.allocations.get(fixture.allocation)!!;
+        fixture.state.allocations.get(fixture.allocation);
     gpu::GpuSpan destination = fixture.destination;
     destination.offset = 16;
     destination.size = 3 * ulong::size;
@@ -384,7 +384,7 @@ fn void timestamp_transfer_stage_accepts_implicit_graphics_support() @test {
     QueueCompletionState* completion = queue_completion_state(
         fixture.state,
         fixture.record.queue.id,
-    )!!;
+    );
     completion.queue_flags = (vk::QueueFlags)
         vk::QueueFlagBits.GRAPHICS_BIT;
 
@@ -518,7 +518,7 @@ fn void timestamp_destination_bounds_are_transactional() @test {
     TimestampCommandProbe probe;
     TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
     AllocationSlot* allocation_slot =
-        fixture.state.allocations.get(fixture.allocation)!!;
+        fixture.state.allocations.get(fixture.allocation);
     gpu::GpuSpan destination = fixture.destination;
 
     destination = fixture.destination;

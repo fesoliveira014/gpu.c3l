@@ -732,7 +732,7 @@ fn usz? vk_get_pipeline_cache_data(
 
 fn uint stub_sampler_intern_attempt_count(gpu::Device* device) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     VkDeviceState* state = operation.state;
     lock_stub_samplers(state);
@@ -742,7 +742,7 @@ fn uint stub_sampler_intern_attempt_count(gpu::Device* device) {
 
 fn uint stub_sampler_native_create_count(gpu::Device* device) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     VkDeviceState* state = operation.state;
     lock_stub_samplers(state);
@@ -761,7 +761,7 @@ fn void destroy_vk_runtime_state(VkRuntimeState* state) {
     mem::free(state);
 }
 
-fn gpu::AdapterInfo? vk_get_adapter_info(VkRuntimeState* state, uint index) {
+fn gpu::AdapterInfo vk_get_adapter_info(VkRuntimeState* state, uint index) {
     device_support_queries++;
     if (state == null || index >= state.adapter_count) abort("gpu: corrupt Adapter");
     return {
@@ -855,7 +855,7 @@ fn bool? vk_adapter_supports_sparse_textures(
     return configured_sparse_texture_support;
 }
 
-fn gpu::AdapterDiagnostics? vk_get_adapter_diagnostics(
+fn gpu::AdapterDiagnostics vk_get_adapter_diagnostics(
     VkRuntimeState* state,
     uint index,
 ) {
@@ -1098,7 +1098,7 @@ fn void stub_fail_device_after_temporary_allocation(bool fail) {
 fn gpu::Adapter stub_last_device_adapter() => last_device_adapter;
 
 fn gpu::Adapter? stub_device_adapter(gpu::Device* device) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     VkDeviceState* state = operation.state;
     if (state == null) abort("gpu: corrupt Device");
@@ -1237,7 +1237,7 @@ fn fault vk_report_root_contract_failure(
     return public_fault;
 }
 
-fn gpu::MemoryStats? vk_get_memory_stats(VkDeviceState* state) {
+fn gpu::MemoryStats vk_get_memory_stats(VkDeviceState* state) {
     state.memory_stats_entered.store(true, AtomicOrdering.RELEASE);
     while (state.block_memory_stats
         && !state.memory_stats_release.load(AtomicOrdering.ACQUIRE)) {
@@ -1246,7 +1246,7 @@ fn gpu::MemoryStats? vk_get_memory_stats(VkDeviceState* state) {
     return {};
 }
 
-fn String? vk_build_memory_report(VkDeviceState* state, bool detailed) {
+fn String vk_build_memory_report(VkDeviceState* state, bool detailed) {
     (void)state;
     (void)detailed;
     return {};
@@ -1334,7 +1334,7 @@ fn void vk_report_abandoned_allocation(
     state.abandoned_allocation_debug_name = debug_name;
 }
 
-fn gpu::AllocationInfo? vk_get_allocation_info(
+fn gpu::AllocationInfo vk_get_allocation_info(
     VkDeviceState* state,
     gpu::GpuAllocation allocation,
 ) {
@@ -1675,7 +1675,7 @@ fn void? vk_resize_swapchain(
     state.swapchain_info.height = height;
 }
 
-fn gpu::SwapchainInfo? vk_get_swapchain_info(
+fn gpu::SwapchainInfo vk_get_swapchain_info(
     VkDeviceState* state,
     gpu::SwapchainHandle handle,
 ) {
@@ -1768,7 +1768,7 @@ fn gpu::Device? create_vk_device(
         transfer_aliases_compute:    true,
     )!;
     gpu::internal::RuntimeData* runtime_data =
-        gpu::internal::require_runtime(retained_runtime)!;
+        gpu::internal::require_runtime(retained_runtime);
     gpu::DeviceCaps caps = {
         .presentation_enabled = normalized.surface.is_valid(),
         .max_sampler_lod_bias = STUB_SAMPLER_LOD_BIAS_LIMIT,

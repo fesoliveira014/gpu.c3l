@@ -284,7 +284,7 @@ fn ResolvedSparseBacking? resolve_sparse_backing_locked(
         return {};
     }
     if (!allocation.is_valid()) abort("gpu: malformed GpuAllocation");
-    AllocationSlot* slot = state.allocations.get(allocation)!;
+    AllocationSlot* slot = state.allocations.get(allocation);
     gpu::TextureRequirements requirements =
         texture.sparse_requirements.page_allocation;
     if (slot.memory_class != gpu::MemoryClass.TEXTURE
@@ -440,7 +440,7 @@ fn void? validate_sparse_backings_locked(
     }
 }
 
-fn void? validate_sparse_wait_publications(
+fn void validate_sparse_wait_publications(
     VkDeviceState* state,
     gpu::CompletionPoint[] waits,
 ) {
@@ -452,7 +452,7 @@ fn void? validate_sparse_wait_publications(
             state,
             gpu::internal::completion_point_queue_id(point),
             gpu::internal::completion_point_sequence(point),
-        )!;
+        );
     }
 }
 
@@ -905,7 +905,7 @@ fn gpu::SparseTextureRequirements? vk_get_sparse_texture_requirements(
 ) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    TextureSlot* slot = state.textures.get(texture)!;
+    TextureSlot* slot = state.textures.get(texture);
     if (!slot.sparse) return gpu::INVALID_ARGUMENT~;
     return slot.sparse_requirements;
 }
@@ -942,7 +942,7 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     }
 
     if (queue.device != state.owner) abort("gpu: foreign Queue");
-    QueueCompletionState* target = queue_completion_state(state, queue.id)!;
+    QueueCompletionState* target = queue_completion_state(state, queue.id);
     if ((uint)target.roles != (uint)queue.roles) {
         abort("gpu: mismatched Queue");
     }
@@ -954,13 +954,13 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
-        TextureSlot* texture = state.textures.get(desc.texture)!;
+        TextureSlot* texture = state.textures.get(desc.texture);
         if (!texture.sparse) return gpu::INVALID_ARGUMENT~;
         validate_sparse_tile_geometry(texture, desc.tiles)!;
         validate_sparse_opaque_geometry(texture, desc.opaque)!;
         validate_sparse_backings_locked(state, texture, desc)!;
     }
-    validate_sparse_wait_publications(state, desc.waits)!;
+    validate_sparse_wait_publications(state, desc.waits);
 
     vk::Semaphore[] wait_semaphores;
     ulong[] wait_values;
@@ -1045,7 +1045,7 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     state.resource_mutex.lock()!!;
     resource_locked = true;
     defer if (resource_locked) state.resource_mutex.unlock();
-    TextureSlot* texture = state.textures.get(desc.texture)!;
+    TextureSlot* texture = state.textures.get(desc.texture);
     if (!texture.sparse) return gpu::INVALID_ARGUMENT~;
     validate_sparse_tile_geometry(texture, desc.tiles)!;
     validate_sparse_opaque_geometry(texture, desc.opaque)!;
@@ -1133,7 +1133,7 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
             state,
             gpu::internal::completion_point_queue_id(point),
             sequence,
-        )!;
+        );
         wait_semaphores[i] = source.timeline;
         wait_values[i] = sequence;
         if (source == target && sequence > maximum_same_queue_wait) {
@@ -1221,7 +1221,7 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
         if (absorb_device_loss(state, "bind_sparse_texture_memory", result)) {
             lost = true;
         } else if (result != vk::Result.SUCCESS) {
-            cancel_queue_completion_locked(state, point)!!;
+            cancel_queue_completion_locked(state, point);
             check_backend_result(
                 state:     state,
                 operation: "bind_sparse_texture_memory",
@@ -1241,7 +1241,7 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     target.pending_sparse_sequence = signal_value;
     state.resource_mutex.unlock();
     resource_locked = false;
-    publish_queue_completion_locked(state, point)!!;
+    publish_queue_completion_locked(state, point);
     if (lost) retire_observed_queue(state, target, ulong::max);
     return point;
 }

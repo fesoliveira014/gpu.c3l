@@ -72,9 +72,9 @@ null object pointer, or broken internal invariant is a programming error:
 `abort("gpu: stale TextureHandle")` where it is detected; the panic backtrace
 shows the public call. A check that must not terminate, such as a liveness
 probe, uses the non-terminating lookup (`find` on a slot table,
-`resolve_runtime`, `find_command_record`), which returns null. A public
-function with no remaining fault returns `T` or `void` and unwraps internal
-optionals with `!!`.
+`resolve_runtime`, `find_command_record`), which returns null. A function
+with no remaining fault, public or internal, returns `T` or `void`; it
+unwraps with `!!` a callee's optional that cannot fail at that call.
 
 ## 7. Handles
 

@@ -539,7 +539,7 @@ fn void discarded_command_buffer_is_reused_by_recording_owner() @test {
     gpu::CommandList abandoned = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&abandoned)!!;
     vk::CommandBuffer abandoned_buffer =
-        vk::resolve_command(&abandoned)!!.command_buffer;
+        vk::resolve_command(&abandoned).command_buffer;
     gpu::ExecutableCommandList executable = gpu::end_commands(&abandoned)!!;
     defer discard_test_executable(&executable)!!;
     gpu::discard_executable_commands(&executable)!!;
@@ -549,7 +549,7 @@ fn void discarded_command_buffer_is_reused_by_recording_owner() @test {
 
     gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;
-    assert(vk::resolve_command(&next)!!.command_buffer == abandoned_buffer,
+    assert(vk::resolve_command(&next).command_buffer == abandoned_buffer,
         "the recording owner reuses the discarded command buffer");
 }
 
@@ -563,7 +563,7 @@ fn void submitted_command_buffer_recycles_at_completion() @test {
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     vk::CommandBuffer submitted_buffer =
-        vk::resolve_command(&commands)!!.command_buffer;
+        vk::resolve_command(&commands).command_buffer;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
@@ -577,7 +577,7 @@ fn void submitted_command_buffer_recycles_at_completion() @test {
 
     gpu::CommandList next = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&next)!!;
-    assert(vk::resolve_command(&next)!!.command_buffer == submitted_buffer,
+    assert(vk::resolve_command(&next).command_buffer == submitted_buffer,
         "the recording owner reuses the completed command buffer");
 }
 
@@ -628,9 +628,9 @@ fn void mixed_allocators_submit_and_retire_to_exact_owners() @test {
     gpu::CommandList first_commands = gpu::begin_commands(&first)!!;
     gpu::CommandList second_commands = gpu::begin_commands(&second)!!;
     uint first_buffer =
-        vk::resolve_command(&first_commands)!!.allocator_buffer;
+        vk::resolve_command(&first_commands).allocator_buffer;
     uint second_buffer =
-        vk::resolve_command(&second_commands)!!.allocator_buffer;
+        vk::resolve_command(&second_commands).allocator_buffer;
     gpu::ExecutableCommandList[2] lists = {
         gpu::end_commands(&first_commands)!!,
         gpu::end_commands(&second_commands)!!,
@@ -638,9 +638,9 @@ fn void mixed_allocators_submit_and_retire_to_exact_owners() @test {
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionPoint completion = gpu::submit(queue, &submit)!!;
     vk::CommandAllocatorSlot* first_slot =
-        state.command_allocators.get(first.handle)!!;
+        state.command_allocators.get(first.handle);
     vk::CommandAllocatorSlot* second_slot =
-        state.command_allocators.get(second.handle)!!;
+        state.command_allocators.get(second.handle);
 
     assert(@catch(gpu::destroy_command_allocator(&first))
             == gpu::RESOURCE_IN_USE
@@ -669,8 +669,8 @@ fn void mixed_allocators_submit_and_retire_to_exact_owners() @test {
         "repeated completion observation returns each exact allocator unit once");
     gpu::CommandList first_reuse = gpu::begin_commands(&first)!!;
     gpu::CommandList second_reuse = gpu::begin_commands(&second)!!;
-    assert(vk::resolve_command(&first_reuse)!!.allocator_buffer == first_buffer
-            && vk::resolve_command(&second_reuse)!!.allocator_buffer
+    assert(vk::resolve_command(&first_reuse).allocator_buffer == first_buffer
+            && vk::resolve_command(&second_reuse).allocator_buffer
                 == second_buffer,
         "mixed retirement makes each exact preallocated buffer reusable");
     gpu::discard_commands(&first_reuse)!!;
@@ -704,7 +704,7 @@ fn void later_completion_observation_retires_multi_allocator_prefix_once() @test
 
     gpu::CommandList first_commands = gpu::begin_commands(&first)!!;
     uint first_buffer =
-        vk::resolve_command(&first_commands)!!.allocator_buffer;
+        vk::resolve_command(&first_commands).allocator_buffer;
     gpu::ExecutableCommandList[1] first_lists = {
         gpu::end_commands(&first_commands)!!,
     };
@@ -716,7 +716,7 @@ fn void later_completion_observation_retires_multi_allocator_prefix_once() @test
 
     gpu::CommandList second_commands = gpu::begin_commands(&second)!!;
     uint second_buffer =
-        vk::resolve_command(&second_commands)!!.allocator_buffer;
+        vk::resolve_command(&second_commands).allocator_buffer;
     gpu::ExecutableCommandList[1] second_lists = {
         gpu::end_commands(&second_commands)!!,
     };
@@ -726,9 +726,9 @@ fn void later_completion_observation_retires_multi_allocator_prefix_once() @test
         &second_submit,
     )!!;
     vk::CommandAllocatorSlot* first_slot =
-        state.command_allocators.get(first.handle)!!;
+        state.command_allocators.get(first.handle);
     vk::CommandAllocatorSlot* second_slot =
-        state.command_allocators.get(second.handle)!!;
+        state.command_allocators.get(second.handle);
     assert(first_slot.in_flight_buffers == 1
             && second_slot.in_flight_buffers == 1,
         "separate submissions keep both allocator units in flight");
@@ -772,7 +772,7 @@ fn void submit_uses_record_queue_without_allocator_queue_reproof() @test {
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     vk::CommandRecord* record = executable.record;
     vk::CommandAllocatorSlot* slot =
-        state.command_allocators.get(record.allocator)!!;
+        state.command_allocators.get(record.allocator);
     gpu::Queue original_queue = slot.queue;
     defer slot.queue = original_queue;
     slot.queue.id++;

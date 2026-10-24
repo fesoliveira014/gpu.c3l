@@ -21,7 +21,7 @@ struct RuntimeData @private {
 
 RuntimeData[MAX_RUNTIMES] runtime_slots @private;
 
-fn RuntimeData*? require_runtime(Runtime* runtime) @private {
+fn RuntimeData* require_runtime(Runtime* runtime) @private {
     if (runtime == null) abort("gpu: null Runtime");
     if (!runtime.is_valid()) abort("gpu: zero Runtime");
     if (runtime.reserved != 0 || runtime.index >= MAX_RUNTIMES) {
@@ -69,19 +69,19 @@ fn Runtime? register_runtime(
 }
 
 fn void? runtime_retain_surface(Runtime* runtime) @private {
-    RuntimeData* data = require_runtime(runtime)!;
+    RuntimeData* data = require_runtime(runtime);
     if (data.live_surface_count == uint::max) return gpu::INVALID_RESOURCE_STATE~;
     data.live_surface_count++;
 }
 
 fn void? runtime_release_surface(Runtime* runtime) @private {
-    RuntimeData* data = require_runtime(runtime)!;
+    RuntimeData* data = require_runtime(runtime);
     if (data.live_surface_count == 0) return gpu::INVALID_RESOURCE_STATE~;
     data.live_surface_count--;
 }
 
 fn void? runtime_retain_device(Runtime* runtime) @private {
-    RuntimeData* data = require_runtime(runtime)!;
+    RuntimeData* data = require_runtime(runtime);
     uint count = data.live_device_count.load(AtomicOrdering.RELAXED);
     while (true) {
         if (count == uint::max) return gpu::INVALID_RESOURCE_STATE~;
@@ -98,7 +98,7 @@ fn void? runtime_retain_device(Runtime* runtime) @private {
 }
 
 fn void? runtime_release_device(Runtime* runtime) @private {
-    RuntimeData* data = require_runtime(runtime)!;
+    RuntimeData* data = require_runtime(runtime);
     uint count = data.live_device_count.load(AtomicOrdering.RELAXED);
     while (true) {
         if (count == 0) return gpu::INVALID_RESOURCE_STATE~;

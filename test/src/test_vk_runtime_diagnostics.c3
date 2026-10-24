@@ -154,7 +154,7 @@ fn void command_completion_retires_its_unit() @test {
         &submit,
     )!!;
     vk::QueueCompletionState* completion_state =
-        vk::queue_completion_state(state, queue.id)!!;
+        vk::queue_completion_state(state, queue.id);
     gpu::wait_completion(completion)!!;
     assert(completion_state.submitted_count == 0,
         "completion retires the command batch");

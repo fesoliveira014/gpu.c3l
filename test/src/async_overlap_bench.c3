@@ -42,7 +42,7 @@ fn double mask_and_scale(ulong raw, uint valid_bits, float period) {
 
 fn vk::CommandBuffer command_buffer(gpu::CommandList* commands) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!!;
+        gpu::internal::recording_command(commands);
     return record.command_buffer;
 }
 

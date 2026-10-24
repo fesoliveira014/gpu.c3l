@@ -339,7 +339,7 @@ fn void sparse_texture_transaction_publishes_unbound_image() @test {
     assert(fixture.probe.image_info.extent.width == 64);
     assert(fixture.probe.image_info.extent.height == 32);
     assert(fixture.probe.image_info.extent.depth == 1);
-    vk::TextureSlot* slot = fixture.state.textures.get(handle)!!;
+    vk::TextureSlot* slot = fixture.state.textures.get(handle);
     assert(slot.sparse);
     assert(slot.image == (vk::Image)(uptr)0x510);
     assert(slot.default_view == (vk::ImageView)(uptr)0x520);
@@ -364,7 +364,7 @@ fn void sparse_three_dimensional_texture_preserves_exact_extent() @test {
             &desc,
             &ops,
         )!!;
-    vk::TextureSlot* slot = fixture.state.textures.get(handle)!!;
+    vk::TextureSlot* slot = fixture.state.textures.get(handle);
 
     assert(fixture.probe.image_info.image_type == vk::ImageType.TYPE_3D);
     assert(fixture.probe.image_info.extent.width == 64);
@@ -500,7 +500,7 @@ fn void sparse_storage_texture_creates_default_view() @test {
             &desc,
             &ops,
         )!!;
-    vk::TextureSlot* slot = fixture.state.textures.get(handle)!!;
+    vk::TextureSlot* slot = fixture.state.textures.get(handle);
 
     assert(fixture.probe.view_calls == 1);
     assert(slot.default_view == (vk::ImageView)(uptr)0x520);
@@ -520,7 +520,7 @@ fn void sparse_transfer_only_texture_omits_default_view() @test {
             &desc,
             &ops,
         )!!;
-    vk::TextureSlot* slot = fixture.state.textures.get(handle)!!;
+    vk::TextureSlot* slot = fixture.state.textures.get(handle);
 
     assert(fixture.probe.view_calls == 0);
     assert(slot.default_view == null);
