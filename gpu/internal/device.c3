@@ -148,7 +148,7 @@ fn ulong? allocate_device_resource_owner() @private {
 }
 
 <* Reject a device token whose bits can never name a live device. *>
-fn void? validate_device_token(Device* device) @private {
+fn void validate_device_token(Device* device) @private {
     if (device == null) abort("gpu: null Device");
     if (!device.is_valid()) abort("gpu: zero Device");
     if (device.reserved != 0 || device.index >= MAX_DEVICES || device.generation == 0) {
@@ -158,8 +158,8 @@ fn void? validate_device_token(Device* device) @private {
 
 <* Pin a live device. A failed CAS means another thread's CAS succeeded, so
    the loop always makes progress; contention never fails the operation. *>
-fn DeviceOperation? begin_device_operation(Device* device) @private {
-    validate_device_token(device)!;
+fn DeviceOperation begin_device_operation(Device* device) @private {
+    validate_device_token(device);
 
     DeviceSlot* slot = &device_slots[device.index];
     ulong packed = slot.control.load(AtomicOrdering.ACQUIRE);
@@ -201,8 +201,8 @@ fn DeviceOperation? begin_device_operation(Device* device) @private {
     }
 }
 
-fn DeviceOperation? borrow_retained_device_operation(Device* device) @private {
-    validate_device_token(device)!;
+fn DeviceOperation borrow_retained_device_operation(Device* device) @private {
+    validate_device_token(device);
 
     DeviceSlot* slot = &device_slots[device.index];
     DeviceSlotControl control =
@@ -340,12 +340,12 @@ fn HandleKind resource_owner_handle_kind(ResourceOwnerKind kind) @private {
     }
 }
 
-fn void? validate_resource_owner(
+fn void validate_resource_owner(
     DeviceOperation* operation,
     ulong owner,
     ResourceOwnerKind kind,
 ) @private {
-    return validate_reported_resource_owner(
+    validate_reported_resource_owner(
         operation:   operation,
         owner:       owner,
         kind:        kind,
@@ -353,7 +353,7 @@ fn void? validate_resource_owner(
     );
 }
 
-fn void? validate_reported_resource_owner(
+fn void validate_reported_resource_owner(
     DeviceOperation* operation,
     ulong owner,
     ResourceOwnerKind kind,
@@ -435,8 +435,8 @@ fn Device? register_device(
     Adapter registered_adapter;
     RuntimeData* runtime_data;
     if (has_runtime) {
-        runtime_data = require_runtime(retained_runtime)!;
-        RuntimeData* adapter_data = require_adapter(adapter)!;
+        runtime_data = require_runtime(retained_runtime);
+        RuntimeData* adapter_data = require_adapter(adapter);
         if (adapter_data != runtime_data) {
             abort("gpu: mismatched Adapter");
         }
@@ -448,7 +448,7 @@ fn Device? register_device(
     Surface registered_surface;
     if (presentation_surface != null) {
         if (!has_runtime) return gpu::INVALID_ARGUMENT~;
-        SurfaceData* surface_data = require_surface(presentation_surface)!;
+        SurfaceData* surface_data = require_surface(presentation_surface);
         RuntimeData* surface_runtime = resolve_runtime(&surface_data.runtime);
         if (surface_runtime != runtime_data) {
             abort("gpu: mismatched Surface");

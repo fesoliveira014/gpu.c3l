@@ -125,7 +125,7 @@ fn AllocationSlot* AllocationTable.find(&self, gpu::GpuAllocation allocation) {
     return &self.slots[allocation.index].value;
 }
 
-fn AllocationSlot*? AllocationTable.get(&self, gpu::GpuAllocation allocation) {
+fn AllocationSlot* AllocationTable.get(&self, gpu::GpuAllocation allocation) {
     if (allocation.owner != self.owner) abort("gpu: foreign GpuAllocation");
     AllocationSlot* slot = self.find(allocation);
     if (slot == null) abort("gpu: stale GpuAllocation");
@@ -133,7 +133,7 @@ fn AllocationSlot*? AllocationTable.get(&self, gpu::GpuAllocation allocation) {
 }
 
 fn void? AllocationTable.free(&self, gpu::GpuAllocation allocation) {
-    AllocationSlot* slot = self.get(allocation)!;
+    AllocationSlot* slot = self.get(allocation);
     if (slot.live_placements > 0) return gpu::RESOURCE_IN_USE~;
     uint index = allocation.index;
     self.slots[index].used = false;
@@ -563,11 +563,11 @@ fn gpu::GpuAllocation? allocate_memory_for_state_with_ops(
     return result;
 }
 
-fn gpu::AllocationInfo? allocation_info_for_state(
+fn gpu::AllocationInfo allocation_info_for_state(
     VkDeviceState* state,
     gpu::GpuAllocation allocation,
 ) {
-    AllocationSlot* slot = state.allocations.get(allocation)!;
+    AllocationSlot* slot = state.allocations.get(allocation);
     return {
         .size         = slot.size,
         .alignment    = slot.alignment,
@@ -585,7 +585,7 @@ fn gpu::GpuSpan? allocation_span_for_state(
     VkDeviceState* state,
     gpu::GpuAllocation allocation,
 ) {
-    AllocationSlot* slot = state.allocations.get(allocation)!;
+    AllocationSlot* slot = state.allocations.get(allocation);
     if (slot.texture_memory) return gpu::INVALID_ARGUMENT~;
     return {
         .owner      = allocation.owner,
@@ -604,7 +604,7 @@ fn void? free_allocation_for_state_with_ops(
     {
         state.resource_mutex.lock()!;
         defer state.resource_mutex.unlock();
-        AllocationSlot* slot = state.allocations.get(allocation)!;
+        AllocationSlot* slot = state.allocations.get(allocation);
         if (slot.live_placements > 0) return gpu::RESOURCE_IN_USE~;
         released = *slot;
         state.allocations.free(allocation)!;
@@ -662,7 +662,7 @@ fn AllocationSlot*? resolve_mapped_allocation_span(
         .index      = span.index,
         .generation = span.generation,
     };
-    AllocationSlot* slot = state.allocations.get(allocation)!;
+    AllocationSlot* slot = state.allocations.get(allocation);
     if (slot.texture_memory) return gpu::INVALID_ARGUMENT~;
     if (span.size == 0
         || !gpu::internal::range_fits(slot.backing.size, span.offset, span.size)) {
@@ -759,7 +759,7 @@ fn void? vk_free_allocation(
     return free_allocation_for_state_with_ops(state, allocation, &ops);
 }
 
-fn gpu::AllocationInfo? vk_get_allocation_info(
+fn gpu::AllocationInfo vk_get_allocation_info(
     VkDeviceState* state,
     gpu::GpuAllocation allocation,
 ) {

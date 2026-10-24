@@ -408,7 +408,7 @@ fn int generated_scratch_worker(void* raw_args) {
         gpu::CommandList commands = gpu::begin_commands(args.allocator)!!;
         vk::VkDeviceState* state =
             gpu::internal::device_slots[args.device.index].data.state;
-        vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+        vk::CommandRecord* record = vk::resolve_command(&commands);
         if (catch acquire_fault = vk::acquire_generated_preprocess_buffer(
             state:        state,
             record:       record,
@@ -568,7 +568,7 @@ fn void worker_thread_reuses_explicit_allocator_buffers() @test {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::CommandAllocatorSlot* allocator_slot =
-        state.command_allocators.get(allocator.handle)!!;
+        state.command_allocators.get(allocator.handle);
     assert(state.command_allocators.next_new == 1
         && allocator_slot.available_count
             == gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY - 2,
@@ -635,7 +635,7 @@ fn void contended_allocator_does_not_hold_the_device_resource_lock() @test {
         gpu::internal::device_slots[device.index].data.state;
     vk::CommandAllocatorSlot* blocked_slot = state.command_allocators.get(
         blocked.handle,
-    )!!;
+    );
 
     blocked_slot.mutex.lock()!!;
     AllocatorBeginArgs blocked_args = { .allocator = &blocked };
@@ -724,7 +724,7 @@ fn void allocator_migrates_after_last_end_and_discard() @test {
         gpu::internal::device_slots[device.index].data.state;
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
-    )!!;
+    );
     assert(slot.live_recordings == 0 && !slot.recording_thread_set,
         "quiescence clears the allocator's recording-thread owner");
 }
@@ -761,7 +761,7 @@ fn void executable_handoff_to_submit_thread_retires_to_allocator() @test {
         gpu::internal::device_slots[device.index].data.state;
     vk::CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
-    )!!;
+    );
     assert(slot.available_count == 1 && slot.in_flight_buffers == 0,
         "submit-thread retirement returns the buffer to its originating allocator");
 }

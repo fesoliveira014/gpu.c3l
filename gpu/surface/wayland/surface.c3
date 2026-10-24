@@ -23,7 +23,7 @@ fn gpu::Surface? create_surface(
         return gpu::INVALID_ARGUMENT~;
     }
 
-    gpu::internal::RuntimeData* runtime_data = gpu::internal::require_runtime(runtime)!;
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::require_runtime(runtime);
     void* backend_surface = gpu::internal::vk::vk_create_wayland_surface(
         runtime_data.state,
         native_display,

@@ -176,7 +176,7 @@ fn bool Adapter.is_valid(self) => (ulong)self != 0;
    @param index : "Zero-based index within the view."
    @return "A borrowed adapter valid until runtime destruction, or a recoverable range fault." *>
 fn Adapter? AdapterList.get(&self, uint index) {
-    gpu::internal::RuntimeData* data = gpu::internal::require_runtime(&self.runtime)!;
+    gpu::internal::RuntimeData* data = gpu::internal::require_runtime(&self.runtime);
     if (index >= self.count || index >= data.adapter_count || index > ushort::max) {
         return INVALID_ARGUMENT~;
     }
@@ -221,7 +221,7 @@ fn Runtime? create_runtime(RuntimeDesc* desc) {
    @return "Success, or a recoverable resource-in-use fault." *>
 fn void? destroy_runtime(Runtime* runtime) {
     if (runtime != null && !runtime.is_valid()) return;
-    gpu::internal::RuntimeData* data = gpu::internal::require_runtime(runtime)!;
+    gpu::internal::RuntimeData* data = gpu::internal::require_runtime(runtime);
     if (data.live_surface_count > 0 || data.live_device_count.load(AtomicOrdering.ACQUIRE) > 0) {
         return RESOURCE_IN_USE~;
     }
@@ -238,7 +238,7 @@ fn void? destroy_runtime(Runtime* runtime) {
    @return "A runtime-owned adapter view." *>
 fn AdapterList enumerate_adapters(Runtime* runtime) {
     gpu::internal::RuntimeData* data =
-        gpu::internal::require_runtime(runtime)!!;
+        gpu::internal::require_runtime(runtime);
     return {
         .runtime = *runtime,
         .count   = data.adapter_count,
@@ -251,11 +251,11 @@ fn AdapterList enumerate_adapters(Runtime* runtime) {
    @return "Cached adapter information." *>
 fn AdapterInfo get_adapter_info(Adapter* adapter) {
     gpu::internal::RuntimeData* data =
-        gpu::internal::require_adapter(adapter)!!;
+        gpu::internal::require_adapter(adapter);
     return gpu::internal::vk::vk_get_adapter_info(
         data.state,
         adapter.adapter_index,
-    )!!;
+    );
 }
 
 <* Query backend and driver identity for diagnostics and logging.
@@ -264,11 +264,11 @@ fn AdapterInfo get_adapter_info(Adapter* adapter) {
    @return "Cached diagnostic identity." *>
 fn AdapterDiagnostics get_adapter_diagnostics(Adapter* adapter) {
     gpu::internal::RuntimeData* data =
-        gpu::internal::require_adapter(adapter)!!;
+        gpu::internal::require_adapter(adapter);
     return gpu::internal::vk::vk_get_adapter_diagnostics(
         data.state,
         adapter.adapter_index,
-    )!!;
+    );
 }
 
 <* Query semantic descriptor support without enabling device state.
@@ -278,7 +278,7 @@ fn AdapterDiagnostics get_adapter_diagnostics(Adapter* adapter) {
    @return "The support result, or a recoverable invalid-argument fault." *>
 fn DeviceSupport? supports_device_desc(Adapter* adapter, DeviceDesc* desc = null) {
     DeviceDesc normalized = gpu::internal::normalize_device_desc(desc)!;
-    gpu::internal::RuntimeData* data = gpu::internal::require_adapter(adapter)!;
+    gpu::internal::RuntimeData* data = gpu::internal::require_adapter(adapter);
     return gpu::internal::evaluate_device_desc_support(
         data,
         adapter,
@@ -292,8 +292,8 @@ fn DeviceSupport? supports_device_desc(Adapter* adapter, DeviceDesc* desc = null
    @param surface : "Borrowed runtime-owned surface."
    @return "Presentation support, or a recoverable backend query fault." *>
 fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
-    gpu::internal::RuntimeData* adapter_runtime = gpu::internal::require_adapter(adapter)!;
-    gpu::internal::SurfaceData* surface_data = gpu::internal::require_surface(surface)!;
+    gpu::internal::RuntimeData* adapter_runtime = gpu::internal::require_adapter(adapter);
+    gpu::internal::SurfaceData* surface_data = gpu::internal::require_surface(surface);
     gpu::internal::RuntimeData* surface_runtime = gpu::internal::resolve_runtime(&surface_data.runtime);
     if (surface_runtime != adapter_runtime) {
         abort("gpu: mismatched Surface");
@@ -315,7 +315,7 @@ fn bool? supports_presentation(Adapter* adapter, Surface* surface) {
    @return "Whether device loss has been observed." *>
 fn bool is_device_lost(Device* device) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return operation.slot.lost.load(AtomicOrdering.ACQUIRE);
 }
@@ -325,7 +325,7 @@ fn bool is_device_lost(Device* device) {
    @return "The device capabilities." *>
 fn DeviceCaps get_device_caps(Device* device) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return operation.data.caps;
 }
@@ -338,7 +338,7 @@ fn DeviceCaps get_device_caps(Device* device) {
    @return "An owning device token, or a recoverable support, capacity, allocation, or backend fault." *>
 fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
     DeviceDesc normalized = gpu::internal::normalize_device_desc(desc)!;
-    gpu::internal::RuntimeData* runtime_data = gpu::internal::require_adapter(adapter)!;
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::require_adapter(adapter);
     DeviceSupport support = gpu::internal::evaluate_device_desc_support(
         data:                 runtime_data,
         adapter:              adapter,
@@ -381,7 +381,7 @@ fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
    @return "Success, or a recoverable resource-in-use or busy fault." *>
 fn void? destroy_device(Device* device) {
     if (device != null && !device.is_valid()) return;
-    gpu::internal::validate_device_token(device)!;
+    gpu::internal::validate_device_token(device);
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     gpu::internal::DeviceSlotControl closing;
     gpu::internal::DeviceData data;
@@ -451,7 +451,7 @@ fn void? destroy_device(Device* device) {
    @param kind : "Semantic queue role."
    @return "A device-owned queue token, or a recoverable unavailable-role fault." *>
 fn Queue? get_queue(Device* device, QueueKind kind) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_selected_queue_kind(&operation, kind)!;
     return {
@@ -468,9 +468,9 @@ fn Queue? get_queue(Device* device, QueueKind kind) {
    @return "Stable queue information." *>
 fn QueueInfo get_queue_info(Device* device, Queue queue) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_queue(&operation, device, queue)!!;
+    gpu::internal::validate_queue(&operation, device, queue);
     return {
         .id    = queue.id,
         .roles = queue.roles,
@@ -552,7 +552,7 @@ fn bool TextureCompatibility.is_valid(self) {
    @param desc : "Borrowed size, memory-class, access, alignment, and debug-name description."
    @return "An owning allocation token, or a recoverable invalid-argument, unsupported-feature, capacity, allocation, or backend fault." *>
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     AllocationDesc normalized = gpu::internal::validated_allocation_desc(&operation, desc)!;
     GpuAllocation allocation =
@@ -571,14 +571,14 @@ fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
 fn void? free_allocation(Device* device, GpuAllocation* allocation) {
     if (allocation == null) abort("gpu: null GpuAllocation");
     if (*allocation == (GpuAllocation){}) return;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (!allocation.is_valid()) abort("gpu: malformed GpuAllocation");
     gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
-    )!;
+    );
     gpu::internal::vk::vk_free_allocation(operation.state, *allocation)!;
     gpu::internal::release_device_children(&operation);
     *allocation = GPU_ALLOCATION_INVALID;
@@ -590,14 +590,14 @@ fn void? free_allocation(Device* device, GpuAllocation* allocation) {
    @return "Immutable allocation properties." *>
 fn AllocationInfo get_allocation_info(Device* device, GpuAllocation allocation) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
-    )!!;
-    return gpu::internal::vk::vk_get_allocation_info(operation.state, allocation)!!;
+    );
+    return gpu::internal::vk::vk_get_allocation_info(operation.state, allocation);
 }
 
 <* Borrow the allocation's complete range.
@@ -606,13 +606,13 @@ fn AllocationInfo get_allocation_info(Device* device, GpuAllocation allocation) 
    @param allocation : "Allocation whose complete range is borrowed."
    @return "A non-owning span, or a recoverable invalid-argument fault." *>
 fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
-    )!;
+    );
     return gpu::internal::vk::vk_get_allocation_span(operation.state, allocation);
 }
 
@@ -622,7 +622,7 @@ fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
    @param span : "Non-owning host-visible allocation range."
    @return "A borrowed mapped byte slice, or a recoverable mapping or range fault." *>
 fn char[]? get_span_mapping(Device* device, GpuSpan span) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_span_mapping(operation.state, span);
 }
@@ -633,7 +633,7 @@ fn char[]? get_span_mapping(Device* device, GpuSpan span) {
    @param span : "Non-owning allocation range."
    @return "The span's GPU address, or a recoverable range fault." *>
 fn GpuAddress? get_span_address(Device* device, GpuSpan span) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_span_address(operation.state, span);
 }
@@ -678,13 +678,13 @@ fn MappedGpuSpan? allocate_mapped_memory(Device* device, AllocationDesc* desc) {
    @param span : "Mapped range whose CPU writes become visible."
    @return "Success, or a recoverable mapping or range fault." *>
 fn void? flush_mapped_span(Device* device, GpuSpan span) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
         &operation,
         span.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
-    )!;
+    );
     return gpu::internal::vk::vk_flush_mapped_span(operation.state, span);
 }
 
@@ -695,13 +695,13 @@ fn void? flush_mapped_span(Device* device, GpuSpan span) {
    @param span : "Mapped range whose GPU writes become visible."
    @return "Success, or a recoverable mapping or range fault." *>
 fn void? invalidate_mapped_span(Device* device, GpuSpan span) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
         &operation,
         span.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
-    )!;
+    );
     return gpu::internal::vk::vk_invalidate_mapped_span(operation.state, span);
 }
 
@@ -711,9 +711,9 @@ fn void? invalidate_mapped_span(Device* device, GpuSpan span) {
    @return "A memory statistics snapshot." *>
 fn MemoryStats get_memory_stats(Device* device) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    return gpu::internal::vk::vk_get_memory_stats(operation.state)!!;
+    return gpu::internal::vk::vk_get_memory_stats(operation.state);
 }
 
 <* Build a human-readable memory report.
@@ -724,9 +724,9 @@ fn MemoryStats get_memory_stats(Device* device) {
    @return "An owned report string." *>
 fn String build_memory_report(Device* device, bool detailed) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    return gpu::internal::vk::vk_build_memory_report(operation.state, detailed)!!;
+    return gpu::internal::vk::vk_build_memory_report(operation.state, detailed);
 }
 
 <* Size of one texture axis at a mip level: halved per level, never below one.
@@ -788,7 +788,7 @@ fn usz? texture_mip_aspect_bytes(TextureDesc* desc, uint mip, TextureAspect aspe
    @param format : "Public texel format to inspect."
    @return "Format support flags, or a recoverable allocation or backend fault." *>
 fn TextureFormatSupport? get_texture_format_support(Device* device, Format format) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_texture_format_support(operation.state, format);
 }
@@ -799,7 +799,7 @@ fn TextureFormatSupport? get_texture_format_support(Device* device, Format forma
    @param desc : "Borrowed exact texture description."
    @return "Whether the descriptor is supported, or a recoverable invalid-argument fault." *>
 fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     if (!gpu::internal::queue_access_is_valid(&operation, desc.access)) return false;
@@ -811,7 +811,7 @@ fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
    @param desc : "Borrowed texture description."
    @return "Placement requirements, or a recoverable validation or unsupported-feature fault." *>
 fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* desc) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_queue_access(&operation, desc.access)!;
@@ -826,7 +826,7 @@ fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* de
    @param desc : "Borrowed texture description."
    @return "An owning texture handle, or a recoverable validation, support, capacity, or allocation fault." *>
 fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_queue_access(&operation, desc.access)!;
@@ -849,7 +849,7 @@ fn TextureHandle? create_placed_texture(
     GpuAllocation allocation,
     usz offset,
 ) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_queue_access(&operation, desc.access)!;
@@ -857,7 +857,7 @@ fn TextureHandle? create_placed_texture(
         &operation,
         allocation.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
-    )!;
+    );
     TextureHandle texture = gpu::internal::vk::vk_create_placed_texture(
         state:     operation.state,
         desc:      desc,
@@ -876,7 +876,7 @@ fn TextureHandle? create_placed_texture(
    @param allocation_desc : "Borrowed compatible dedicated-allocation description."
    @return "The owning texture and allocation pair, or a recoverable validation, support, capacity, or allocation fault." *>
 fn DedicatedTexture? create_dedicated_texture(Device* device, TextureDesc* desc, AllocationDesc* allocation_desc) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null || allocation_desc == null
         || allocation_desc.size == 0
@@ -915,9 +915,9 @@ fn DedicatedTexture? create_dedicated_texture(Device* device, TextureDesc* desc,
    @return "Success, or a recoverable in-use, invalid-argument (swapchain-owned texture), or backend fault." *>
 fn void? destroy_texture(Device* device, TextureHandle texture) {
     if (texture == (TextureHandle){}) return;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
+    gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE);
     gpu::internal::vk::vk_destroy_texture(operation.state, texture)!;
     gpu::internal::release_device_children(&operation);
 }
@@ -930,9 +930,9 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
    @param desc : "Borrowed view description; null selects the full default view."
    @return "An owning view token, or a recoverable validation, capacity, or allocation fault." *>
 fn TextureView? create_texture_view(Device* device, TextureHandle texture, TextureViewDesc* desc) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
+    gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE);
     TextureView view =
         gpu::internal::vk::vk_create_texture_view(operation.state, texture, desc)!;
     gpu::internal::retain_device_children(&operation);
@@ -947,7 +947,7 @@ fn TextureView? create_texture_view(Device* device, TextureHandle texture, Textu
    @param out_views : "Caller-owned output slice with exactly the input length."
    @return "Success, or a recoverable validation, capacity, or allocation fault." *>
 fn void? create_texture_views(Device* device, TextureViewCreateDesc[] descs, TextureView[] out_views) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (out_views.len != descs.len) {
         return gpu::internal::report_device_contract_failure(
@@ -961,7 +961,11 @@ fn void? create_texture_views(Device* device, TextureViewCreateDesc[] descs, Tex
     }
     if (descs.len == 0) return;
     foreach (&desc : descs) {
-        gpu::internal::validate_resource_owner(&operation, desc.texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
+        gpu::internal::validate_resource_owner(
+            &operation,
+            desc.texture.owner,
+            gpu::internal::ResourceOwnerKind.TEXTURE,
+        );
     }
     gpu::internal::vk::vk_create_texture_views(operation.state, descs, out_views)!;
     gpu::internal::retain_device_children(&operation, (ulong)descs.len);
@@ -978,13 +982,13 @@ fn void? create_texture_views(Device* device, TextureViewCreateDesc[] descs, Tex
 fn void destroy_texture_view(Device* device, TextureView view) {
     if (view == (TextureView){}) return;
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
         &operation,
         view.owner,
         gpu::internal::ResourceOwnerKind.TEXTURE_VIEW,
-    )!!;
+    );
     gpu::internal::vk::vk_destroy_texture_view(operation.state, view)!!;
     gpu::internal::release_device_children(&operation);
 }
@@ -996,7 +1000,7 @@ fn void destroy_texture_view(Device* device, TextureView view) {
    @param count : "Nonzero number of slots."
    @return "The reserved range, or a recoverable invalid-argument or capacity fault." *>
 fn TextureIndexRange? reserve_texture_indices(Device* device, uint count) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (count == 0) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_reserve_texture_indices(operation.state, count);
@@ -1012,7 +1016,7 @@ fn TextureIndexRange? reserve_texture_indices(Device* device, uint count) {
    @return "Success, or a recoverable invalid-argument or in-use fault." *>
 fn void? release_texture_indices(Device* device, TextureIndexRange range) {
     if (range.count == 0 && !range.base.is_valid()) return;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_release_texture_indices(operation.state, range);
 }
@@ -1025,9 +1029,9 @@ fn void? release_texture_indices(Device* device, TextureIndexRange range) {
    @param desc : "Borrowed view description; null selects the full default view."
    @return "An owning view token, or a recoverable invalid-argument, in-use, or allocation fault." *>
 fn TextureView? create_texture_view_at(Device* device, TextureIndex slot, TextureHandle texture, TextureViewDesc* desc) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
+    gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE);
     TextureView view = gpu::internal::vk::vk_create_texture_view_at(
         state:   operation.state,
         slot:    slot,
@@ -1048,10 +1052,10 @@ fn TextureView? create_texture_view_at(Device* device, TextureIndex slot, Textur
    @return "Success, or a recoverable capacity or allocation fault." *>
 fn void? update_texture_view(Device* device, TextureView* view, TextureHandle texture, TextureViewDesc* desc) {
     if (view == null) abort("gpu: null TextureView");
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_resource_owner(&operation, view.owner, gpu::internal::ResourceOwnerKind.TEXTURE_VIEW)!;
-    gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE)!;
+    gpu::internal::validate_resource_owner(&operation, view.owner, gpu::internal::ResourceOwnerKind.TEXTURE_VIEW);
+    gpu::internal::validate_resource_owner(&operation, texture.owner, gpu::internal::ResourceOwnerKind.TEXTURE);
     return gpu::internal::vk::vk_update_texture_view(
         state:   operation.state,
         view:    view,
@@ -1067,7 +1071,7 @@ fn void? update_texture_view(Device* device, TextureView* view, TextureHandle te
    @return "An owning texture handle, or a recoverable validation, support, capacity, or allocation fault." *>
 fn TextureHandle? create_sparse_texture(Device* device, TextureDesc* desc) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_queue_access(&operation, desc.access)!;
@@ -1083,13 +1087,13 @@ fn TextureHandle? create_sparse_texture(Device* device, TextureDesc* desc) {
    @return "The cached requirements, or a recoverable argument fault." *>
 fn SparseTextureRequirements? get_sparse_texture_requirements(Device* device, TextureHandle texture) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
         &operation,
         texture.owner,
         gpu::internal::ResourceOwnerKind.TEXTURE,
-    )!;
+    );
     return gpu::internal::vk::vk_get_sparse_texture_requirements(
         operation.state,
         texture,
@@ -1107,9 +1111,9 @@ fn SparseTextureRequirements? get_sparse_texture_requirements(Device* device, Te
 fn CompletionPoint? bind_sparse_texture_memory(Queue queue, SparseTextureBindDesc* desc) {
     Device device = queue.device;
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(&device)!;
+        gpu::internal::begin_device_operation(&device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_queue(&operation, &device, queue)!;
+    gpu::internal::validate_queue(&operation, &device, queue);
     if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_bind_sparse_texture_memory(
         operation.state,
@@ -1126,7 +1130,7 @@ fn CompletionPoint? bind_sparse_texture_memory(Queue queue, SparseTextureBindDes
    @param desc : "Borrowed semantic sampler description."
    @return "A stable device-lifetime sampler index, or a recoverable validation, support, capacity, or allocation fault." *>
 fn SamplerIndex? intern_sampler(Device* device, SamplerDesc* desc) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_sampler_desc(&operation, desc)!;
@@ -1143,7 +1147,7 @@ fn AccelerationStructureRequirements? get_acceleration_structure_requirements(
     AccelerationStructureDesc* desc,
 ) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_get_acceleration_structure_requirements(
@@ -1158,7 +1162,7 @@ fn AccelerationStructureRequirements? get_acceleration_structure_requirements(
    @return "An owning handle, or a recoverable validation, support, capacity, or allocation fault." *>
 fn AccelerationStructureHandle? create_acceleration_structure(Device* device, AccelerationStructureDesc* desc) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     AccelerationStructureHandle acceleration_structure =
@@ -1184,14 +1188,14 @@ fn AccelerationStructureHandle? create_placed_acceleration_structure(
     usz offset,
 ) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
         gpu::internal::ResourceOwnerKind.ALLOCATION,
-    )!;
+    );
     AccelerationStructureHandle acceleration_structure =
         gpu::internal::vk::vk_create_placed_acceleration_structure(
             state:      operation.state,
@@ -1213,7 +1217,7 @@ fn DedicatedAccelerationStructure? create_dedicated_acceleration_structure(
     AccelerationStructureDesc* desc,
 ) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     DedicatedAccelerationStructure created =
@@ -1233,13 +1237,13 @@ fn DedicatedAccelerationStructure? create_dedicated_acceleration_structure(
 fn void? destroy_acceleration_structure(Device* device, AccelerationStructureHandle acceleration_structure) {
     if (acceleration_structure == ACCELERATION_STRUCTURE_HANDLE_INVALID) return;
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
         &operation,
         acceleration_structure.owner,
         gpu::internal::ResourceOwnerKind.ACCELERATION_STRUCTURE,
-    )!;
+    );
     gpu::internal::vk::vk_destroy_acceleration_structure(
         operation.state,
         acceleration_structure,
@@ -1254,13 +1258,13 @@ fn void? destroy_acceleration_structure(Device* device, AccelerationStructureHan
    @return "A nonzero BLAS address, or a recoverable argument fault." *>
 fn GpuAddress? get_acceleration_structure_address(Device* device, AccelerationStructureHandle acceleration_structure) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
         &operation,
         acceleration_structure.owner,
         gpu::internal::ResourceOwnerKind.ACCELERATION_STRUCTURE,
-    )!;
+    );
     return gpu::internal::vk::vk_get_acceleration_structure_address(
         operation.state,
         acceleration_structure,
@@ -1276,14 +1280,14 @@ fn AccelerationStructureInstance? make_acceleration_structure_instance(
     AccelerationStructureInstanceDesc* desc,
 ) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_resource_owner(
         &operation,
         desc.bottom_level.owner,
         gpu::internal::ResourceOwnerKind.ACCELERATION_STRUCTURE,
-    )!;
+    );
     GpuAddress address =
         gpu::internal::vk::vk_get_acceleration_structure_address(
             operation.state,
@@ -1304,13 +1308,13 @@ fn AccelerationStructureView? create_acceleration_structure_view(
     AccelerationStructureHandle acceleration_structure,
 ) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
         &operation,
         acceleration_structure.owner,
         gpu::internal::ResourceOwnerKind.ACCELERATION_STRUCTURE,
-    )!;
+    );
     AccelerationStructureView view =
         gpu::internal::vk::vk_create_acceleration_structure_view(
             operation.state,
@@ -1326,13 +1330,13 @@ fn AccelerationStructureView? create_acceleration_structure_view(
 fn void destroy_acceleration_structure_view(Device* device, AccelerationStructureView view) {
     if (view == ACCELERATION_STRUCTURE_VIEW_INVALID) return;
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
         &operation,
         view.owner,
         gpu::internal::ResourceOwnerKind.ACCELERATION_STRUCTURE_VIEW,
-    )!!;
+    );
     gpu::internal::vk::vk_destroy_acceleration_structure_view(
         operation.state,
         view,
@@ -1418,7 +1422,7 @@ fn ColorState uniform_color_state(ColorTargetState[] targets, ColorTargetState s
    @param desc : "Borrowed compute pipeline description."
    @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, or compilation fault." *>
 fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* desc) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline =
@@ -1440,7 +1444,7 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
    @param desc : "Borrowed graphics pipeline description."
    @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, or compilation fault." *>
 fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline =
@@ -1456,7 +1460,7 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
    @param desc : "Borrowed mesh pipeline description."
    @return "Owning pipeline handle, or a recoverable validation, support, or capacity fault." *>
 fn PipelineHandle? create_mesh_pipeline(Device* device, MeshPipelineDesc* desc) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline =
@@ -1475,7 +1479,7 @@ fn PipelineHandle? create_mesh_pipeline(Device* device, MeshPipelineDesc* desc) 
    @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, or compilation fault." *>
 fn PipelineHandle? create_ray_tracing_pipeline(Device* device, RayTracingPipelineDesc* desc) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline =
@@ -1494,7 +1498,7 @@ fn PipelineHandle? create_ray_tracing_pipeline(Device* device, RayTracingPipelin
    @return "The pipeline group ranges, or a recoverable kind fault." *>
 fn RayTracingPipelineInfo? get_ray_tracing_pipeline_info(Device* device, PipelineHandle pipeline) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_ray_tracing_pipeline_info(
         operation.state,
@@ -1519,7 +1523,7 @@ fn void? get_ray_tracing_shader_group_handles(
     char[] out,
 ) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::vk::vk_get_ray_tracing_shader_group_handles(
         operation.state,
@@ -1544,7 +1548,7 @@ fn ulong? get_ray_tracing_shader_group_stack_size(
     RayTracingGroupShader group_shader,
 ) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_ray_tracing_shader_group_stack_size(
         state:        operation.state,
@@ -1563,9 +1567,9 @@ fn ulong? get_ray_tracing_shader_group_stack_size(
    @return "Success, or a recoverable in-use fault." *>
 fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
     if (pipeline == (PipelineHandle){}) return;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_resource_owner(&operation, pipeline.owner, gpu::internal::ResourceOwnerKind.PIPELINE)!;
+    gpu::internal::validate_resource_owner(&operation, pipeline.owner, gpu::internal::ResourceOwnerKind.PIPELINE);
     gpu::internal::vk::vk_destroy_pipeline(operation.state, pipeline)!;
     gpu::internal::release_device_children(&operation);
 }
@@ -1576,7 +1580,7 @@ fn void? destroy_pipeline(Device* device, PipelineHandle pipeline) {
    @param device : "Live device whose cache is queried."
    @return "The current cache byte size, or a recoverable backend fault." *>
 fn usz? get_pipeline_cache_size(Device* device) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_pipeline_cache_size(operation.state);
 }
@@ -1590,7 +1594,7 @@ fn usz? get_pipeline_cache_size(Device* device) {
    @param out : "Caller-owned output storage sized from a fresh cache-size query."
    @return "Bytes written, or a recoverable invalid-argument or backend fault." *>
 fn usz? get_pipeline_cache_data(Device* device, char[] out) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_pipeline_cache_data(operation.state, out);
 }
@@ -1608,9 +1612,9 @@ fn usz? get_pipeline_cache_data(Device* device, char[] out) {
    @param desc : "Borrowed capacity description; null or zero fields select defaults."
    @return "An owning allocator, or a recoverable validation, unsupported-feature, capacity, or allocation fault." *>
 fn CommandAllocator? create_command_allocator(Device* device, Queue queue, CommandAllocatorDesc* desc = null) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_queue(&operation, device, queue)!;
+    gpu::internal::validate_queue(&operation, device, queue);
     CommandAllocatorDesc normalized = desc == null ? {} : *desc;
     if (normalized.command_buffer_capacity == 0) {
         normalized.command_buffer_capacity = DEFAULT_COMMAND_ALLOCATOR_CAPACITY;
@@ -1669,9 +1673,9 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
     if (allocator == null) abort("gpu: null CommandAllocator");
     if (allocator.handle == COMMAND_ALLOCATOR_HANDLE_INVALID) return;
     if (!allocator.handle.is_valid()) abort("gpu: malformed CommandAllocator");
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_command_allocator(&operation, allocator)!;
+    gpu::internal::validate_command_allocator(&operation, allocator);
     gpu::internal::vk::vk_destroy_command_allocator(
         operation.state,
         allocator.handle,
@@ -1691,15 +1695,15 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
    @return "Success, or a recoverable validation, capacity, or allocation fault." *>
 fn void? reserve_generated_work(CommandAllocator* allocator, GeneratedWorkReservationDesc* desc) {
     if (allocator == null) abort("gpu: null CommandAllocator");
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_command_allocator(&operation, allocator)!;
+    gpu::internal::validate_command_allocator(&operation, allocator);
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_resource_owner(
         &operation,
         desc.pipeline.owner,
         gpu::internal::ResourceOwnerKind.PIPELINE,
-    )!;
+    );
     if (!gpu::internal::generated_work_kind_valid(desc.kind)
         || desc.max_commands_per_list == 0
         || desc.concurrent_lists == 0
@@ -1723,14 +1727,14 @@ fn void? reserve_generated_work(CommandAllocator* allocator, GeneratedWorkReserv
    @return "Success, or a recoverable validation fault." *>
 fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipeline, GeneratedWorkKind kind) {
     if (allocator == null) abort("gpu: null CommandAllocator");
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_command_allocator(&operation, allocator)!;
+    gpu::internal::validate_command_allocator(&operation, allocator);
     gpu::internal::validate_resource_owner(
         &operation,
         pipeline.owner,
         gpu::internal::ResourceOwnerKind.PIPELINE,
-    )!;
+    );
     if (!gpu::internal::generated_work_kind_valid(kind)) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_release_generated_work(
         state:     operation.state,
@@ -1756,9 +1760,9 @@ fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipe
    @return "A recording token, or a recoverable capacity or busy fault." *>
 fn CommandList? begin_commands(CommandAllocator* allocator) {
     if (allocator == null) abort("gpu: null CommandAllocator");
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_command_allocator(&operation, allocator)!;
+    gpu::internal::validate_command_allocator(&operation, allocator);
     CommandList commands;
     gpu::internal::vk::vk_begin_commands(
         operation.state,
@@ -1778,9 +1782,9 @@ fn CommandList? begin_commands(CommandAllocator* allocator) {
    @param commands : "Recording token consumed on success."
    @return "An executable token, or a recoverable command-state fault." *>
 fn ExecutableCommandList? end_commands(CommandList* commands) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     gpu::internal::DeviceOperation operation =
-        gpu::internal::command_operation(record)!;
+        gpu::internal::command_operation(record);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::vk::vk_end_commands(operation.state, record)!;
     ExecutableCommandList executable;
@@ -1799,10 +1803,10 @@ fn void? discard_commands(CommandList* commands) {
     if (commands == null) abort("gpu: null CommandList");
     if (commands.record == null && commands.generation == 0 && commands.device_identity == 0) return;
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
+        gpu::internal::recording_command(commands);
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         record,
-    )!;
+    );
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::vk::vk_discard_commands(
         operation.state,
@@ -1827,7 +1831,7 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
         gpu::internal::executable_command(commands)!;
     gpu::internal::DeviceOperation operation = gpu::internal::command_operation(
         record,
-    )!;
+    );
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::vk::vk_discard_commands(
         operation.state,
@@ -1843,7 +1847,7 @@ fn void? discard_executable_commands(ExecutableCommandList* commands) {
    Requires a live unconsumed token and readable non-null label text for this call.
    Invalid token/phase or null label aborts in every build mode. *>
 fn void cmd_begin_label(CommandList* commands, ZString label, float[4] color = {}) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     if (label == null) abort("Label is required");
     gpu::internal::vk::vk_cmd_begin_label(record, label, color);
 }
@@ -1852,7 +1856,7 @@ fn void cmd_begin_label(CommandList* commands, ZString label, float[4] color = {
    Requires a live unconsumed recording token.
    Invalid token or phase aborts in every build mode. *>
 fn void cmd_end_label(CommandList* commands) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     gpu::internal::vk::vk_cmd_end_label(record);
 }
 
@@ -1863,7 +1867,7 @@ fn void cmd_end_label(CommandList* commands) {
    @param desc : "Borrowed exact source and destination ranges."
    @return "Success, or a recoverable command, validation, or bounds fault." *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_copy_buffer(record, desc);
 }
@@ -1876,7 +1880,7 @@ fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
    @param value : "Repeated 32-bit fill pattern."
    @return "Success, or a recoverable command, validation, bounds, or alignment fault." *>
 fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_fill_buffer(record, dst, value);
 }
 
@@ -1889,7 +1893,7 @@ fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
    @param desc : "Borrowed source-span and destination-texture region."
    @return "Success, or a recoverable command, validation, bounds, alignment, or support fault." *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_copy_buffer_to_texture(record, desc);
 }
@@ -1903,7 +1907,7 @@ fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc
    @param desc : "Borrowed source-texture and destination-span region."
    @return "Success, or a recoverable command, validation, bounds, alignment, or support fault." *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_copy_texture_to_buffer(record, desc);
 }
@@ -1919,7 +1923,7 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
    @param desc : "Borrowed source and destination region."
    @return "Success, or a recoverable command, validation, bounds, alignment, or support fault." *>
 fn void? cmd_copy_texture(CommandList* commands, TextureCopyDesc* desc) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_copy_texture(record, desc);
 }
@@ -1931,7 +1935,7 @@ fn void? cmd_copy_texture(CommandList* commands, TextureCopyDesc* desc) {
    @return "Success, or a recoverable command, validation, range, capacity, or support fault." *>
 fn void? cmd_build_acceleration_structure(CommandList* commands, AccelerationStructureBuildDesc* desc) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
+        gpu::internal::recording_command(commands);
     if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_build_acceleration_structure(record, desc);
 }
@@ -1944,7 +1948,7 @@ fn void? cmd_build_acceleration_structure(CommandList* commands, AccelerationStr
    @return "Success, or a recoverable command, validation, range, capacity, or support fault." *>
 fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationStructureBuildDesc* desc) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
+        gpu::internal::recording_command(commands);
     if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_update_acceleration_structure(record, desc);
 }
@@ -1972,7 +1976,7 @@ fn void? cmd_build_acceleration_structure_indirect(
     GpuSpan ranges,
 ) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
+        gpu::internal::recording_command(commands);
     if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_build_acceleration_structure_indirect(
         record,
@@ -2000,7 +2004,7 @@ fn void? cmd_update_acceleration_structure_indirect(
     GpuSpan ranges,
 ) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
+        gpu::internal::recording_command(commands);
     if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_update_acceleration_structure_indirect(
         record,
@@ -2021,7 +2025,7 @@ fn void? cmd_clone_acceleration_structure(
     AccelerationStructureHandle destination,
 ) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
+        gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_clone_acceleration_structure(
         record,
         source,
@@ -2037,7 +2041,7 @@ fn void? cmd_clone_acceleration_structure(
    @param pipeline : "Compute, graphics, or ray-tracing pipeline to bind."
    @return "Success, or a recoverable command or compatibility fault." *>
 fn void? cmd_bind_pipeline(CommandList* commands, PipelineHandle pipeline) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_bind_pipeline(record, pipeline);
 }
 
@@ -2061,7 +2065,7 @@ macro char[] @inline_root(value) => ((char*)value)[:@sizeof(*value)];
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, pipeline, or limit fault." *>
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups, char[] inline_root = {}) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     gpu::internal::vk::set_inline_root(record, inline_root)!;
     return gpu::internal::vk::vk_cmd_dispatch(record, root, groups);
 }
@@ -2077,7 +2081,7 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups, char
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, bounds, or pipeline fault." *>
 fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     gpu::internal::vk::set_inline_root(record, inline_root)!;
     return gpu::internal::vk::vk_cmd_dispatch_indirect(record, root, args);
 }
@@ -2096,7 +2100,7 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
    @param max_dispatch_count : "Maximum generated records to execute."
    @return "Success, or a recoverable command, bounds, support, or scratch-capacity fault." *>
 fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_dispatch_generated(
         commands:            record,
         records:            records,
@@ -2123,7 +2127,7 @@ fn void? cmd_trace_rays(
     char[] inline_root = {},
 ) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
+        gpu::internal::recording_command(commands);
     gpu::internal::vk::set_inline_root(record, inline_root)!;
     if (shader_binding_table == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_trace_rays(
@@ -2151,7 +2155,7 @@ fn void? cmd_trace_rays_indirect(
     char[] inline_root = {},
 ) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
+        gpu::internal::recording_command(commands);
     gpu::internal::vk::set_inline_root(record, inline_root)!;
     if (shader_binding_table == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_trace_rays_indirect(
@@ -2173,7 +2177,7 @@ fn void? cmd_trace_rays_indirect(
    @return "Success, or a recoverable command, range, pipeline, or support fault." *>
 fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
+        gpu::internal::recording_command(commands);
     gpu::internal::vk::set_inline_root(record, inline_root)!;
     return gpu::internal::vk::vk_cmd_trace_rays_indirect2(record, root, args);
 }
@@ -2185,7 +2189,7 @@ fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpa
    @return "Success, or a recoverable command, pipeline, queue, scope, range, or support fault." *>
 fn void? cmd_set_ray_tracing_pipeline_stack_size(CommandList* commands, ulong pipeline_stack_size) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
+        gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_set_ray_tracing_pipeline_stack_size(
         record,
         pipeline_stack_size,
@@ -2198,14 +2202,14 @@ fn void? cmd_set_ray_tracing_pipeline_stack_size(CommandList* commands, ulong pi
    @param desc : "Borrowed texture subresource description."
    @return "An owning attachment-view handle, or a recoverable validation, capacity, or allocation fault." *>
 fn AttachmentViewHandle? create_attachment_view(Device* device, AttachmentViewDesc* desc) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_resource_owner(
         &operation,
         desc.texture.owner,
         gpu::internal::ResourceOwnerKind.TEXTURE,
-    )!;
+    );
     AttachmentViewHandle view = gpu::internal::vk::vk_create_attachment_view(
         operation.state,
         desc,
@@ -2223,13 +2227,13 @@ fn AttachmentViewHandle? create_attachment_view(Device* device, AttachmentViewDe
    @return "Success, or a recoverable resource-state fault for a swapchain-owned view." *>
 fn void? destroy_attachment_view(Device* device, AttachmentViewHandle view) {
     if (view == (AttachmentViewHandle){}) return;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
         &operation,
         view.owner,
         gpu::internal::ResourceOwnerKind.ATTACHMENT_VIEW,
-    )!;
+    );
     gpu::internal::vk::vk_destroy_attachment_view(operation.state, view)!;
     gpu::internal::release_device_children(&operation);
 }
@@ -2286,7 +2290,7 @@ fn GraphicsState? render_geometry_state(uint width, uint height) {
    @param desc : "Borrowed attachment and render-area description copied into the command stream; a zero extent selects the first attachment's extent."
    @return "Success, or a recoverable command, validation, or compatibility fault." *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     if (!gpu::internal::render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_begin_render_pass(record, desc);
 }
@@ -2299,7 +2303,7 @@ fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
    @param state : "Borrowed complete graphics state copied into the command stream."
    @return "Success, or a recoverable command, validation, pipeline, or support fault." *>
 fn void? cmd_set_graphics_state(CommandList* commands, GraphicsState* state) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     if (!gpu::internal::graphics_state_host_safe(state)) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_set_graphics_state(record, state);
 }
@@ -2310,7 +2314,7 @@ fn void? cmd_set_graphics_state(CommandList* commands, GraphicsState* state) {
    @param commands : "Live recording token inside a render pass."
    @return "Success, or a recoverable command-state fault." *>
 fn void? cmd_end_render_pass(CommandList* commands) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_end_render_pass(record);
 }
 
@@ -2318,7 +2322,7 @@ fn void? cmd_end_render_pass(CommandList* commands) {
    Requires a live unconsumed token and readable viewport: finite, within device bounds, nonzero height.
    Invalid token/phase or null viewport aborts in every build mode; state is copied for this call. *>
 fn void cmd_set_viewport(CommandList* commands, Viewport* viewport) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     if (viewport == null) abort("Viewport is required");
     gpu::internal::vk::vk_cmd_set_viewport(record, viewport);
 }
@@ -2327,7 +2331,7 @@ fn void cmd_set_viewport(CommandList* commands, Viewport* viewport) {
    Requires a live unconsumed token and readable scissor: nonnegative, signed-representable origin/extent.
    Invalid token/phase or null scissor aborts in every build mode; overscan is valid and state is copied. *>
 fn void cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     if (scissor == null) abort("Scissor is required");
     gpu::internal::vk::vk_cmd_set_scissor(record, scissor);
 }
@@ -2345,7 +2349,7 @@ fn void cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, pipeline, state, or limit fault." *>
 fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count, char[] inline_root = {}) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     gpu::internal::vk::set_inline_root(record, inline_root)!;
     return gpu::internal::vk::vk_cmd_draw(
         commands:        record,
@@ -2371,7 +2375,7 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, bounds, pipeline, or state fault." *>
 fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     gpu::internal::vk::set_inline_root(record, inline_root)!;
     return gpu::internal::vk::vk_cmd_draw_indexed(
         commands:        record,
@@ -2394,7 +2398,7 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
    @return "Success, or a recoverable command, pipeline, support, or limit fault." *>
 fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, Vec3u groups, char[] inline_root = {}) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     gpu::internal::vk::set_inline_root(record, inline_root)!;
     return gpu::internal::vk::vk_cmd_draw_mesh_tasks(
         commands:        record,
@@ -2415,7 +2419,7 @@ fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAdd
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
    @return "Success, or a recoverable command, bounds, support, or pipeline fault." *>
 fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     gpu::internal::vk::set_inline_root(record, inline_root)!;
     return gpu::internal::vk::vk_cmd_draw_mesh_tasks_indirect(
         commands:        record,
@@ -2437,7 +2441,7 @@ fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_roo
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
    @return "Success, or a recoverable command, bounds, support, or pipeline fault." *>
 fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, char[] inline_root = {}) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     gpu::internal::vk::set_inline_root(record, inline_root)!;
     return gpu::internal::vk::vk_cmd_draw_mesh_tasks_indirect_count(
         commands:         record,
@@ -2462,7 +2466,7 @@ fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress me
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, bounds, pipeline, or state fault." *>
 fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     gpu::internal::vk::set_inline_root(record, inline_root)!;
     return gpu::internal::vk::vk_cmd_draw_indirect(
         commands:       record,
@@ -2488,7 +2492,7 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, bounds, pipeline, or state fault." *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     gpu::internal::vk::set_inline_root(record, inline_root)!;
     return gpu::internal::vk::vk_cmd_draw_indexed_indirect(
         commands:       record,
@@ -2518,7 +2522,7 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
    @return "Success, or a recoverable command, bounds, support, pipeline, or state fault." *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     gpu::internal::vk::set_inline_root(record, inline_root)!;
     return gpu::internal::vk::vk_cmd_draw_indexed_indirect_count(
         commands:        record,
@@ -2546,7 +2550,7 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    @param max_draw_count : "Maximum generated records to execute."
    @return "Success, or a recoverable command, bounds, support, or scratch-capacity fault." *>
 fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_draw_generated(
         commands:        record,
         records:        records,
@@ -2571,7 +2575,7 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
    @param index_type : "Index element width; defaults to U32."
    @return "Success, or a recoverable command, bounds, support, or scratch-capacity fault." *>
 fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_draw_indexed_generated(
         commands:        record,
         records:        records,
@@ -2668,7 +2672,7 @@ fn TextureBarrier? texture_transition(TextureHandle texture, TextureState before
    @param barrier : "Borrowed source and destination execution scopes."
    @return "Success, or a recoverable command, validation, or queue-support fault." *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     if (barrier == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_barrier(record, barrier);
 }
@@ -2680,7 +2684,7 @@ fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
    @param barrier : "Borrowed texture, subresource range, and semantic states."
    @return "Success, or a recoverable command, validation, range, or support fault." *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
-    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands)!;
+    gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     if (barrier == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_texture_barrier(record, barrier);
 }
@@ -2692,7 +2696,7 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
    @return "An owning pool handle, or a recoverable invalid-argument, unsupported-feature, capacity, or allocation fault." *>
 fn TimestampPoolHandle? create_timestamp_pool(Device* device, TimestampPoolDesc* desc) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null || desc.capacity == 0) return INVALID_ARGUMENT~;
     if ((uint)operation.data.caps.timestamps.queues == 0) {
@@ -2710,13 +2714,13 @@ fn TimestampPoolHandle? create_timestamp_pool(Device* device, TimestampPoolDesc*
 fn void destroy_timestamp_pool(Device* device, TimestampPoolHandle pool) {
     if (pool == (TimestampPoolHandle){}) return;
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
         operation: &operation,
         owner:     pool.owner,
         kind:      gpu::internal::ResourceOwnerKind.TIMESTAMP_POOL,
-    )!!;
+    );
     gpu::internal::vk::vk_destroy_timestamp_pool(operation.state, pool)!!;
     gpu::internal::release_device_children(&operation);
 }
@@ -2734,7 +2738,7 @@ fn void? cmd_reset_timestamps(
     uint count,
 ) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
+        gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_reset_timestamps(
         record: record,
         pool: pool,
@@ -2756,7 +2760,7 @@ fn void? cmd_write_timestamp(
     StageMask stage,
 ) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
+        gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_write_timestamp(
         record: record,
         pool: pool,
@@ -2782,7 +2786,7 @@ fn void? cmd_resolve_timestamps(
     GpuSpan dst,
 ) {
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(commands)!;
+        gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_resolve_timestamps(
         record: record,
         pool: pool,
@@ -2810,13 +2814,13 @@ fn void? read_timestamps(
     ulong[] out,
 ) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
         operation: &operation,
         owner:     pool.owner,
         kind:      gpu::internal::ResourceOwnerKind.TIMESTAMP_POOL,
-    )!;
+    );
     if (count == 0 || out.len < count || out.ptr == null) {
         return INVALID_ARGUMENT~;
     }
@@ -2886,9 +2890,9 @@ fn double? timestamp_delta_ns(
    @return "A reusable completion point, or a recoverable validation, capacity, busy, or backend fault." *>
 fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     Device device = queue.device;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_queue(&operation, &device, queue)!;
+    gpu::internal::validate_queue(&operation, &device, queue);
     if (desc == null) return INVALID_ARGUMENT~;
     if (desc.command_lists.len > gpu::internal::MAX_SUBMIT_COMMAND_LISTS) {
         return INVALID_ARGUMENT~;
@@ -2897,7 +2901,7 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
         return INVALID_ARGUMENT~;
     }
     foreach (wait : desc.completion_waits) {
-        gpu::internal::validate_completion_point(&operation, &device, wait.point)!;
+        gpu::internal::validate_completion_point(&operation, &device, wait.point);
         if (!gpu::internal::submit_wait_stage_mask_valid(wait.before)) {
             return INVALID_ARGUMENT~;
         }
@@ -2936,9 +2940,9 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
    @return "Whether completion has occurred, or a recoverable backend fault." *>
 fn bool? poll_completion(CompletionPoint point) {
     Device device = point.device;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_completion_point(&operation, &device, point)!;
+    gpu::internal::validate_completion_point(&operation, &device, point);
     return gpu::internal::vk::vk_poll_completion(
         operation.state,
         gpu::internal::completion_point_queue_id(point),
@@ -2957,9 +2961,9 @@ fn bool? poll_completion(CompletionPoint point) {
    @return "Success, or a recoverable timeout or backend fault." *>
 fn void? wait_completion(CompletionPoint point, ulong timeout_ns = TIMEOUT_INFINITE) {
     Device device = point.device;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_completion_point(&operation, &device, point)!;
+    gpu::internal::validate_completion_point(&operation, &device, point);
     return gpu::internal::vk::vk_wait_completion(
         state:      operation.state,
         queue_id:   gpu::internal::completion_point_queue_id(point),
@@ -2988,10 +2992,10 @@ fn bool SwapchainReadiness.equals(self, SwapchainReadiness other) @operator(==) 
    @return "Success, or a recoverable resource-in-use fault." *>
 fn void? destroy_surface(Surface* surface) {
     if (surface != null && !surface.is_valid()) return;
-    gpu::internal::SurfaceData* data = gpu::internal::require_surface(surface)!;
+    gpu::internal::SurfaceData* data = gpu::internal::require_surface(surface);
     if (data.live_swapchain_count > 0) return RESOURCE_IN_USE~;
     Runtime runtime = data.runtime;
-    gpu::internal::RuntimeData* runtime_data = gpu::internal::require_runtime(&runtime)!;
+    gpu::internal::RuntimeData* runtime_data = gpu::internal::require_runtime(&runtime);
     void* backend_surface = data.backend_surface;
     data.runtime = RUNTIME_INVALID;
     data.backend_surface = null;
@@ -3017,13 +3021,13 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
         abort("gpu: null Surface");
     }
     if (desc == null) return INVALID_ARGUMENT~;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::DeviceData* device_data = operation.data;
-    gpu::internal::SurfaceData* surface_data = gpu::internal::require_surface(surface)!;
+    gpu::internal::SurfaceData* surface_data = gpu::internal::require_surface(surface);
     if (!device_data.runtime_retained) return INVALID_RESOURCE_STATE~;
     if (!device_data.presentation_surface.is_valid()) return UNSUPPORTED_FEATURE~;
-    gpu::internal::RuntimeData* device_runtime = gpu::internal::require_runtime(&device_data.runtime)!;
+    gpu::internal::RuntimeData* device_runtime = gpu::internal::require_runtime(&device_data.runtime);
     gpu::internal::RuntimeData* surface_runtime = gpu::internal::resolve_runtime(&surface_data.runtime);
     if ((ulong)*surface != (ulong)device_data.presentation_surface
         || surface_runtime != device_runtime) {
@@ -3045,12 +3049,12 @@ fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, Swapchain
    @return "The current immutable configuration snapshot." *>
 fn SwapchainInfo get_swapchain_info(Device* device, SwapchainHandle swapchain) {
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(device)!!;
+        gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_swapchain_info(
         operation.state,
         swapchain,
-    )!!;
+    );
 }
 
 <* Present modes the swapchain's surface supports. Unsupported requested
@@ -3059,7 +3063,7 @@ fn SwapchainInfo get_swapchain_info(Device* device, SwapchainHandle swapchain) {
    @param swapchain : "Swapchain whose surface modes are queried."
    @return "Supported present modes, or a recoverable surface fault." *>
 fn PresentModeSupport? get_present_mode_support(Device* device, SwapchainHandle swapchain) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_present_mode_support(
         operation.state,
@@ -3080,7 +3084,7 @@ fn PresentModeSupport? get_present_mode_support(Device* device, SwapchainHandle 
    @param height : "Requested surface height."
    @return "Success, including a dormant zero extent or a lost device, or a recoverable in-use, surface, or allocation fault." *>
 fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width, uint height) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_resize_swapchain(
         state:  operation.state,
@@ -3100,7 +3104,7 @@ fn void? resize_swapchain(Device* device, SwapchainHandle swapchain, uint width,
    @param timeout_ns : "Maximum host wait in nanoseconds; zero is nonblocking."
    @return "A one-shot acquired image, or a recoverable timeout, lifecycle, or surface fault." *>
 fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain, ulong timeout_ns = 0) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_acquire_next_image(
         operation.state,
@@ -3122,9 +3126,9 @@ fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain, 
    @return "Success, or a recoverable timeout, lifecycle, surface, or backend fault." *>
 fn void? present(Device* device, AcquiredImage* image, CompletionPoint render_completion) {
     if (image == null) return INVALID_ARGUMENT~;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_completion_point(&operation, device, render_completion)!;
+    gpu::internal::validate_completion_point(&operation, device, render_completion);
     gpu::internal::vk::vk_present(
         operation.state,
         image,
@@ -3152,7 +3156,7 @@ fn void? present(Device* device, AcquiredImage* image, CompletionPoint render_co
    @param timeout_ns : "Maximum host wait in nanoseconds; TIMEOUT_INFINITE waits without a deadline and zero is nonblocking."
    @return "Success, or a recoverable timeout, allocation, or backend fault." *>
 fn void? wait_swapchain_presentations(Device* device, SwapchainHandle swapchain, ulong timeout_ns = TIMEOUT_INFINITE) {
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_wait_swapchain_presentations(
         state:      operation.state,
@@ -3170,7 +3174,7 @@ fn void? wait_swapchain_presentations(Device* device, SwapchainHandle swapchain,
    @return "Success, or a recoverable in-use or surface fault." *>
 fn void? destroy_swapchain(Device* device, SwapchainHandle swapchain) {
     if (swapchain == (SwapchainHandle){}) return;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::vk::vk_destroy_swapchain(operation.state, swapchain)!;
     gpu::internal::release_device_children(&operation);

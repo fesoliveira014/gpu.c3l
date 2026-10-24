@@ -172,7 +172,7 @@ fn void? wait_test_queue(gpu::Device* device, gpu::QueueKind queue) {
 fn void? destroy_test_device(gpu::Device* device) {
     if (device == null || !device.is_valid()) return;
     gpu::Runtime runtime;
-    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device)!;
+    gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     if (operation.data.runtime_retained) runtime = operation.data.runtime;
     gpu::internal::end_device_operation(&operation);
     gpu::QueueRoles queues = gpu::get_device_caps(device).queues;

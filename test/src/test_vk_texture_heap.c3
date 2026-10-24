@@ -1179,8 +1179,8 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
     )!!;
     assert(slot.index.value == range.base.value && slot.generation != stale.generation,
         "an update keeps the index and advances the generation");
-    assert(state.textures.get(large)!!.live_descriptor_views == 1
-        && state.textures.get(small)!!.live_descriptor_views == 2,
+    assert(state.textures.get(large).live_descriptor_views == 1
+        && state.textures.get(small).live_descriptor_views == 2,
         "the live-view count moves to the new texture");
 
     sample_root.width = SMALL;

@@ -76,7 +76,7 @@ fn AttachmentViewSlot* AttachmentViewTable.find(&self, gpu::AttachmentViewHandle
     return &self.slots[handle.index].value;
 }
 
-fn AttachmentViewSlot*? AttachmentViewTable.get(&self, gpu::AttachmentViewHandle handle) {
+fn AttachmentViewSlot* AttachmentViewTable.get(&self, gpu::AttachmentViewHandle handle) {
     if (handle.owner != self.owner) abort("gpu: foreign AttachmentViewHandle");
     AttachmentViewSlot* slot = self.find(handle);
     if (slot == null) abort("gpu: stale AttachmentViewHandle");
@@ -87,7 +87,7 @@ fn void? AttachmentViewTable.free(
     &self,
     gpu::AttachmentViewHandle handle,
 ) {
-    self.get(handle)!;
+    self.get(handle);
     AttachmentViewCell* cell = &self.slots[handle.index];
     cell.value = {};
     cell.used = false;
@@ -108,7 +108,7 @@ fn gpu::AttachmentViewHandle? vk_create_attachment_view(
     if (desc == null) return gpu::INVALID_ARGUMENT~;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    TextureSlot* texture = state.textures.get(desc.texture)!;
+    TextureSlot* texture = state.textures.get(desc.texture);
     if (texture_slot_is_3d(texture)
         || (!texture.usage.color_attach && !texture.usage.depth_attach)
         || desc.mip_level >= texture.mip_levels
@@ -173,9 +173,9 @@ fn void? vk_destroy_attachment_view(
 ) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
-    AttachmentViewSlot* slot = state.attachment_views.get(handle)!;
+    AttachmentViewSlot* slot = state.attachment_views.get(handle);
     if (slot.swapchain_owned) return gpu::INVALID_RESOURCE_STATE~;
-    TextureSlot* texture = state.textures.get(slot.texture)!;
+    TextureSlot* texture = state.textures.get(slot.texture);
     vk::ImageView native = slot.native;
     bool owns_native = slot.owns_native;
     state.attachment_views.free(handle)!;

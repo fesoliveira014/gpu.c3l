@@ -363,7 +363,7 @@ fn void mesh_and_vertex_pipelines_alternate_in_one_pass() @test {
     state.color = { .targets = color_on[..] };
     gpu::GpuAddress tri_root = test_span_address(&device, tri.span);
     gpu::GpuAddress color_root = test_span_address(&device, color.span);
-    vk::CommandRecord* record = vk::resolve_command(&cmd)!!;
+    vk::CommandRecord* record = vk::resolve_command(&cmd);
     vk::VkDeviceState* device_state = mesh_device_state(&device);
 
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;

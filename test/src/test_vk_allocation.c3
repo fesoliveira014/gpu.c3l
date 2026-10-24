@@ -714,7 +714,7 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
         .in_flight_buffers = 1,
     })!!;
     vk::CommandAllocatorSlot* allocator_slot =
-        fixture.state.command_allocators.get(allocator)!!;
+        fixture.state.command_allocators.get(allocator);
     allocator_slot.mutex.init()!!;
     defer (void)allocator_slot.mutex.destroy();
     vk::CommandCell[1] command_cells;
@@ -835,7 +835,7 @@ fn void check_allocation_memory_policy(gpu::MemoryClass memory_class) {
         assert((required & (uint)vk::MemoryPropertyFlagBits.HOST_VISIBLE_BIT) != 0,
             "CPU memory classes require HOST_VISIBLE memory");
     }
-    vk::AllocationSlot* slot = fixture.state.allocations.get(allocation)!!;
+    vk::AllocationSlot* slot = fixture.state.allocations.get(allocation);
     assert(slot.alignment == 128, "the published slot retains actual alignment");
     bool device_preferred = memory_class == gpu::MemoryClass.GPU_PRIVATE
         || memory_class == gpu::MemoryClass.CPU_WRITE_GPU_LOCAL;
@@ -936,7 +936,7 @@ fn void texture_memory_uses_raw_non_addressable_allocation() @test {
     gpu::AllocationInfo info = vk::allocation_info_for_state(
         &fixture.state,
         allocation,
-    )!!;
+    );
     assert(info.size == desc.size
         && info.memory_class == gpu::MemoryClass.TEXTURE
         && info.access == desc.access
@@ -1043,7 +1043,7 @@ fn void allocation_queries_and_immediate_release() @test {
     gpu::AllocationInfo info = vk::allocation_info_for_state(
         &fixture.state,
         allocation,
-    )!!;
+    );
     assert(info.size == desc.size && info.size < 256,
         "allocation info reports logical rather than native requirement size");
     assert(info.alignment == 128
@@ -1064,7 +1064,7 @@ fn void allocation_queries_and_immediate_release() @test {
         && span.size == desc.size,
         "the whole span preserves allocation identity and logical extent");
 
-    vk::AllocationSlot* slot = fixture.state.allocations.get(allocation)!!;
+    vk::AllocationSlot* slot = fixture.state.allocations.get(allocation);
     slot.live_placements = 1;
     assert(@catch(vk::free_allocation_for_state_with_ops(
         &fixture.state,
@@ -1072,7 +1072,7 @@ fn void allocation_queries_and_immediate_release() @test {
         &ops,
     )) == gpu::RESOURCE_IN_USE,
         "live placements reject immediate allocation release");
-    assert(fixture.state.allocations.get(allocation)!! == slot
+    assert(fixture.state.allocations.get(allocation) == slot
         && fixture.probe.destroy_count == 0,
         "rejected release preserves table and paired native ownership");
 
@@ -1188,7 +1188,7 @@ fn void native_allocation_classes_map_and_release() @test {
             "every memory class exposes a nonzero GPU address");
 
         vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-        vk::AllocationSlot* slot = state.allocations.get(allocation)!!;
+        vk::AllocationSlot* slot = state.allocations.get(allocation);
         vk::MemoryRequirements native_requirements;
         vk::get_buffer_memory_requirements(
             state.device,

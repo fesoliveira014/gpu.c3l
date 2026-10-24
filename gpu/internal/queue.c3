@@ -406,7 +406,7 @@ fn bool queue_id_is_selected(
         && queue_roles_equal(queue.roles, selection.identity_roles[queue.id]);
 }
 
-fn void? validate_queue(
+fn void validate_queue(
     gpu::internal::DeviceOperation* operation,
     Device* device,
     Queue queue,
@@ -419,7 +419,7 @@ fn void? validate_queue(
     if (!queue_id_is_selected(operation, queue)) abort("gpu: malformed Queue");
 }
 
-fn void? validate_completion_point(
+fn void validate_completion_point(
     gpu::internal::DeviceOperation* operation,
     Device* device,
     CompletionPoint point,

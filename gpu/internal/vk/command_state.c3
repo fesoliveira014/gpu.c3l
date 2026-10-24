@@ -117,7 +117,7 @@ fn CommandRecord* CommandTable.find(&self, gpu::internal::CommandListHandle hand
     return &self.slots[handle.index].record;
 }
 
-fn CommandRecord*? CommandTable.get(&self, gpu::internal::CommandListHandle handle) {
+fn CommandRecord* CommandTable.get(&self, gpu::internal::CommandListHandle handle) {
     if (handle.owner != self.owner) abort("gpu: foreign CommandList");
     CommandRecord* slot = self.find(handle);
     if (slot == null) abort("gpu: stale CommandList");
@@ -125,7 +125,7 @@ fn CommandRecord*? CommandTable.get(&self, gpu::internal::CommandListHandle hand
 }
 
 fn void? CommandTable.free(&self, gpu::internal::CommandListHandle handle) {
-    self.get(handle)!;
+    self.get(handle);
     uint idx = handle.index;
     self.slots[idx].record = {};
     self.slots[idx].used = false;
@@ -146,12 +146,10 @@ fn void? CommandTable.cancel_claim(
     return self.free(handle);
 }
 
-fn CommandRecord*? resolve_command(
+fn CommandRecord* resolve_command(
     gpu::CommandList* token,
 ) @feat(TESTING) {
-    CommandRecord* record =
-        gpu::internal::recording_command(token)!;
-    return record;
+    return gpu::internal::recording_command(token);
 }
 
 fn void release_command(

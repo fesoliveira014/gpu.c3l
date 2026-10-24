@@ -96,7 +96,7 @@ fn void? validate_texture_allocation(
             owner:       texture_compatibility_owner(requirements.compatibility),
             kind:        gpu::internal::ResourceOwnerKind.ALLOCATION,
             handle_kind: gpu::internal::HandleKind.TEXTURE_REQUIREMENTS,
-        )!;
+        );
         if (requirements.dedicated_only && !allow_dedicated) {
             return gpu::UNSUPPORTED_FEATURE~;
         }
@@ -167,7 +167,7 @@ fn MappedGpuSpan? allocate_mapped_allocation(
     Device* device,
     AllocationDesc* desc,
 ) @private {
-    DeviceOperation operation = begin_device_operation(device)!;
+    DeviceOperation operation = begin_device_operation(device);
     defer end_device_operation(&operation);
     AllocationDesc normalized = validated_allocation_desc(&operation, desc)!;
     GpuAllocation allocation =

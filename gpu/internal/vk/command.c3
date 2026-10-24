@@ -217,7 +217,7 @@ fn CommandAllocatorSlot* CommandAllocatorTable.find(&self, gpu::CommandAllocator
     return &self.slots[handle.index].value;
 }
 
-fn CommandAllocatorSlot*? CommandAllocatorTable.get(&self, gpu::CommandAllocatorHandle handle) {
+fn CommandAllocatorSlot* CommandAllocatorTable.get(&self, gpu::CommandAllocatorHandle handle) {
     if (handle.owner != self.owner) abort("gpu: foreign CommandAllocator");
     CommandAllocatorSlot* slot = self.find(handle);
     if (slot == null) abort("gpu: stale CommandAllocator");
@@ -228,7 +228,7 @@ fn void? CommandAllocatorTable.free(
     &self,
     gpu::CommandAllocatorHandle handle,
 ) {
-    self.get(handle)!;
+    self.get(handle);
     CommandAllocatorCell* cell = &self.slots[handle.index];
     cell.value = {};
     cell.used = false;
@@ -425,7 +425,7 @@ fn void? initialize_command_allocator_slot_with_ops(
     QueueCompletionState* completion = queue_completion_state(
         state,
         queue.id,
-    )!;
+    );
     slot.pool = ops.create(
         ops.user_data,
         state.device,
@@ -474,7 +474,7 @@ fn gpu::CommandAllocatorHandle? vk_create_command_allocator(
         owns_slot = false;
         CommandAllocatorSlot* published = state.command_allocators.get(
             handle,
-        )!!;
+        );
         if (catch published.mutex.init()) {
             destroy_command_allocator_slot(state, published);
             state.command_allocators.free(handle)!!;
@@ -492,7 +492,7 @@ fn void? vk_destroy_command_allocator(
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
-        CommandAllocatorSlot* slot = state.command_allocators.get(handle)!;
+        CommandAllocatorSlot* slot = state.command_allocators.get(handle);
         // This claim never takes retirement_mutex, so a retirement waiter cannot form a lock cycle.
         uint claimed = mem::compare_exchange(
             ptr:      &slot.operation_pins.data,
@@ -527,7 +527,7 @@ fn bool command_allocator_quiescent_locked(CommandAllocatorSlot* slot) {
         && slot.available_count == slot.command_buffers.len;
 }
 
-fn CommandAllocatorSlot*? resolve_command_allocator(
+fn CommandAllocatorSlot* resolve_command_allocator(
     VkDeviceState* state,
     gpu::CommandAllocator* allocator,
 ) {
@@ -536,7 +536,7 @@ fn CommandAllocatorSlot*? resolve_command_allocator(
     }
     CommandAllocatorSlot* slot = state.command_allocators.get(
         allocator.handle,
-    )!;
+    );
     if (slot.queue != allocator.queue) abort("gpu: mismatched CommandAllocator");
     return slot;
 }
@@ -575,7 +575,7 @@ fn CommandAllocatorSlot*? lock_command_allocator(
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
-        slot = resolve_command_allocator(state, allocator)!;
+        slot = resolve_command_allocator(state, allocator);
         pin_command_allocator_slot(slot);
     }
     defer catch (void)slot.operation_pins.sub(1, AtomicOrdering.RELEASE);
@@ -591,7 +591,7 @@ fn CommandAllocatorSlot*? lock_command_allocator_handle(
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
-        slot = state.command_allocators.get(handle)!;
+        slot = state.command_allocators.get(handle);
         pin_command_allocator_slot(slot);
     }
     defer catch (void)slot.operation_pins.sub(1, AtomicOrdering.RELEASE);
@@ -608,8 +608,8 @@ fn CommandAllocatorSlot*? lock_command_allocator_for_pipeline(
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
-        slot = resolve_command_allocator(state, allocator)!;
-        (void)state.pipelines.get(pipeline)!;
+        slot = resolve_command_allocator(state, allocator);
+        (void)state.pipelines.get(pipeline);
         pin_command_allocator_slot(slot);
     }
     defer catch (void)slot.operation_pins.sub(1, AtomicOrdering.RELEASE);
@@ -621,7 +621,7 @@ fn vk::MemoryRequirements? generated_scratch_requirements(
     VkDeviceState* state,
     gpu::GeneratedWorkReservationDesc* desc,
 ) {
-    PipelineSlot* slot = state.pipelines.get(desc.pipeline)!;
+    PipelineSlot* slot = state.pipelines.get(desc.pipeline);
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[slot.entry];
     PipelineKind pipeline_kind = (PipelineKind)entry.key.kind;
     vk::IndirectCommandsLayoutEXT layout;
@@ -768,7 +768,7 @@ fn void? vk_reserve_generated_work(
         (void)resolve_command_allocator(
             state,
             allocator,
-        )!;
+        );
         requirements = generated_scratch_requirements(state, desc)!;
     }
     {
@@ -1091,7 +1091,7 @@ fn CommandAllocatorSlot* record_allocator_slot(
     if (record.internal) {
         return state.queue_completions[record.queue.id].internal_allocator;
     }
-    return state.command_allocators.get(record.allocator)!!;
+    return state.command_allocators.get(record.allocator);
 }
 
 fn CommandAllocatorSlot*? lock_internal_command_allocator(
@@ -1112,7 +1112,7 @@ fn CommandRecord*? begin_internal_commands(
 ) {
     gpu::Device owner = state.owner;
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(&owner)!;
+        gpu::internal::begin_device_operation(&owner);
     defer gpu::internal::end_device_operation(&operation);
     CommandAllocatorSlot* slot = lock_internal_command_allocator(
         completion.internal_allocator,
@@ -1355,7 +1355,7 @@ fn CommandRecord*? begin_commands_with_injected_ops(
         pool_ops:     pool_ops,
     )!;
     CommandRecord* record =
-        gpu::internal::recording_command(out_commands)!;
+        gpu::internal::recording_command(out_commands);
     return record;
 }
 
@@ -1382,7 +1382,7 @@ fn void? vk_discard_commands(
     {
         state.command_mutex.lock()!!;
         defer state.command_mutex.unlock();
-        CommandRecord* record = state.commands.get(handle)!;
+        CommandRecord* record = state.commands.get(handle);
         bool state_matches = executable
             ? record.state == gpu::internal::CommandState.EXECUTABLE
             : record.state == gpu::internal::CommandState.RECORDING
@@ -1397,7 +1397,7 @@ fn void? vk_discard_commands(
     defer unlock_command_allocator(slot);
     state.command_mutex.lock()!!;
     defer state.command_mutex.unlock();
-    CommandRecord* record = state.commands.get(handle)!;
+    CommandRecord* record = state.commands.get(handle);
     bool state_matches = executable
         ? record.state == gpu::internal::CommandState.EXECUTABLE
         : record.state == gpu::internal::CommandState.RECORDING
@@ -1643,7 +1643,7 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    TextureSlot* texture = state.textures.get(desc.texture)!;
+    TextureSlot* texture = state.textures.get(desc.texture);
     ResolvedSpan buffer = resolve_span_slot(
         state:          state,
         span:           &desc.src,
@@ -1682,7 +1682,7 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    TextureSlot* texture = state.textures.get(desc.texture)!;
+    TextureSlot* texture = state.textures.get(desc.texture);
     ResolvedSpan buffer = resolve_span_slot(
         state:          state,
         span:           &desc.dst,
@@ -1785,8 +1785,8 @@ fn void? vk_cmd_copy_texture(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    TextureSlot* src = state.textures.get(desc.src)!;
-    TextureSlot* dst = state.textures.get(desc.dst)!;
+    TextureSlot* src = state.textures.get(desc.src);
+    TextureSlot* dst = state.textures.get(desc.dst);
     gpu::internal::TextureCopyShape src_shape = texture_copy_shape(src);
     gpu::internal::TextureCopyShape dst_shape = texture_copy_shape(dst);
     gpu::internal::TextureCopyExtent extent = gpu::internal::resolve_texture_copy(
@@ -1873,7 +1873,7 @@ fn BoundPipeline? lower_bound_pipeline(
     }
     VkDeviceState* state = commands.device_state;
     validate_descriptor_heap_binding(state)!;
-    PipelineCell* cell = state.pipelines.get_cell(pipeline)!;
+    PipelineCell* cell = state.pipelines.get_cell(pipeline);
     PipelineSlot* slot = &cell.value;
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[slot.entry];
     return {

@@ -63,7 +63,7 @@ fn void? bind_pipeline_with_capture(
         .set_topology = &capture_pipeline_topology,
     };
     return vk::vk_cmd_bind_pipeline_with_ops(
-        vk::resolve_command(commands)!,
+        vk::resolve_command(commands),
         pipeline,
         &ops,
     );
@@ -195,7 +195,7 @@ fn DynamicStateFixture make_dynamic_state_fixture(
     };
     gpu::cmd_begin_render_pass(&fixture.commands, &pass)!!;
     select_graphics_color_pipeline(
-        vk::resolve_command(&fixture.commands)!!,
+        vk::resolve_command(&fixture.commands),
         color_formats[..],
     );
     gpu::cmd_set_graphics_state(&fixture.commands, &graphics_state)!!;
@@ -205,7 +205,7 @@ fn DynamicStateFixture make_dynamic_state_fixture(
 fn void destroy_dynamic_state_fixture(
     DynamicStateFixture* fixture,
 ) {
-    vk::CommandRecord* record = vk::resolve_command(&fixture.commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&fixture.commands);
     if (record.state == gpu::internal::CommandState.RECORDING_RENDER_PASS) {
         gpu::cmd_end_render_pass(&fixture.commands)!!;
     }
@@ -272,7 +272,7 @@ fn vk::TextureSlot* render_validation_slot(
 ) {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    return state.textures.get(texture)!!;
+    return state.textures.get(texture);
 }
 
 fn vk::AttachmentViewSlot* render_validation_view_slot(
@@ -281,7 +281,7 @@ fn vk::AttachmentViewSlot* render_validation_view_slot(
 ) {
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
-    return state.attachment_views.get(view)!!;
+    return state.attachment_views.get(view);
 }
 
 fn void texture_create_info_uses_requested_sample_count() @test {
@@ -885,7 +885,7 @@ fn void preserves_graphics_binding_across_render_passes() @test {
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     gpu::cmd_set_graphics_state(&commands, &graphics_state)!!;
     gpu::cmd_end_render_pass(&commands)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
     assert(record.logical_pipeline.handle == draw.graphics,
         "ending a render pass preserves the logical graphics binding");
     assert(record.native_graphics_pipeline.pipeline != null,
@@ -932,7 +932,7 @@ fn void graphics_alias_updates_logical_handle() @test {
         alias_pipeline,
         &capture,
     )!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
     assert(capture.calls == 1 && capture.graphics_calls == 1,
         "graphics aliases sharing one cache entry emit one native bind");
     assert(record.logical_pipeline.handle == alias_pipeline,
@@ -950,7 +950,7 @@ fn void mesh_state_replays_topology_on_graphics_bind() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
     record.logical_pipeline.kind = vk::PipelineKind.MESH;
     gpu::GraphicsState state = gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
     state.raster.topology = gpu::PrimitiveTopology.LINES;
@@ -1004,7 +1004,7 @@ fn void alternating_bind_points_preserve_native_caches() @test {
         &capture,
     )!!;
 
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
     assert(capture.calls == 2
             && capture.compute_calls == 1
             && capture.graphics_calls == 1,
@@ -1036,7 +1036,7 @@ fn void distinct_pipelines_on_one_bind_point_emit_distinct_binds() @test {
     bind_pipeline_with_capture(&commands, compute.pipeline, &capture)!!;
     bind_pipeline_with_capture(&commands, other, &capture)!!;
 
-    vk::CommandRecord* record = vk::resolve_command(&commands)!!;
+    vk::CommandRecord* record = vk::resolve_command(&commands);
     assert(capture.calls == 2 && capture.compute_calls == 2,
         "a different pipeline on one bind point is never suppressed");
     assert(capture.pipelines[0] != capture.pipelines[1],
@@ -1091,7 +1091,7 @@ fn void command_buffer_reuse_resets_graphics_and_descriptor_state() @test {
     gpu::cmd_bind_pipeline(&first, compute.pipeline)!!;
     gpu::cmd_bind_pipeline(&first, draw.graphics)!!;
     gpu::cmd_set_graphics_state(&first, &graphics)!!;
-    vk::CommandRecord* first_record = vk::resolve_command(&first)!!;
+    vk::CommandRecord* first_record = vk::resolve_command(&first);
     assert(first_record.graphics_state_initialized,
         "complete state initializes topology persistence");
     assert(first_record.descriptor_heap_binding.graphics_set_bound
@@ -1102,7 +1102,7 @@ fn void command_buffer_reuse_resets_graphics_and_descriptor_state() @test {
 
     gpu::CommandList reused = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&reused)!!;
-    vk::CommandRecord* reused_record = vk::resolve_command(&reused)!!;
+    vk::CommandRecord* reused_record = vk::resolve_command(&reused);
     assert(!reused_record.logical_pipeline.handle.is_valid()
             && reused_record.logical_pipeline.pipeline == null
             && reused_record.logical_pipeline.layout == null

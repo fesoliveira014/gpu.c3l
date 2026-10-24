@@ -100,7 +100,7 @@ fn void rendering_attachments_use_classic_layouts() @test {
         .height = DP_RT,
     };
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(&commands)!!;
+        gpu::internal::recording_command(&commands);
 
     gpu::internal::vk::PreparedRenderPass prepared =
         gpu::internal::vk::lower_render_pass(record, &pass)!!;
@@ -244,7 +244,7 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         .height = DP_RT,
     };
     gpu::internal::vk::CommandRecord* record =
-        gpu::internal::recording_command(&commands)!!;
+        gpu::internal::recording_command(&commands);
     gpu::internal::vk::PreparedRenderPass prepared =
         gpu::internal::vk::lower_render_pass(record, &pass)!!;
     bool unified = gpu::get_device_caps(&device).unified_layouts;

@@ -135,7 +135,7 @@ fn void initialize_acquisition_fixture(AcquisitionFixture* fixture) {
 
 fn void reset_acquisition_state(AcquisitionFixture* fixture) {
     gpu::internal::vk::SwapchainSlot* slot =
-        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+        fixture.state.presentation.swapchains.get(fixture.handle);
     slot.acquire_pending = false;
     slot.readiness_consumed = true;
     slot.acquisition = 11;
@@ -220,7 +220,7 @@ fn void assert_mapped_acquire_failure_preserves_state(
     fault expected_fault,
 ) {
     gpu::internal::vk::SwapchainSlot* slot =
-        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+        fixture.state.presentation.swapchains.get(fixture.handle);
     AcquisitionStateSnapshot before = snapshot_acquisition_state(slot);
     reset_acquire_capture(result);
     fault actual_fault = @catch(run_captured_acquire(fixture, 0));
@@ -747,7 +747,7 @@ fn void present_path_guards_precede_native_mutation() @test {
         device,
         handle,
         7,
-    )!!;
+    );
     gpu::AcquiredImage image = {
         .texture   = texture_handle,
         .readiness = readiness,
@@ -797,7 +797,7 @@ fn void present_path_guards_precede_native_mutation() @test {
     )!!;
     assert(captured_present_calls == 1,
         "valid present reaches the native seam exactly once");
-    assert(state.presentation.swapchains.get(handle)!!.present_fence_pending[0],
+    assert(state.presentation.swapchains.get(handle).present_fence_pending[0],
         "an enqueued present tracks its private completion fence");
     assert(capture.calls == 0, "valid present emits no diagnostic");
 
@@ -880,7 +880,7 @@ fn void acquire_timeout_values_reach_native_unchanged() @test {
     initialize_acquisition_fixture(&fixture);
     reset_acquisition_state(&fixture);
     gpu::internal::vk::SwapchainSlot* slot =
-        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+        fixture.state.presentation.swapchains.get(fixture.handle);
     AcquisitionStateSnapshot before = snapshot_acquisition_state(slot);
     ulong[3] timeouts = {
         0,
@@ -946,7 +946,7 @@ fn void retryable_acquire_failures_preserve_candidate_for_success() @test {
     initialize_acquisition_fixture(&fixture);
     reset_acquisition_state(&fixture);
     gpu::internal::vk::SwapchainSlot* slot =
-        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+        fixture.state.presentation.swapchains.get(fixture.handle);
     AcquisitionStateSnapshot before = snapshot_acquisition_state(slot);
 
     reset_acquire_capture(vk::Result.NOT_READY);
@@ -1002,7 +1002,7 @@ fn void suboptimal_acquire_commits_once() @test {
     initialize_acquisition_fixture(&fixture);
     reset_acquisition_state(&fixture);
     gpu::internal::vk::SwapchainSlot* slot =
-        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+        fixture.state.presentation.swapchains.get(fixture.handle);
     uint prior_acquisition = slot.acquisition;
 
     reset_acquire_capture(vk::Result.SUBOPTIMAL_KHR);
@@ -1047,7 +1047,7 @@ fn void exhausted_acquisition_identity_precedes_native_acquire() @test {
     initialize_acquisition_fixture(&fixture);
     reset_acquisition_state(&fixture);
     gpu::internal::vk::SwapchainSlot* slot =
-        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+        fixture.state.presentation.swapchains.get(fixture.handle);
     slot.acquisition = uint::max;
     AcquisitionStateSnapshot before = snapshot_acquisition_state(slot);
 
@@ -1065,7 +1065,7 @@ fn void busy_acquire_ring_precedes_native_acquire() @test {
     initialize_acquisition_fixture(&fixture);
     reset_acquisition_state(&fixture);
     gpu::internal::vk::SwapchainSlot* slot =
-        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+        fixture.state.presentation.swapchains.get(fixture.handle);
     fixture.retirements[1] = {
         .device  = fixture.device,
         .payload = 7ull << gpu::internal::COMPLETION_QUEUE_BITS,
@@ -1086,7 +1086,7 @@ fn void invalid_native_acquire_index_preserves_transaction_state() @test {
     initialize_acquisition_fixture(&fixture);
     reset_acquisition_state(&fixture);
     gpu::internal::vk::SwapchainSlot* slot =
-        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+        fixture.state.presentation.swapchains.get(fixture.handle);
     AcquisitionStateSnapshot before = snapshot_acquisition_state(slot);
 
     reset_acquire_capture(vk::Result.SUCCESS, uint::max);
@@ -1163,7 +1163,7 @@ fn void swapchain_release_is_immediate_and_retryable() @test {
         .texture         = texture,
         .swapchain_owned = true,
     })!!;
-    state.textures.get(texture)!!.internal_references.add(
+    state.textures.get(texture).internal_references.add(
         1,
         AtomicOrdering.RELAXED,
     );
@@ -1206,7 +1206,7 @@ fn void swapchain_release_is_immediate_and_retryable() @test {
     defer (void)completions[0].retirement_mutex.destroy();
     completions[0].published_sequence.store(1, AtomicOrdering.RELEASE);
     state.queue_completions = completions[..];
-    state.textures.get(texture)!!.internal_references.sub(
+    state.textures.get(texture).internal_references.sub(
         1,
         AtomicOrdering.RELAXED,
     );
@@ -1275,17 +1275,17 @@ fn void swapchain_release_detects_shared_resource_references() @test {
     assert(!gpu::internal::vk::swapchain_images_referenced_locked(
         &state,
         &slot,
-    )!!, "an unused wrapped texture is releasable");
+    ), "an unused wrapped texture is releasable");
 
-    state.textures.get(texture)!!.internal_references.add(
+    state.textures.get(texture).internal_references.add(
         1,
         AtomicOrdering.RELAXED,
     );
     assert(gpu::internal::vk::swapchain_images_referenced_locked(
         &state,
         &slot,
-    )!!, "internal texture operations block release");
-    state.textures.get(texture)!!.internal_references.sub(
+    ), "internal texture operations block release");
+    state.textures.get(texture).internal_references.sub(
         1,
         AtomicOrdering.RELAXED,
     );
@@ -1296,20 +1296,20 @@ fn void swapchain_release_detects_shared_resource_references() @test {
         assert(!gpu::internal::vk::swapchain_images_referenced_locked(
             &state,
             &slot,
-        )!!, "descriptor high-water alone does not block release");
+        ), "descriptor high-water alone does not block release");
     }
 
-    state.textures.get(texture)!!.live_descriptor_views = 1;
+    state.textures.get(texture).live_descriptor_views = 1;
     assert(gpu::internal::vk::swapchain_images_referenced_locked(
         &state,
         &slot,
-    )!!, "a shared texture descriptor blocks release");
-    state.textures.get(texture)!!.live_descriptor_views = 0;
+    ), "a shared texture descriptor blocks release");
+    state.textures.get(texture).live_descriptor_views = 0;
     state.attachment_views.free(attachment_view)!!;
     assert(!gpu::internal::vk::swapchain_images_referenced_locked(
         &state,
         &slot,
-    )!!, "a missing internal attachment-view slot is ignored defensively");
+    ), "a missing internal attachment-view slot is ignored defensively");
 }
 
 fn void swapchain_release_detects_live_views_across_images() @test {
@@ -1332,18 +1332,18 @@ fn void swapchain_release_detects_live_views_across_images() @test {
         })!!;
     }
 
-    state.textures.get(slot.textures[2])!!.live_descriptor_views = 1;
+    state.textures.get(slot.textures[2]).live_descriptor_views = 1;
     assert(gpu::internal::vk::swapchain_images_referenced_locked(
         &state,
         &slot,
-    )!!, "a live view on the final wrapped image blocks release");
+    ), "a live view on the final wrapped image blocks release");
 
-    state.textures.get(slot.textures[2])!!.live_descriptor_views = 0;
-    state.textures.get(slot.textures[0])!!.live_descriptor_views = 1;
+    state.textures.get(slot.textures[2]).live_descriptor_views = 0;
+    state.textures.get(slot.textures[0]).live_descriptor_views = 1;
     assert(gpu::internal::vk::swapchain_images_referenced_locked(
         &state,
         &slot,
-    )!!, "a live view on the first wrapped image blocks release");
+    ), "a live view on the first wrapped image blocks release");
 }
 
 struct BorrowedSwapchainFixture {
@@ -1529,7 +1529,7 @@ fn void install_borrowed_swapchain(
         context: &context,
     )!!;
     fixture.swapchain = state.presentation.swapchains.alloc(slot)!!;
-    fixture.live_slot = state.presentation.swapchains.get(fixture.swapchain)!!;
+    fixture.live_slot = state.presentation.swapchains.get(fixture.swapchain);
 }
 
 fn void restore_borrowed_swapchain(BorrowedSwapchainFixture* fixture) {
@@ -1575,9 +1575,9 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     )!!;
     gpu::TextureHandle old_texture = acquired.texture;
     gpu::AttachmentViewHandle old_view = acquired.attachment_view;
-    gpu::internal::vk::TextureSlot* texture = state.textures.get(old_texture)!!;
+    gpu::internal::vk::TextureSlot* texture = state.textures.get(old_texture);
     gpu::internal::vk::AttachmentViewSlot* view =
-        state.attachment_views.get(old_view)!!;
+        state.attachment_views.get(old_view);
     assert(borrowed_view_swapchain_creates == 1
         && borrowed_view_acquires == 1
         && live_slot.image_count == 1,
@@ -1632,7 +1632,7 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
         .emit = &emit_simulated_swapchain_barrier,
     };
     gpu::internal::vk::vk_cmd_texture_barrier_with_ops(
-        gpu::internal::recording_command(&commands)!!,
+        gpu::internal::recording_command(&commands),
         &to_present,
         &barrier_ops,
     )!!;
@@ -1981,7 +1981,7 @@ fn void wait_present_fences_preserves_image_reference_guards() @test {
     slot.attachment_views[0] = attachment_view;
     slot.present_fences[0] = (vk::Fence)73;
     slot.present_fence_pending[0] = true;
-    state.textures.get(texture)!!.internal_references.add(
+    state.textures.get(texture).internal_references.add(
         1,
         AtomicOrdering.RELAXED,
     );
@@ -1995,13 +1995,13 @@ fn void wait_present_fences_preserves_image_reference_guards() @test {
         reset_fn:   &capture_fence_reset_all,
     )!!;
     assert(
-        state.textures.get(texture)!!.internal_references.load(
+        state.textures.get(texture).internal_references.load(
             AtomicOrdering.RELAXED,
         ) == 1,
         "presentation wait leaves image reference counts unchanged"
     );
     assert(
-        gpu::internal::vk::swapchain_images_referenced_locked(&state, &slot)!!,
+        gpu::internal::vk::swapchain_images_referenced_locked(&state, &slot),
         "the image-reference guard still rejects after presentation retirement"
     );
     gpu::internal::vk::WsiDiagnosticContext context = {
@@ -2058,7 +2058,7 @@ fn void swapchain_readiness_identity_round_trips() @test {
         device,
         swapchain,
         0xFFFF_FFFE,
-    )!!;
+    );
 
     assert(readiness.device == device, "readiness keeps exact device identity");
     assert(gpu::internal::vk::swapchain_readiness_index(readiness) == swapchain.index,
@@ -2168,7 +2168,7 @@ fn void acquired_image_reports_prior_state() @test {
         device,
         swapchain,
         1,
-    )!!;
+    );
     gpu::TextureHandle handle = { .index = 2, .generation = 7 };
     gpu::AttachmentViewHandle attachment_view = {
         .index = 3, .generation = 11,
@@ -2277,7 +2277,7 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = 4, .height = 4 };
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     gpu::cmd_end_render_pass(&commands)!!;
-    unified_application_buffer = gpu::internal::recording_command(&commands)!!.command_buffer;
+    unified_application_buffer = gpu::internal::recording_command(&commands).command_buffer;
     gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)!! };
 
     gpu::SubmitDesc wrong = {
@@ -2315,7 +2315,7 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
     gpu::wait_completion(point)!!;
     consume_simulated_present(&fixture, queue, &acquired);
     gpu::internal::DeviceOperation operation =
-        gpu::internal::begin_device_operation(&device)!!;
+        gpu::internal::begin_device_operation(&device);
     release_submitted_executables(&operation, lists[..]);
     gpu::internal::end_device_operation(&operation);
 
@@ -2327,7 +2327,7 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
     gpu::CommandList again = gpu::begin_commands(&allocator)!!;
     gpu::cmd_begin_render_pass(&again, &pass)!!;
     gpu::cmd_end_render_pass(&again)!!;
-    unified_application_buffer = gpu::internal::recording_command(&again)!!.command_buffer;
+    unified_application_buffer = gpu::internal::recording_command(&again).command_buffer;
     gpu::ExecutableCommandList[1] again_lists = { gpu::end_commands(&again)!! };
     gpu::SubmitDesc omitted = { .command_lists = again_lists[..], .readiness = second.readiness };
     gpu::CompletionPoint second_point = gpu::internal::vk::vk_submit_with_ops(
@@ -2441,7 +2441,7 @@ fn void present_fences_count_as_signaled_after_loss() @test {
         gpu::destroy_device(&device)!!;
     }
     gpu::internal::vk::SwapchainSlot* slot =
-        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+        fixture.state.presentation.swapchains.get(fixture.handle);
     slot.present_fences[0] = (vk::Fence)17;
     gpu::internal::mark_device_lost(&device);
     captured_fence_status_calls = 0;
@@ -2554,7 +2554,7 @@ fn void absorbed_present_loss() @test {
             device,
             handle,
             7,
-        )!!,
+        ),
         .index     = 0,
     };
     captured_present_calls = 0;
@@ -2566,7 +2566,7 @@ fn void absorbed_present_loss() @test {
         present_fn:        &lose_present,
     )!!;
     gpu::internal::vk::SwapchainSlot* slot =
-        state.presentation.swapchains.get(handle)!!;
+        state.presentation.swapchains.get(handle);
     assert(captured_present_calls == 1, "the native present observed the loss");
     assert(!image.readiness.is_valid() && !slot.acquire_pending,
         "an absorbed present loss consumes the acquisition");
@@ -2580,7 +2580,7 @@ fn void absorbed_acquire_loss_returns_an_image() @test {
     initialize_acquisition_fixture(&fixture);
     reset_acquisition_state(&fixture);
     gpu::internal::vk::SwapchainSlot* slot =
-        fixture.state.presentation.swapchains.get(fixture.handle)!!;
+        fixture.state.presentation.swapchains.get(fixture.handle);
     uint expected_index = (slot.pending_image + 1) % slot.image_count;
 
     reset_acquire_capture(vk::Result.ERROR_DEVICE_LOST);

@@ -440,7 +440,7 @@ fn gpu::AccelerationStructureIndex acceleration_structure_index_from_slot(
     return { .value = slot + 1 };
 }
 
-fn AccelerationStructureDescriptorCell*?
+fn AccelerationStructureDescriptorCell*
 acceleration_structure_descriptor_cell_get(
     VkDeviceState* state,
     gpu::AccelerationStructureView view,
@@ -493,7 +493,7 @@ create_acceleration_structure_descriptor_view_with_ops(
     defer state.resource_mutex.unlock();
 
     AccelerationStructureSlot* owner =
-        state.acceleration_structures.get(acceleration_structure)!;
+        state.acceleration_structures.get(acceleration_structure);
     if (owner.desc.kind != gpu::AccelerationStructureKind.TOP_LEVEL) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -543,9 +543,9 @@ fn void? destroy_acceleration_structure_descriptor_view(
     defer state.resource_mutex.unlock();
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
     AccelerationStructureDescriptorCell* cell =
-        acceleration_structure_descriptor_cell_get(state, view)!;
+        acceleration_structure_descriptor_cell_get(state, view);
     AccelerationStructureSlot* owner =
-        state.acceleration_structures.get(cell.owner)!;
+        state.acceleration_structures.get(cell.owner);
     if (owner.live_view_count == 0) abort("gpu: corrupt AccelerationStructureView");
 
     cell.used = false;
@@ -587,7 +587,7 @@ fn uint storage_texture_binding(TextureSlot* texture) @private {
         : HEAP_BINDING_STORAGE_2D;
 }
 
-fn TextureDescriptorCell*? texture_cell_get(
+fn TextureDescriptorCell* texture_cell_get(
     VkDeviceState* state,
     gpu::TextureView view,
 ) @private {
@@ -766,7 +766,7 @@ fn TextureSlot*? resolve_descriptor_texture(
     ZString operation,
     ZString usage_field,
 ) @private {
-    TextureSlot* slot = state.textures.get(texture)!;
+    TextureSlot* slot = state.textures.get(texture);
     if (!slot.usage.sampled && !slot.usage.storage) {
         return report_contract_failure(
             state:               state,
@@ -1297,7 +1297,7 @@ fn void? vk_update_texture_view(
     defer state.resource_mutex.unlock();
     state.texture_view_cache_mutex.lock()!!;
     defer state.texture_view_cache_mutex.unlock();
-    TextureDescriptorCell* cell = texture_cell_get(state, *view)!;
+    TextureDescriptorCell* cell = texture_cell_get(state, *view);
     if (!should_recycle_handle_generation(cell.generation)) {
         return gpu::DESCRIPTOR_HEAP_FULL~;
     }
