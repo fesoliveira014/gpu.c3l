@@ -449,7 +449,7 @@ least 24; and `(count - 1) * stride` plus the element size fits `usz`. The
 build matches the destination: a TLAS takes no geometries and between one
 and its `max_instance_count` instances; a BLAS takes exactly its geometries,
 each of its kind, within its maxima, with a transform exactly when the
-destination has one, no indices and three vertices per primitive for
+destination has one, no indices and at least three vertices per primitive for
 non-indexed triangles, and no instances. An update destination was created
 with `allow_update`. A clone's source and destination are distinct and the
 destination storage is at least as large as the source's.

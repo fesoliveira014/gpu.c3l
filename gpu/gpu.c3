@@ -2120,7 +2120,7 @@ fn void? cmd_copy_texture(CommandList* commands, TextureCopyDesc* desc) {
    `desc.destination` must match the build: a top-level destination takes no
    geometries and between one and its `max_instance_count` instances; a
    bottom-level destination takes exactly its geometries, each of its kind,
-   with triangle and primitive counts within its maxima, a transform exactly
+   with vertex and primitive counts within its maxima, a transform exactly
    when it has one, no indices and at least three vertices per primitive for
    non-indexed triangles, and no instances. Those rules read destination
    state, so a violation panics in safe builds.
@@ -2145,7 +2145,7 @@ fn void? cmd_build_acceleration_structure(CommandList* commands, AccelerationStr
    `desc.destination` must match the build: a top-level destination takes no
    geometries and between one and its `max_instance_count` instances; a
    bottom-level destination takes exactly its geometries, each of its kind,
-   with triangle and primitive counts within its maxima, a transform exactly
+   with vertex and primitive counts within its maxima, a transform exactly
    when it has one, no indices and at least three vertices per primitive for
    non-indexed triangles, and no instances. An update destination must have been created with
    `flags.allow_update`. Those rules read destination
@@ -2180,7 +2180,7 @@ fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationSt
    `desc.destination` must match the build: a top-level destination takes no
    geometries and between one and its `max_instance_count` instances; a
    bottom-level destination takes exactly its geometries, each of its kind,
-   with triangle and primitive counts within its maxima, a transform exactly
+   with vertex and primitive counts within its maxima, a transform exactly
    when it has one, no indices and at least three vertices per primitive for
    non-indexed triangles, and no instances. Those rules read destination
    state, so a violation panics in safe builds.
@@ -2220,7 +2220,7 @@ fn void? cmd_build_acceleration_structure_indirect(
    `desc.destination` must match the build: a top-level destination takes no
    geometries and between one and its `max_instance_count` instances; a
    bottom-level destination takes exactly its geometries, each of its kind,
-   with triangle and primitive counts within its maxima, a transform exactly
+   with vertex and primitive counts within its maxima, a transform exactly
    when it has one, no indices and at least three vertices per primitive for
    non-indexed triangles, and no instances. An update destination must have been created with
    `flags.allow_update`. Those rules read destination

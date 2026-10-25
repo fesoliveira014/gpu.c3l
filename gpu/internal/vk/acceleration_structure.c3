@@ -488,7 +488,11 @@ prepare_acceleration_structure_build_mode(
             desc.geometries.len,
             destination.desc.geometries.len
         );
-        foreach (i, &input : desc.geometries) {
+        sz lowered_count = min(
+            desc.geometries.len,
+            destination.desc.geometries.len,
+        );
+        foreach (i, &input : desc.geometries[:lowered_count]) {
             gpu::internal::NormalizedAccelerationStructureGeometry* schema =
                 &destination.desc.geometries[i];
             assert(
