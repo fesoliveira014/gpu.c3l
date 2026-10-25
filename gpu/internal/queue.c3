@@ -364,6 +364,9 @@ fn bool queue_access_is_valid(
         && queue_roles_are_subset(access, selected_queue_role_mask(operation));
 }
 
+<* Public entry points require `access` to be nonzero with known roles. Every
+   role must also be one the device selected; that rule reads device state, so
+   it is asserted here and a violation panics in safe builds. *>
 fn void validate_queue_access(
     gpu::internal::DeviceOperation* operation,
     QueueRoles access,

@@ -105,6 +105,14 @@ these rules.
 and visibility calls also require a host-mapped class. Spans from
 `get_allocation_span` and `subspan` satisfy these rules.
 
+Every command that takes a `GpuSpan` requires it to be nonempty, and requires
+it to hold the bytes the call's own arguments imply (for example `draw_count`
+records of the indirect command type, or `index_count` indices). A span whose
+required size comes from the device, such as an acceleration-structure
+scratch range, must also cover that size. All of these are contracts: a
+violation panics in safe builds. `allocate_memory` and `allocate_mapped_memory`
+also require `desc.access` to name only queue roles the device selected.
+
 `allocate_mapped_memory` allocates a mapped class and returns the same
 three views in one call; free it through `span.allocation()`:
 

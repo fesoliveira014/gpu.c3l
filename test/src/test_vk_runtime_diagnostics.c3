@@ -162,29 +162,6 @@ fn void command_completion_retires_its_unit() @test {
     owned.span = {};
 }
 
-fn void commands_reject_null_descriptors() @test {
-    RuntimeDiagnosticCapture capture;
-    gpu::RuntimeDesc desc = diagnostic_runtime_desc(
-        vulkan_layers:   false,
-        callback:        false,
-        debug_names:     false,
-        capture:         &capture,
-    );
-    gpu::Device device = create_test_device(&desc)!!;
-    defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(
-        &allocator,
-    )!!;
-    defer discard_test_commands(&commands)!!;
-
-    assert(@catch(gpu::cmd_copy_buffer(&commands, null))
-        == gpu::INVALID_ARGUMENT,
-        "commands reject null host descriptors");
-}
-
 fn uint diagnostic_live_device_count() {
     uint count;
     for (uint i = 0; i < gpu::internal::MAX_DEVICES; i++) {

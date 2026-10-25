@@ -68,6 +68,12 @@ fn gpu::GpuAddress resolved_span_address(ResolvedSpan* span) {
     return span.address;
 }
 
+<* Resolve a span the caller has already checked. Public entry points require
+   a nonempty span and, where the size follows from their arguments, that it
+   covers the bytes they use. Spans whose required size comes from the device
+   (acceleration-structure and scratch sizes, shader-binding-table strides) are
+   checked here: `required` must not exceed `span.size`, and a violation
+   panics in safe builds. *>
 fn ResolvedSpan resolve_span_slot(
     VkDeviceState* state,
     gpu::GpuSpan* span,

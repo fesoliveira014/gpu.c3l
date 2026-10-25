@@ -15,11 +15,6 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
         "supports_texture_desc rejects a null descriptor"
     );
     assert(
-        @catch(gpu::create_texture(&device, (gpu::TextureDesc*)null))
-            == gpu::INVALID_ARGUMENT,
-        "create_texture rejects a null descriptor"
-    );
-    assert(
         @catch(gpu::intern_sampler(&device, (gpu::SamplerDesc*)null))
             == gpu::INVALID_ARGUMENT,
         "intern_sampler rejects a null descriptor"
@@ -77,25 +72,6 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
 
-    assert(
-        @catch(gpu::cmd_copy_buffer(&commands, (gpu::BufferCopyDesc*)null))
-            == gpu::INVALID_ARGUMENT,
-        "cmd_copy_buffer rejects a null descriptor"
-    );
-    assert(
-        @catch(gpu::cmd_copy_buffer_to_texture(
-            &commands,
-            (gpu::BufferTextureCopyDesc*)null,
-        )) == gpu::INVALID_ARGUMENT,
-        "cmd_copy_buffer_to_texture rejects a null descriptor"
-    );
-    assert(
-        @catch(gpu::cmd_copy_texture_to_buffer(
-            &commands,
-            (gpu::TextureBufferCopyDesc*)null,
-        )) == gpu::INVALID_ARGUMENT,
-        "cmd_copy_texture_to_buffer rejects a null descriptor"
-    );
     assert(
         @catch(gpu::cmd_barrier(&commands, (gpu::Barrier*)null))
             == gpu::INVALID_ARGUMENT,

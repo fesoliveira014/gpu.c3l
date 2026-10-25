@@ -251,10 +251,6 @@ fn void texture_memory_requires_prequeried_compatibility() @test {
     Device device = create_allocation_stub_device(&state);
     TextureDesc texture_desc = texture_allocation_desc();
 
-    assert(@catch(gpu::get_texture_requirements(&device, null))
-        == gpu::INVALID_ARGUMENT);
-    assert(state.texture_requirements_calls == 0,
-        "null descriptors stop before the backend requirements query");
     TextureRequirements requirements = gpu::get_texture_requirements(
         &device,
         &texture_desc,
@@ -352,11 +348,6 @@ fn void dedicated_texture_creation_publishes_independent_tokens() @test {
         .debug_name           = "dedicated_texture_memory",
     };
 
-    assert(@catch(gpu::create_dedicated_texture(
-        &device,
-        null,
-        &allocation_desc,
-    )) == gpu::INVALID_ARGUMENT);
     assert(state.texture_dedicated_calls == 0,
         "no dedicated backend mutation happens before creation");
 

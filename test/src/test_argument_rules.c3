@@ -232,3 +232,37 @@ fn void texture_requirement_rules_follow_the_memory_class() @test {
         "the allocation must cover every requirement");
 }
 
+fn void span_rules_need_a_nonempty_covering_span() @test {
+    GpuSpan empty = {};
+    GpuSpan sixteen = { .size = 16 };
+    assert(!gpu::internal::span_holds_bytes(empty, 0), "an empty span is never accepted");
+    assert(gpu::internal::span_holds_bytes(sixteen, 16));
+    assert(!gpu::internal::span_holds_bytes(sixteen, 17));
+
+    assert(gpu::internal::span_holds_records(sixteen, 8, 2));
+    assert(!gpu::internal::span_holds_records(sixteen, 8, 3));
+    assert(gpu::internal::span_holds_records(sixteen, 8, 0), "a zero count needs only a nonempty span");
+    assert(!gpu::internal::span_holds_records(empty, 8, 0));
+    assert(!gpu::internal::span_holds_records({ .size = usz::max }, usz::max, 2),
+        "the byte product must not overflow");
+}
+
+fn void index_span_rule_follows_the_index_type() @test {
+    GpuSpan span = { .size = 12 };
+    assert(gpu::internal::index_span_holds_indices(span, IndexType.U16, 6));
+    assert(!gpu::internal::index_span_holds_indices(span, IndexType.U16, 7));
+    assert(gpu::internal::index_span_holds_indices(span, IndexType.U32, 3));
+    assert(!gpu::internal::index_span_holds_indices(span, IndexType.U32, 4));
+}
+
+fn void generated_span_rule_reads_nothing_for_a_zero_maximum() @test {
+    GpuSpan empty = {};
+    GpuSpan records = { .size = 48 };
+    GpuSpan count = { .size = 4 };
+    assert(gpu::internal::generated_spans_hold(empty, empty, 24, 0));
+    assert(gpu::internal::generated_spans_hold(records, count, 24, 2));
+    assert(!gpu::internal::generated_spans_hold(records, count, 24, 3));
+    assert(!gpu::internal::generated_spans_hold(records, { .size = 3 }, 24, 2));
+    assert(!gpu::internal::generated_spans_hold(empty, count, 24, 1));
+}
+
