@@ -1913,7 +1913,7 @@ fn void cmd_end_label(CommandList* commands) {
    Always checked: token phase, required pointer, identity, bounds, and safe lowering.
    @param commands : "Live recording token."
    @param desc : "Borrowed exact source and destination ranges."
-   @return "Success, or a recoverable command, validation, or bounds fault."
+   @return "Success, or a recoverable command or validation fault."
    @require desc != null : "desc must not be null"
    @require desc.src.size > 0 : "desc.src.size must be greater than 0"
    @require desc.dst.size > 0 : "desc.dst.size must be greater than 0" *>
@@ -1984,7 +1984,10 @@ fn void? cmd_copy_texture(CommandList* commands, TextureCopyDesc* desc) {
 }
 
 <* Record one full BLAS or TLAS build using caller-owned input and scratch
-   spans. The command inserts no barrier.
+   spans. The command inserts no barrier. Each input span and the scratch span
+   must be nonempty, lie within its buffer allocation, and the scratch span
+   must cover the build scratch size reported by
+   `get_acceleration_structure_requirements`; a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, dynamic inputs, and build scratch."
    @return "Success, or a recoverable command, validation, range, capacity, or support fault." *>
@@ -1998,6 +2001,10 @@ fn void? cmd_build_acceleration_structure(CommandList* commands, AccelerationStr
 <* Record an in-place acceleration-structure update using caller-owned input
    and update scratch spans. The application orders a compatible update-enabled
    build before execution; recording needs no host wait and inserts no barrier.
+   Each input span and the scratch span must be nonempty, lie within its buffer
+   allocation, and the scratch span must cover the update scratch size reported
+   by `get_acceleration_structure_requirements`; a violation panics in safe
+   builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, matching dynamic inputs, and update scratch."
    @return "Success, or a recoverable command, validation, range, capacity, or support fault." *>
@@ -2020,11 +2027,15 @@ fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationSt
    queue and inserts no barrier. Order a GPU producer with a barrier whose
    destination contains both `indirect` and `acceleration_structure_build`.
    The caller keeps the destination, inputs, scratch, and range span alive and
-   unmodified as required through their final GPU use.
+   unmodified as required through their final GPU use. Every span must lie
+   within its buffer allocation and the scratch span must cover the build
+   scratch size reported by `get_acceleration_structure_requirements`; a
+   violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, maximum-count inputs, and build scratch."
    @param ranges : "Caller-owned GPU-authored fixed-stride range records."
-   @return "Success, or a recoverable command, validation, range, capacity, or support fault." *>
+   @return "Success, or a recoverable command, validation, range, capacity, or support fault."
+   @require ranges.size > 0 : "ranges.size must be greater than 0" *>
 fn void? cmd_build_acceleration_structure_indirect(
     CommandList* commands,
     AccelerationStructureBuildDesc* desc,
@@ -2049,10 +2060,14 @@ fn void? cmd_build_acceleration_structure_indirect(
    GPU-authored actual count equals the corresponding actual count from its
    prior build or update, while remaining within the supplied CPU maximum and
    explicit input span. The library does not inspect or read back the packet.
+   Every span must lie within its buffer allocation and the scratch span must
+   cover the update scratch size reported by
+   `get_acceleration_structure_requirements`; a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, maximum-count inputs, and update scratch."
    @param ranges : "Caller-owned GPU-authored fixed-stride range records."
-   @return "Success, or a recoverable command, validation, range, capacity, or support fault." *>
+   @return "Success, or a recoverable command, validation, range, capacity, or support fault."
+   @require ranges.size > 0 : "ranges.size must be greater than 0" *>
 fn void? cmd_update_acceleration_structure_indirect(
     CommandList* commands,
     AccelerationStructureBuildDesc* desc,
@@ -2134,7 +2149,7 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups, char
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param args : "Non-owning span containing one GPU-written dispatch record."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, bounds, or pipeline fault."
+   @return "Success, or a recoverable command or pipeline fault."
    @require gpu::internal::span_holds_bytes(args, DispatchIndirectCommand::size) : "args must be nonempty and hold one DispatchIndirectCommand" *>
 fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
@@ -2154,7 +2169,7 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
    @param records : "Non-owning GPU-written generated-dispatch record range."
    @param count_span : "Non-owning span containing the GPU-written dispatch count."
    @param max_dispatch_count : "Maximum generated records to execute."
-   @return "Success, or a recoverable command, bounds, support, or scratch-capacity fault."
+   @return "Success, or a recoverable command, support, or scratch-capacity fault."
    @require gpu::internal::generated_spans_hold(records, count_span, GeneratedDispatchRecord::size, max_dispatch_count) : "records must hold max_dispatch_count GeneratedDispatchRecord values and count_span one uint when max_dispatch_count is nonzero" *>
 fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
@@ -2169,7 +2184,8 @@ fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan 
 <* Record one direct ray dispatch through the active ray-tracing pipeline.
    The caller owns, populates, uploads, synchronizes, and retains every SBT
    span. The command pushes one RootPush value and inserts no hidden barrier,
-   bind, upload, submission, or wait.
+   bind, upload, submission, or wait. Each nonempty SBT region span must lie
+   within its buffer allocation; a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address passed unchanged to all ray-tracing stages."
    @param shader_binding_table : "Borrowed caller-owned SBT regions."
@@ -2198,12 +2214,14 @@ fn void? cmd_trace_rays(
 <* Record one basic indirect ray dispatch through the active ray-tracing
    pipeline. The root and caller-owned SBT remain direct; only dimensions come
    from the GPU span. The command inserts no hidden synchronization or work.
+   Each nonempty SBT region span must lie within its buffer allocation; a
+   violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param shader_binding_table : "Borrowed caller-owned direct shader binding table regions."
    @param args : "Caller-owned span beginning with one GPU-written TraceRaysIndirectCommand, valid through completion."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, range, pipeline, or support fault."
+   @return "Success, or a recoverable command, pipeline, or support fault."
    @require gpu::internal::span_holds_bytes(args, TraceRaysIndirectCommand::size) : "args must be nonempty and hold one TraceRaysIndirectCommand" *>
 fn void? cmd_trace_rays_indirect(
     CommandList* commands,
@@ -2232,7 +2250,7 @@ fn void? cmd_trace_rays_indirect(
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param args : "Caller-owned span beginning with one GPU-written TraceRaysIndirectCommand2; the packet and every shader binding table allocation it addresses must remain valid through completion."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, range, pipeline, or support fault."
+   @return "Success, or a recoverable command, pipeline, or support fault."
    @require gpu::internal::span_holds_bytes(args, TraceRaysIndirectCommand2::size) : "args must be nonempty and hold one TraceRaysIndirectCommand2" *>
 fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record =
@@ -2432,7 +2450,7 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    @param instance_count : "Instances to draw."
    @param index_type : "Index element width; defaults to U32."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, bounds, pipeline, or state fault."
+   @return "Success, or a recoverable command, pipeline, or state fault."
    @require gpu::internal::index_span_holds_indices(index_span, index_type, index_count) : "index_span must be nonempty and hold index_count indices of index_type" *>
 fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
@@ -2477,7 +2495,7 @@ fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAdd
    @param args : "Non-owning record array kept alive by the caller through completion."
    @param draw_count : "Number of records to execute."
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
-   @return "Success, or a recoverable command, bounds, support, or pipeline fault."
+   @return "Success, or a recoverable command, support, or pipeline fault."
    @require gpu::internal::span_holds_records(args, DrawMeshTasksIndirectCommand::size, draw_count) : "args must be nonempty and hold draw_count DrawMeshTasksIndirectCommand values" *>
 fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
@@ -2500,7 +2518,7 @@ fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_roo
    @param count_span : "Non-owning span holding the GPU-written draw count."
    @param max_draw_count : "Maximum records the GPU count may select."
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
-   @return "Success, or a recoverable command, bounds, support, or pipeline fault."
+   @return "Success, or a recoverable command, support, or pipeline fault."
    @require gpu::internal::span_holds_records(args, DrawMeshTasksIndirectCommand::size, max_draw_count) : "args must be nonempty and hold max_draw_count DrawMeshTasksIndirectCommand values"
    @require gpu::internal::span_holds_bytes(count_span, uint::size) : "count_span must be nonempty and hold one uint" *>
 fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, char[] inline_root = {}) {
@@ -2527,7 +2545,7 @@ fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress me
    @param args : "Non-owning array of indirect draw records kept alive by the caller through completion."
    @param draw_count : "Number of indirect records to execute."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, bounds, pipeline, or state fault."
+   @return "Success, or a recoverable command, pipeline, or state fault."
    @require gpu::internal::span_holds_records(args, DrawIndirectCommand::size, draw_count) : "args must be nonempty and hold draw_count DrawIndirectCommand values" *>
 fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
@@ -2554,7 +2572,7 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, bounds, pipeline, or state fault."
+   @return "Success, or a recoverable command, pipeline, or state fault."
    @require gpu::internal::span_holds_records(args, DrawIndexedIndirectCommand::size, draw_count) : "args must be nonempty and hold draw_count DrawIndexedIndirectCommand values"
    @require index_span.size > 0 : "index_span.size must be greater than 0" *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
@@ -2586,7 +2604,7 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, bounds, support, pipeline, or state fault."
+   @return "Success, or a recoverable command, support, pipeline, or state fault."
    @require gpu::internal::span_holds_records(args, DrawIndexedIndirectCommand::size, max_draw_count) : "args must be nonempty and hold max_draw_count DrawIndexedIndirectCommand values"
    @require gpu::internal::span_holds_bytes(count_span, uint::size) : "count_span must be nonempty and hold one uint"
    @require index_span.size > 0 : "index_span.size must be greater than 0" *>
@@ -2617,7 +2635,7 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    @param records : "Non-owning GPU-written generated-draw record range."
    @param count_span : "Non-owning span containing the GPU-written draw count."
    @param max_draw_count : "Maximum generated records to execute."
-   @return "Success, or a recoverable command, bounds, support, or scratch-capacity fault."
+   @return "Success, or a recoverable command, support, or scratch-capacity fault."
    @require gpu::internal::generated_spans_hold(records, count_span, GeneratedDrawRecord::size, max_draw_count) : "records must hold max_draw_count GeneratedDrawRecord values and count_span one uint when max_draw_count is nonzero" *>
 fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
@@ -2643,7 +2661,7 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
    @param max_draw_count : "Maximum generated records to execute."
    @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
-   @return "Success, or a recoverable command, bounds, support, or scratch-capacity fault."
+   @return "Success, or a recoverable command, support, or scratch-capacity fault."
    @require gpu::internal::generated_spans_hold(records, count_span, GeneratedDrawIndexedRecord::size, max_draw_count) : "records must hold max_draw_count GeneratedDrawIndexedRecord values and count_span one uint when max_draw_count is nonzero"
    @require max_draw_count == 0 || index_span.size > 0 : "index_span.size must be greater than 0 when max_draw_count is nonzero" *>
 fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
