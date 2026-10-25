@@ -1210,7 +1210,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     }
     create_sampler_table(state)!;
     if (state.acceleration_structures_enabled) {
-        create_acceleration_structure_state(state)!;
+        create_acceleration_structure_state(state);
     }
     create_descriptor_heap(state)!;
     reach_device_creation_checkpoint(probe, DeviceCreationCheckpoint.DESCRIPTOR_HEAP)!;

@@ -744,7 +744,7 @@ fn void? create_pipeline_shared(VkDeviceState* state, char[] initial_cache_data,
 
     state.pipeline_cache.entries = mem::new_array(PipelineCacheEntry, capacity);
     state.pipeline_cache.bucket_heads = mem::new_array(uint, next_pow2(capacity * 2));
-    create_shader_store(state, capacity)!;
+    create_shader_store(state, capacity);
 }
 
 fn usz? vk_get_pipeline_cache_size(VkDeviceState* state) {

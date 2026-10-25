@@ -1842,7 +1842,7 @@ fn gpu::internal::TextureCopyShape texture_copy_shape(TextureSlot* slot) @privat
     };
 }
 
-fn ResolvedSpan? lower_indirect_span(
+fn ResolvedSpan lower_indirect_span(
     VkDeviceState* state,
     gpu::GpuSpan* span,
     usz arg_size,
@@ -1917,7 +1917,7 @@ fn void set_pipeline_topology_real(
     vk::cmd_set_primitive_topology(command_buffer, topology);
 }
 
-fn void? record_bound_pipeline_with_ops(
+fn void record_bound_pipeline_with_ops(
     CommandRecord* commands,
     BoundPipeline* bound,
     PipelineBindOps* ops,
@@ -1978,7 +1978,7 @@ fn void? vk_cmd_bind_pipeline_with_ops(
     PipelineBindOps* ops,
 ) {
     BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
-    record_bound_pipeline_with_ops(commands, &bound, ops)!;
+    record_bound_pipeline_with_ops(commands, &bound, ops);
 }
 
 fn void? vk_cmd_bind_pipeline(
@@ -2105,7 +2105,7 @@ fn PreparedDispatchIndirect? lower_dispatch_indirect(
             span:     &args,
             arg_size: gpu::DispatchIndirectCommand::size,
             count:    1,
-        )!,
+        ),
         .root      = root,
     };
 }
@@ -2136,7 +2136,7 @@ fn void? vk_cmd_dispatch_indirect(
     record_dispatch_indirect(commands, &dispatch);
 }
 
-fn ResolvedSpan? lower_generated_work_records(
+fn ResolvedSpan lower_generated_work_records(
     VkDeviceState* state,
     gpu::GpuSpan* records,
     usz record_size,
@@ -2234,13 +2234,13 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch_inputs(
         records:     &records,
         record_size: gpu::GeneratedDispatchRecord::size,
         max_count:   max_dispatch_count,
-    )!;
+    );
     dispatch.count = lower_indirect_span(
         state:    state,
         span:     &count_span,
         arg_size: uint::size,
         count:    1,
-    )!;
+    );
     return dispatch;
 }
 

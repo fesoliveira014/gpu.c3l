@@ -752,7 +752,7 @@ fn AccelerationStructureSlot? AccelerationStructureTable.free(
     return released;
 }
 
-fn void? create_acceleration_structure_state(VkDeviceState* state) {
+fn void create_acceleration_structure_state(VkDeviceState* state) {
     assert(
         state != null && state.acceleration_structures_enabled,
         "acceleration structures must be enabled before creating their state"

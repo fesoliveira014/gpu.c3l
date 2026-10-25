@@ -457,8 +457,8 @@ fn void ray_tracing_bind_uses_distinct_native_bind_point_and_cache() @test {
         .bind      = &capture_ray_tracing_bind,
     };
     vk::BoundPipeline bound = fixture.record.logical_pipeline;
-    vk::record_bound_pipeline_with_ops(&fixture.record, &bound, &ops)!!;
-    vk::record_bound_pipeline_with_ops(&fixture.record, &bound, &ops)!!;
+    vk::record_bound_pipeline_with_ops(&fixture.record, &bound, &ops);
+    vk::record_bound_pipeline_with_ops(&fixture.record, &bound, &ops);
     assert(capture.matched && capture.calls == 1);
     assert(fixture.record.native_ray_tracing_pipeline.pipeline
         == bound.pipeline);

@@ -280,7 +280,7 @@ fn bool shader_store_index_consistent(VkDeviceState* state) {
     return linked == shader_store_live_count(state);
 }
 
-fn void? create_shader_store(VkDeviceState* state, uint pipeline_capacity) {
+fn void create_shader_store(VkDeviceState* state, uint pipeline_capacity) {
     assert(
         pipeline_capacity > 0 && pipeline_capacity <= SHADER_STORE_MAX_PIPELINE_CAPACITY,
         "pipeline capacity must be within the shader store limit"

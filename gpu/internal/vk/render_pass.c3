@@ -780,7 +780,7 @@ fn PreparedIndirectDraw? lower_indirect_draw(
             span:     &args,
             arg_size: gpu::DrawIndirectCommand::size,
             count:    draw_count,
-        )!,
+        ),
         .vertex_root   = vertex_root,
         .fragment_root = fragment_root,
         .draw_count    = draw_count,
@@ -860,7 +860,7 @@ fn PreparedIndexedIndirectDraw? lower_indexed_indirect_draw(
             span:     &args,
             arg_size: gpu::DrawIndexedIndirectCommand::size,
             count:    draw_count,
-        )!,
+        ),
         .index = resolve_span_slot(
             state:      state,
             span:       &index_span,
@@ -944,13 +944,13 @@ fn PreparedIndexedIndirectCountDraw? lower_indexed_indirect_count_draw(
             span:     &args,
             arg_size: gpu::DrawIndexedIndirectCommand::size,
             count:    max_draw_count,
-        )!,
+        ),
         .count = lower_indirect_span(
             state:    state,
             span:     &count_span,
             arg_size: uint::size,
             count:    1,
-        )!,
+        ),
         .index = resolve_span_slot(
             state:      state,
             span:       &index_span,
@@ -1042,13 +1042,13 @@ fn PreparedGeneratedDraw? lower_generated_draw(
         records:     &records,
         record_size: gpu::GeneratedDrawRecord::size,
         max_count:   max_draw_count,
-    )!;
+    );
     draw.count = lower_indirect_span(
         state:    state,
         span:     &count_span,
         arg_size: uint::size,
         count:    1,
-    )!;
+    );
     return draw;
 }
 
@@ -1112,13 +1112,13 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
         records:     &records,
         record_size: gpu::GeneratedDrawIndexedRecord::size,
         max_count:   max_draw_count,
-    )!;
+    );
     draw.count = lower_indirect_span(
         state:    state,
         span:     &count_span,
         arg_size: uint::size,
         count:    1,
-    )!;
+    );
     draw.index = resolve_span_slot(
         state:      state,
         span:       &index_span,
@@ -1258,7 +1258,7 @@ fn PreparedMeshIndirectDraw? lower_mesh_indirect_draw(
             span:     &args,
             arg_size: gpu::DrawMeshTasksIndirectCommand::size,
             count:    draw_count,
-        )!,
+        ),
         .mesh_root     = mesh_root,
         .fragment_root = fragment_root,
         .draw_count    = draw_count,
@@ -1270,7 +1270,7 @@ fn PreparedMeshIndirectDraw? lower_mesh_indirect_draw(
             span:     &count_span,
             arg_size: uint::size,
             count:    1,
-        )!;
+        );
     }
     return draw;
 }
