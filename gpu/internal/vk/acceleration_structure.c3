@@ -480,14 +480,6 @@ prepare_acceleration_structure_build_mode(
             .primitive_count = desc.instance_count,
         };
     } else {
-        assert(
-            desc.geometries.len == destination.desc.geometries.len
-                && desc.instance_count == 0
-                && gpu_span_is_zero(desc.instances),
-            "a bottom-level build must supply exactly the destination's geometries and no instances: %s geometries, destination has %s",
-            desc.geometries.len,
-            destination.desc.geometries.len
-        );
         sz lowered_count = min(
             desc.geometries.len,
             destination.desc.geometries.len,
@@ -625,6 +617,16 @@ prepare_acceleration_structure_build_mode(
                 };
             }
         }
+        // After the loop: unsafe builds assume asserts hold, which would
+        // drop the lowered_count bound if this came first.
+        assert(
+            desc.geometries.len == destination.desc.geometries.len
+                && desc.instance_count == 0
+                && gpu_span_is_zero(desc.instances),
+            "a bottom-level build must supply exactly the destination's geometries and no instances: %s geometries, destination has %s",
+            desc.geometries.len,
+            destination.desc.geometries.len
+        );
     }
 
     usz required_scratch = update

@@ -89,6 +89,12 @@ Choose the mechanism by who can know the rule is broken:
 - `abort` only for handle misuse, as above.
 - A fault only for a condition the application cannot know before calling.
 
+In unsafe builds `assert` and `@require` become optimizer assumptions: the
+compiler treats the condition as true from that point on. A guard that keeps
+library memory safe by construction, such as a clamped copy length, must not
+come after a contract that restates its condition, or the optimizer removes
+the guard. Put such an `assert` after the guarded write.
+
 Messages read `<field or value> must <rule>`, for example
 `desc.width must be greater than 0`. A field inside a slice is written with
 `[]`, for example `descs[].view`. An `assert` may format the values it

@@ -230,6 +230,16 @@ fn void texture_requirement_rules_follow_the_memory_class() @test {
     small.size = 32;
     assert(!gpu::internal::allocation_covers_texture_requirements(&small),
         "the allocation must cover every requirement");
+
+    AllocationDesc null_requirements = {
+        .size                 = 128,
+        .memory_class         = MemoryClass.TEXTURE,
+        .texture_requirements = ((TextureRequirements*)null)[:1],
+    };
+    assert(!gpu::internal::texture_requirements_valid(&null_requirements),
+        "a null requirement slice needs length 0");
+    assert(!gpu::internal::allocation_covers_texture_requirements(&null_requirements),
+        "a null requirement slice needs length 0");
 }
 
 fn void span_rules_need_a_nonempty_covering_span() @test {
@@ -686,6 +696,11 @@ fn void acceleration_structure_desc_rules_reject_each_clause() @test {
 
     AccelerationStructureDesc no_geometry = { .kind = AccelerationStructureKind.BOTTOM_LEVEL };
     assert(!gpu::internal::acceleration_structure_desc_valid(&no_geometry), "a bottom-level structure needs geometries");
+    AccelerationStructureDesc null_geometries = {
+        .kind       = AccelerationStructureKind.BOTTOM_LEVEL,
+        .geometries = ((AccelerationStructureGeometryDesc*)null)[:1],
+    };
+    assert(!gpu::internal::acceleration_structure_desc_valid(&null_geometries), "a null geometry slice needs length 0");
     blas.max_instance_count = 1;
     assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "a bottom-level structure has no instances");
     blas.max_instance_count = 0;

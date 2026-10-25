@@ -1995,17 +1995,6 @@ fn void set_inline_root(
     char[] inline_root,
 ) {
     record.inline_root = inline_root;
-    if (inline_root.len == 0) return;
-    BoundPipeline*? bound = borrow_bound_pipeline(record);
-    if (catch err = bound) return;
-    BoundPipeline* pipeline = bound;
-    uint needed = pipeline.inline_root_offset + (uint)inline_root.len;
-    assert(
-        needed <= gpu::ROOT_PUSH_CAPACITY,
-        "inline_root must fit ROOT_PUSH_CAPACITY from the bound pipeline's payload offset: offset %s, length %s",
-        pipeline.inline_root_offset,
-        inline_root.len
-    );
 }
 
 <* One push of the header followed by the inline payload at the bound
@@ -2028,6 +2017,15 @@ fn void push_root_block(
         mem::copy(&block[inline_offset], inline_root.ptr, length);
         size = inline_offset + (uint)length;
     }
+    // After the copy: unsafe builds assume asserts hold, which would drop the
+    // room bound if this came first.
+    assert(
+        inline_root.len == 0
+            || inline_offset + (uint)inline_root.len <= gpu::ROOT_PUSH_CAPACITY,
+        "inline_root must fit ROOT_PUSH_CAPACITY from the bound pipeline's payload offset: offset %s, length %s",
+        inline_offset,
+        inline_root.len
+    );
     vk::cmd_push_constants(
         command_buffer: command_buffer,
         layout:         layout,

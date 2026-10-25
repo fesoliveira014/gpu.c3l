@@ -662,21 +662,13 @@ fn void? vk_get_ray_tracing_shader_group_handles_with_ops(
         end_group <= slot.ray_tracing_info.total_group_count,
         "first_group + group_count must not exceed the pipeline's total group count"
     );
-    ulong required = (ulong)group_count
-        * state.caps.ray_tracing_pipelines.shader_group_handle_size;
-    assert(
-        out.len == required && (required == 0 || out.ptr != null),
-        "out.len must equal group_count * shader_group_handle_size"
-    );
     ulong handle_size = state.caps.ray_tracing_pipelines.shader_group_handle_size;
-    if (group_count == 0 || handle_size == 0) return;
-    ulong fits = (ulong)out.len / handle_size;
+    ulong required = (ulong)group_count * handle_size;
+    ulong fits = handle_size == 0 ? 0 : (ulong)out.len / handle_size;
     uint copy_count = fits < group_count ? (uint)fits : group_count;
-    if (copy_count == 0) return;
-    check_backend_result(
-        state:     state,
-        operation: "get_ray_tracing_shader_group_handles",
-        result:    ops.get(
+    vk::Result result = vk::Result.SUCCESS;
+    if (copy_count != 0) {
+        result = ops.get(
             ops.user_data,
             state.device,
             slot.pipeline,
@@ -684,7 +676,18 @@ fn void? vk_get_ray_tracing_shader_group_handles_with_ops(
             copy_count,
             (sz)(copy_count * handle_size),
             out.ptr,
-        ),
+        );
+    }
+    // After the copy: unsafe builds assume asserts hold, which would drop the
+    // copy_count bound if this came first.
+    assert(
+        out.len == required && (required == 0 || out.ptr != null),
+        "out.len must equal group_count * shader_group_handle_size"
+    );
+    check_backend_result(
+        state:     state,
+        operation: "get_ray_tracing_shader_group_handles",
+        result:    result,
     )!;
 }
 

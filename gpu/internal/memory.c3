@@ -74,6 +74,7 @@ fn bool texture_requirements_valid(AllocationDesc* desc) @private {
         return desc.texture_requirements.len == 0;
     }
     if (desc.texture_requirements.len == 0) return false;
+    if (desc.texture_requirements.ptr == null) return false;
     foreach (&requirements : desc.texture_requirements) {
         if (requirements.size == 0
             || requirements.alignment == 0
@@ -86,6 +87,7 @@ fn bool texture_requirements_valid(AllocationDesc* desc) @private {
 }
 
 fn bool allocation_covers_texture_requirements(AllocationDesc* desc) @private {
+    if (desc.texture_requirements.len > 0 && desc.texture_requirements.ptr == null) return false;
     foreach (&requirements : desc.texture_requirements) {
         if (desc.size < requirements.size) return false;
     }

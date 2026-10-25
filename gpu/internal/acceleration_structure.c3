@@ -140,6 +140,7 @@ fn bool acceleration_structure_desc_valid(
         default:
             return false;
     }
+    if (desc.geometries.len > 0 && desc.geometries.ptr == null) return false;
     uint primitive_total;
     foreach (&geometry : desc.geometries) {
         if (!acceleration_structure_capacity_geometry_valid(
