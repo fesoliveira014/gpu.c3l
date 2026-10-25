@@ -82,7 +82,7 @@ fn DeviceContextDesc default_device_context_desc() {
    @param desc : "Call-scoped settings; never modified."
    @return "A complete context, or the original fault after best-effort cleanup."
    @require desc != null : "desc must not be null"
-   @require device_context_desc_valid(desc) : "desc.device.surface must be zero, each user data must come with its callback, and desc.command_queue must be a required queue role, graphics when create_surface is set" *>
+   @require device_context_desc_valid(desc) : "desc.device.surface must be zero, each user data must come with its callback, desc.command_queue must be a required queue role, and the required roles must include graphics when create_surface is set" *>
 fn DeviceContext? create_device_context(DeviceContextDesc* desc) {
     DeviceContextDesc settings = *desc;
     gpu::DeviceDesc device_desc = settings.device;

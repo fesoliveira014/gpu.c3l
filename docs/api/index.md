@@ -172,6 +172,7 @@ Constants: `GPU_ALLOCATION_INVALID`, `TEXTURE_HANDLE_INVALID`,
 `ACCELERATION_STRUCTURE_VIEW_INVALID`,
 `ACCELERATION_STRUCTURE_INDEX_INVALID`, `MAX_MEMORY_HEAPS`,
 `DEFAULT_TEXTURE_CAPACITY`, `MAX_SPARSE_TEXTURE_ASPECTS`,
+`MAX_SPARSE_TILE_BINDS`, `MAX_SPARSE_OPAQUE_BINDS`, `MAX_SPARSE_BIND_WAITS`,
 `DEFAULT_TEXTURE_HEAP_CAPACITY`, `DEFAULT_SAMPLER_HEAP_CAPACITY`,
 `MAX_SHADER_HEAP_CAPACITY`.
 
@@ -217,7 +218,7 @@ Types: `RootPush`, `GraphicsRootPush`, `GeneratedDrawRecord`,
 `RayTracingShaderBindingTableRegion`, `RayTracingShaderBindingTable`.
 
 Constants: `PIPELINE_HANDLE_INVALID`, `COLOR_WRITE_ALL`, `STENCIL_MASK_ALL`, `MAX_PIPELINES`,
-`MAX_COLOR_ATTACHMENTS`.
+`MAX_COLOR_ATTACHMENTS`, `MAX_SHADER_ENTRY_POINT_BYTES`.
 
 Methods: `PipelineHandle.is_valid`, `PipelineHandle.equals`.
 
@@ -290,7 +291,8 @@ Types: `StageMask`, `TextureLayout`, `TextureAccess`, `TextureState`,
 `SubmitDesc`, `TimestampPoolHandle`, `TimestampPoolDesc`.
 
 Constants: `COMPLETION_POINT_INVALID`, `TIMEOUT_INFINITE`,
-`TIMESTAMP_POOL_HANDLE_INVALID`.
+`TIMESTAMP_POOL_HANDLE_INVALID`, `MAX_SUBMIT_COMMAND_LISTS`,
+`MAX_SUBMIT_COMPLETION_WAITS`.
 
 Methods: `CompletionPoint.is_valid`, `CompletionPoint.equals`,
 `TimestampPoolHandle.is_valid`, `TimestampPoolHandle.equals`.

@@ -689,7 +689,7 @@ fn MappedGpuSpan? mapped_gpu_span(Device* device, GpuSpan span) {
    a violation panics in safe builds. Free with `free_allocation` on `span.allocation()`.
    @param device : "Live device that will own the allocation."
    @param desc : "Borrowed allocation description with a mapped memory class."
-   @return "Consistent borrowed views of the new allocation, or a recoverable unsupported-feature, access, or allocation fault. A failed view frees the allocation and returns the view fault; a rollback that cannot free the allocation is unrecoverable and panics after reporting the allocation as abandoned."
+   @return "Consistent borrowed views of the new allocation, or a recoverable unsupported-feature or allocation fault. A failed view frees the allocation and returns the view fault; a rollback that cannot free the allocation is unrecoverable and panics after reporting the allocation as abandoned."
    @require desc != null : "desc must not be null"
    @require desc.size > 0 : "desc.size must be greater than 0"
    @require desc.memory_class != MemoryClass.GPU_PRIVATE && desc.memory_class != MemoryClass.TEXTURE : "desc.memory_class must be a host-mapped class"
@@ -2017,8 +2017,10 @@ fn void cmd_end_label(CommandList* commands) {
 
 <* Record a buffer-to-buffer copy; surrounding barriers are caller-owned.
    Preconditions: usage and queue access are valid.
-   Always checked: token phase, identity, bounds, and safe lowering.
-   `desc.src.size` must not exceed `desc.dst.size`.
+   Always checked: token phase, identity, and safe lowering.
+   `desc.src.size` must not exceed `desc.dst.size`. `desc.src` and `desc.dst`
+   must each lie within its buffer allocation; a violation panics in safe
+   builds.
    @param commands : "Live recording token."
    @param desc : "Borrowed exact source and destination ranges."
    @return "Success, or a recoverable command fault."
@@ -2039,7 +2041,7 @@ fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
    @param commands : "Live recording token."
    @param dst : "Destination GPU span."
    @param value : "Repeated 32-bit fill pattern."
-   @return "Success, or a recoverable command, validation, or alignment fault."
+   @return "Success, or a recoverable command fault."
    @require dst.size > 0 : "dst.size must be greater than 0" *>
 fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
@@ -2299,7 +2301,7 @@ macro char[] @inline_root(value) => ((char*)value)[:@sizeof(*value)];
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param groups : "Workgroup counts in X, Y, and Z."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
-   @return "Success, or a recoverable command, pipeline, or limit fault."
+   @return "Success, or a recoverable command or pipeline fault."
    @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
@@ -2310,8 +2312,9 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups, char
 <* Dispatch indirectly with the root passed unchanged; zero is valid.
    Preconditions: compute state, args, queue access, barriers, and GPU-written
    group counts are valid; shaders make zero dereference safe.
-   Always checked: token phase, identities, bounds, a usable bound-pipeline
-   snapshot, and safe lowering.
+   Always checked: token phase, identities, a usable bound-pipeline snapshot,
+   and safe lowering. `args` must lie within its buffer allocation; a
+   violation panics in safe builds.
    @param commands : "Live recording token."
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param args : "Non-owning span containing one GPU-written dispatch record."
@@ -2329,8 +2332,10 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
    zero roots are valid.
    Preconditions: compute state, spans, count, queue access, barriers, and
    shader zero paths are valid.
-   Always checked: token phase, identities, bounds, capacity, a usable
-   bound-pipeline snapshot, and safe lowering.
+   Always checked: token phase, identities, capacity, a usable bound-pipeline
+   snapshot, and safe lowering. When `max_dispatch_count` is nonzero,
+   `records` and `count_span` must each lie within its buffer allocation; a
+   violation panics in safe builds.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
    @param commands : "Live recording token."
@@ -2359,7 +2364,7 @@ fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan 
    @param shader_binding_table : "Borrowed caller-owned SBT regions."
    @param dimensions : "Nonzero direct trace width, height, and depth within the selected device limits."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
-   @return "Success, or a recoverable command, pipeline, or limit fault."
+   @return "Success, or a recoverable pipeline or support fault."
    @require shader_binding_table != null : "shader_binding_table must not be null"
    @require gpu::internal::ray_tracing_shader_binding_table_valid(shader_binding_table) : "shader_binding_table regions must each be the zero value with stride 0 or a span with a nonzero size"
    @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
@@ -2608,7 +2613,7 @@ fn void cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
    @param vertex_count : "Vertices drawn per instance."
    @param instance_count : "Instances to draw."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
-   @return "Success, or a recoverable command, pipeline, state, or limit fault."
+   @return "Success, or a recoverable command, pipeline, or state fault."
    @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
@@ -2625,8 +2630,9 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
 <* Draw indexed geometry with both roots passed unchanged; either may be zero.
    Preconditions: graphics state is valid, index_span and root data admit the
    queue, and shaders make zero dereference safe.
-   Always checked: token phase, identities, index bounds, a usable bound-pipeline
-   snapshot, and safe lowering.
+   Always checked: token phase, identities, a usable bound-pipeline snapshot,
+   and safe lowering. `index_span` must lie within its buffer allocation; a
+   violation panics in safe builds.
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
@@ -2660,7 +2666,7 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    @param fragment_root : "Fragment root address."
    @param groups : "Task work groups with a task shader, else mesh work groups."
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
-   @return "Success, or a recoverable command, pipeline, support, or limit fault."
+   @return "Success, or a recoverable command, pipeline, or support fault."
    @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, Vec3u groups, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
@@ -2726,8 +2732,9 @@ fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress me
 <* Draw indirectly with one root pair passed unchanged to every draw; zero is valid.
    Preconditions: graphics state, args, count, queue access, and barriers are valid;
    root data admits the queue and shaders make zero dereference safe.
-   Always checked: token phase, identities, bounds, overflow, a usable
-   bound-pipeline snapshot, and safe lowering.
+   Always checked: token phase, identities, a usable bound-pipeline snapshot,
+   and safe lowering. `args` must lie within its buffer allocation; a
+   violation panics in safe builds.
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
@@ -2752,8 +2759,9 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
 <* Indexed indirect draw with one unchanged root pair; zero is valid.
    Preconditions: graphics state, spans, count, queue access, and barriers are
    valid; shader zero paths and GPU-written index bounds are caller-owned.
-   Always checked: token phase, identities, host-visible bounds, overflow, a
-   usable bound-pipeline snapshot, and safe lowering.
+   Always checked: token phase, identities, a usable bound-pipeline snapshot,
+   and safe lowering. `args` and `index_span` must each lie within its buffer
+   allocation; a violation panics in safe builds.
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
@@ -2783,8 +2791,9 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
 <* Count-buffer indexed draw with one unchanged root pair; zero is valid.
    Preconditions: graphics state, spans, counts, queue access, barriers, shader
    zero paths, and GPU-written index bounds are valid.
-   Always checked: token phase, identities, host-visible bounds, overflow, a
-   usable bound-pipeline snapshot, and safe lowering.
+   Always checked: token phase, identities, a usable bound-pipeline snapshot,
+   and safe lowering. `args`, `count_span` and `index_span` must each lie
+   within its buffer allocation; a violation panics in safe builds.
    Runtime failures: unsupported count execution faults UNSUPPORTED_FEATURE.
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
@@ -2819,8 +2828,10 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    zero roots are valid.
    Preconditions: graphics state, spans, count, queue access, barriers, and
    shader zero paths are valid.
-   Always checked: token phase, identities, bounds, capacity, a usable
-   bound-pipeline snapshot, and safe lowering.
+   Always checked: token phase, identities, capacity, a usable bound-pipeline
+   snapshot, and safe lowering. When `max_draw_count` is nonzero, `records`
+   and `count_span` must each lie within its buffer allocation; a violation
+   panics in safe builds.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
    @param commands : "Live recording token inside a render pass."
@@ -2843,8 +2854,10 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
    zero roots are valid.
    Preconditions: graphics state, spans, count, queue access, barriers, shader
    zero paths, and GPU-written index bounds are valid.
-   Always checked: token phase, identities, bounds, capacity, a usable
-   bound-pipeline snapshot, and safe lowering.
+   Always checked: token phase, identities, capacity, a usable bound-pipeline
+   snapshot, and safe lowering. When `max_draw_count` is nonzero, `records`,
+   `count_span` and `index_span` must each lie within its buffer allocation; a
+   violation panics in safe builds.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
    @param commands : "Live recording token inside a render pass."

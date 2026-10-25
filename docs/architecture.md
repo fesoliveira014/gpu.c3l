@@ -145,7 +145,7 @@ every role share one native queue.
 
 ```mermaid
 flowchart LR
-    A[GpuAllocation<br/>owner] --> S[GpuSpan<br/>checked byte range]
+    A[GpuAllocation<br/>owner] --> S[GpuSpan<br/>non-owning byte range]
     S --> M["char[] mapping<br/>(CPU_WRITE / CPU_READ)"]
     S --> G[GpuAddress<br/>raw shader value]
 ```
