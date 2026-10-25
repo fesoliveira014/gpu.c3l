@@ -1,6 +1,10 @@
-"""Safe builds of a consumer panic with the contract message."""
+"""Safe builds of a consumer panic with the contract message.
+
+Set C3C to point at a specific c3c binary.
+"""
 
 import os
+import shutil
 import subprocess
 import unittest
 from pathlib import Path
@@ -38,8 +42,10 @@ def run(command):
 
 class ContractProbeTest(unittest.TestCase):
     def check_build(self, build):
+        c3c = shutil.which(os.environ.get("C3C", "c3c"))
+        self.assertIsNotNone(c3c, "c3c not found (set C3C or add it to PATH)")
         built = run(
-            ["c3c", "build", "contract_probe", "--path", str(PROJECT), *BUILDS[build]]
+            [c3c, "build", "contract_probe", "--path", str(PROJECT), *BUILDS[build]]
         )
         self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
 
