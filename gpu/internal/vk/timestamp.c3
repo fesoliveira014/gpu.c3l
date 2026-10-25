@@ -164,21 +164,18 @@ fn void? TimestampPoolTable.free(
     self.free_head = index + 1;
 }
 
-fn void? validate_timestamp_range(
+fn void validate_timestamp_range(
     uint capacity,
     uint first,
     uint count,
 ) {
-    if (count == 0) return gpu::INVALID_ARGUMENT~;
-    if (first > capacity || count > capacity - first) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        first <= capacity && count <= capacity - first,
+        "first + count must not exceed the timestamp pool capacity"
+    );
 }
 
-fn usz? timestamp_result_bytes(uint count) {
-    if (count == 0 || (usz)count > usz::max / ulong::size) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+fn usz timestamp_result_bytes(uint count) {
     return (usz)count * ulong::size;
 }
 
@@ -243,9 +240,8 @@ fn gpu::TimestampPoolHandle? create_timestamp_pool_with(
     ZString debug_name,
     TimestampPoolNativeOps* ops,
 ) {
-    if (table == null || ops == null || capacity == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(table != null && ops != null, "timestamp table and ops must be present");
+    assert(capacity > 0, "capacity must be greater than 0");
     vk::QueryPoolCreateInfo info = vk::query_pool_create_info()
         .set_query_type(vk::QueryType.TIMESTAMP)
         .set_query_count(capacity);
@@ -268,7 +264,7 @@ fn void? destroy_timestamp_pool_with(
     gpu::TimestampPoolHandle handle,
     TimestampPoolNativeOps* ops,
 ) {
-    if (table == null || ops == null) return gpu::INVALID_ARGUMENT~;
+    assert(table != null && ops != null, "timestamp table and ops must be present");
     TimestampPoolSlot* slot = table.get(handle);
     vk::QueryPool pool = slot.pool;
     table.free(handle)!;
@@ -284,12 +280,11 @@ fn void? read_timestamps_with(
     ulong[] out,
     TimestampPoolNativeOps* ops,
 ) {
-    if (table == null || ops == null || out.ptr == null || out.len < count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(table != null && ops != null, "timestamp table and ops must be present");
+    assert(out.len >= count, "out must hold at least count values");
     TimestampPoolSlot* slot = table.get(pool);
-    validate_timestamp_range(slot.capacity, first, count)!;
-    usz data_size = timestamp_result_bytes(count)!;
+    validate_timestamp_range(slot.capacity, first, count);
+    usz data_size = timestamp_result_bytes(count);
     vk::Result result = ops.read(
         user_data: ops.user_data,
         device:    device,
@@ -329,9 +324,6 @@ fn gpu::TimestampPoolHandle? vk_create_timestamp_pool(
     VkDeviceState* state,
     gpu::TimestampPoolDesc* desc,
 ) {
-    if (state == null || desc == null || desc.capacity == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     vk::QueryPoolCreateInfo info = vk::query_pool_create_info()
         .set_query_type(vk::QueryType.TIMESTAMP)
         .set_query_count(desc.capacity);
@@ -379,12 +371,11 @@ fn void? vk_read_timestamps(
     uint count,
     ulong[] out,
 ) {
-    if (out.ptr == null || out.len < count) return gpu::INVALID_ARGUMENT~;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     TimestampPoolSlot* slot = state.timestamp_pools.get(pool);
-    validate_timestamp_range(slot.capacity, first, count)!;
-    usz required = timestamp_result_bytes(count)!;
+    validate_timestamp_range(slot.capacity, first, count);
+    usz required = timestamp_result_bytes(count);
     if (device_lost(state)) {
         out[:count] = 0;
         return;
@@ -437,7 +428,7 @@ fn TimestampPoolSlot*? lower_timestamp_pool_range(
     if (!recording) return gpu::COMMAND_RECORDING_ERROR~;
     TimestampPoolSlot* slot =
         record.device_state.timestamp_pools.get(pool);
-    validate_timestamp_range(slot.capacity, first, count)!;
+    validate_timestamp_range(slot.capacity, first, count);
     return slot;
 }
 
@@ -455,7 +446,7 @@ fn LoweredTimestampResolve? lower_timestamp_resolve(
         count,
         false,
     )!;
-    usz required = timestamp_result_bytes(count)!;
+    usz required = timestamp_result_bytes(count);
     ResolvedSpan resolved = resolve_span_slot(
         state:          record.device_state,
         span:           &destination,

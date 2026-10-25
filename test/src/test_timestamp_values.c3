@@ -164,7 +164,7 @@ fn void timestamp_delta_rejects_unsupported_roles() @test {
         "an unsupported transfer role returns UNSUPPORTED_FEATURE");
 }
 
-fn void timestamp_delta_rejects_invalid_capabilities_and_queue() @test {
+fn void timestamp_caps_rules_reject_each_clause() @test {
     TimestampCaps zero_width = {
         .queues.graphics = true,
         .period_ns       = 1.0f,
@@ -190,53 +190,14 @@ fn void timestamp_delta_rejects_invalid_capabilities_and_queue() @test {
     };
     int unknown_queue = 99;
 
-    fault null_fault = @catch(gpu::timestamp_delta_ns(
-        caps:  null,
-        queue: QueueKind.GRAPHICS,
-        begin: 0,
-        end:   1,
-    ));
-    fault zero_width_fault = @catch(gpu::timestamp_delta_ns(
-        caps:  &zero_width,
-        queue: QueueKind.GRAPHICS,
-        begin: 0,
-        end:   1,
-    ));
-    fault wide_fault = @catch(gpu::timestamp_delta_ns(
-        caps:  &wide,
-        queue: QueueKind.GRAPHICS,
-        begin: 0,
-        end:   1,
-    ));
-    fault zero_period_fault = @catch(gpu::timestamp_delta_ns(
-        caps:  &zero_period,
-        queue: QueueKind.GRAPHICS,
-        begin: 0,
-        end:   1,
-    ));
-    fault negative_period_fault = @catch(gpu::timestamp_delta_ns(
-        caps:  &negative_period,
-        queue: QueueKind.GRAPHICS,
-        begin: 0,
-        end:   1,
-    ));
-    fault queue_fault = @catch(gpu::timestamp_delta_ns(
-        caps:  &valid,
-        queue: bitcast(unknown_queue, QueueKind),
-        begin: 0,
-        end:   1,
-    ));
-
-    assert(null_fault == gpu::INVALID_ARGUMENT,
-        "null timestamp capabilities return INVALID_ARGUMENT");
-    assert(zero_width_fault == gpu::INVALID_ARGUMENT,
-        "zero valid bits return INVALID_ARGUMENT");
-    assert(wide_fault == gpu::INVALID_ARGUMENT,
-        "valid-bit widths above 64 return INVALID_ARGUMENT");
-    assert(zero_period_fault == gpu::INVALID_ARGUMENT,
-        "a zero timestamp period returns INVALID_ARGUMENT");
-    assert(negative_period_fault == gpu::INVALID_ARGUMENT,
-        "a negative timestamp period returns INVALID_ARGUMENT");
-    assert(queue_fault == gpu::INVALID_ARGUMENT,
-        "an unknown queue kind returns INVALID_ARGUMENT");
+    assert(gpu::internal::timestamp_caps_valid(&valid, QueueKind.GRAPHICS));
+    assert(!gpu::internal::timestamp_caps_valid(null, QueueKind.GRAPHICS), "null capabilities");
+    assert(!gpu::internal::timestamp_caps_valid(&zero_width, QueueKind.GRAPHICS), "zero valid bits");
+    assert(!gpu::internal::timestamp_caps_valid(&wide, QueueKind.GRAPHICS), "more than 64 valid bits");
+    assert(!gpu::internal::timestamp_caps_valid(&zero_period, QueueKind.GRAPHICS), "zero period");
+    assert(!gpu::internal::timestamp_caps_valid(&negative_period, QueueKind.GRAPHICS), "negative period");
+    assert(gpu::internal::timestamp_caps_valid(&valid, QueueKind.COMPUTE),
+        "an unsupported role is left to its fault");
+    assert(!gpu::internal::queue_kind_valid(bitcast(unknown_queue, QueueKind)), "undefined queue kind");
+    assert(!gpu::internal::timestamp_caps_valid(&valid, bitcast(unknown_queue, QueueKind)));
 }

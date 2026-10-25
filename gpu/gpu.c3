@@ -2895,12 +2895,13 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
    reset with `cmd_reset_timestamps` before their first write.
    @param device : "Live device that will own the pool."
    @param desc : "Borrowed pool capacity and debug-name description."
-   @return "An owning pool handle, or a recoverable invalid-argument, unsupported-feature, capacity, or allocation fault." *>
+   @return "An owning pool handle, or a recoverable unsupported-feature, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require desc.capacity > 0 : "desc.capacity must be greater than 0" *>
 fn TimestampPoolHandle? create_timestamp_pool(Device* device, TimestampPoolDesc* desc) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null || desc.capacity == 0) return INVALID_ARGUMENT~;
     if ((uint)operation.data.caps.timestamps.queues == 0) {
         return UNSUPPORTED_FEATURE~;
     }
@@ -2928,11 +2929,14 @@ fn void destroy_timestamp_pool(Device* device, TimestampPoolHandle pool) {
 }
 
 <* Reset a nonempty pool range outside a render pass.
+   `first + count` must not exceed the pool capacity; that rule reads pool
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token."
    @param pool : "Pool whose slots will be reset."
    @param first : "First slot in the reset range."
    @param count : "Number of slots to reset."
-   @return "Success, or a recoverable command or range fault." *>
+   @return "Success, or a recoverable command fault."
+   @require count > 0 : "count must be greater than 0" *>
 fn void? cmd_reset_timestamps(
     CommandList* commands,
     TimestampPoolHandle pool,
@@ -2950,11 +2954,13 @@ fn void? cmd_reset_timestamps(
 }
 
 <* Write one timestamp at exactly one executable pipeline stage.
+   `index` must be less than the pool capacity; that rule reads pool state, so
+   a violation panics in safe builds.
    @param commands : "Live recording token."
    @param pool : "Pool that receives the timestamp."
    @param index : "Destination slot index."
    @param stage : "Single executable stage to timestamp."
-   @return "Success, or a recoverable command, range, or stage fault." *>
+   @return "Success, or a recoverable command fault." *>
 fn void? cmd_write_timestamp(
     CommandList* commands,
     TimestampPoolHandle pool,
@@ -2974,12 +2980,15 @@ fn void? cmd_write_timestamp(
 <* Resolve packed `ulong` values with a device-side wait into aligned caller
    storage. Every slot must have been reset and written; an unwritten slot can
    stall the queue indefinitely. This call never waits on the host.
+   `first + count` must not exceed the pool capacity; that rule reads pool
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token."
    @param pool : "Pool containing the timestamp values."
    @param first : "First slot to resolve."
    @param count : "Number of slots to resolve."
    @param dst : "Destination GPU span, large and aligned enough for packed ulong values."
-   @return "Success, or a recoverable command, range, or alignment fault."
+   @return "Success, or a recoverable command or alignment fault."
+   @require count > 0 : "count must be greater than 0"
    @require gpu::internal::span_holds_records(dst, ulong::size, count) : "dst must be nonempty and hold count packed ulong values" *>
 fn void? cmd_resolve_timestamps(
     CommandList* commands,
@@ -3002,13 +3011,17 @@ fn void? cmd_resolve_timestamps(
 <* Read packed timestamp values without waiting.
    The caller orders this read after GPU completion and externally synchronizes
    mutation or destruction of the same pool. `DEVICE_BUSY` leaves
-   `out[0..count]` unspecified.
+   `out[0..count]` unspecified. `first + count` must not exceed the pool
+   capacity; that rule reads pool state, so a violation panics in safe builds.
    @param device : "Live device that owns the pool."
    @param pool : "Pool to read."
    @param first : "First slot to read."
    @param count : "Number of slots to read."
    @param out : "Caller-owned output slice with at least count elements."
-   @return "Success, or a recoverable invalid-argument, range, or busy fault." *>
+   @return "Success, or a recoverable busy or backend fault."
+   @require count > 0 : "count must be greater than 0"
+   @require out.len >= count : "out must hold at least count values"
+   @require out.ptr != null : "out must not be null" *>
 fn void? read_timestamps(
     Device* device,
     TimestampPoolHandle pool,
@@ -3024,9 +3037,6 @@ fn void? read_timestamps(
         owner:     pool.owner,
         kind:      gpu::internal::ResourceOwnerKind.TIMESTAMP_POOL,
     );
-    if (count == 0 || out.len < count || out.ptr == null) {
-        return INVALID_ARGUMENT~;
-    }
     return gpu::internal::vk::vk_read_timestamps(
         state: operation.state,
         pool:  pool,
@@ -3041,14 +3051,16 @@ fn void? read_timestamps(
    @param queue : "Semantic role for the native queue that produced both values."
    @param begin : "Earlier raw timestamp value."
    @param end : "Later raw timestamp value."
-   @return "Elapsed nanoseconds, or a recoverable fault for invalid capabilities or an unsupported role." *>
+   @return "Elapsed nanoseconds, or a recoverable unsupported-feature fault for a role the capabilities do not support."
+   @require caps != null : "caps must not be null"
+   @require gpu::internal::queue_kind_valid(queue) : "queue must be a defined QueueKind"
+   @require gpu::internal::timestamp_caps_valid(caps, queue) : "caps must report 1..64 valid bits for the role and a positive period_ns" *>
 fn double? timestamp_delta_ns(
     TimestampCaps* caps,
     QueueKind queue,
     ulong begin,
     ulong end,
 ) {
-    if (caps == null) return INVALID_ARGUMENT~;
     uint valid_bits;
     switch (queue) {
         case GRAPHICS:
@@ -3061,10 +3073,7 @@ fn double? timestamp_delta_ns(
             if (!caps.queues.transfer) return UNSUPPORTED_FEATURE~;
             valid_bits = caps.transfer_valid_bits;
         default:
-            return INVALID_ARGUMENT~;
-    }
-    if (valid_bits == 0 || valid_bits > 64 || caps.period_ns <= 0.0f) {
-        return INVALID_ARGUMENT~;
+            return UNSUPPORTED_FEATURE~;
     }
     ulong mask = valid_bits == 64
         ? ulong::max
@@ -3082,45 +3091,52 @@ fn double? timestamp_delta_ns(
    Keep them alive and unmodified as required through their last GPU use.
    Preconditions: externally synchronize the queue; every list targets it and
    waits/readiness name valid scopes and live same-device values.
-   Always checked: queue/point identity, limits, wait scopes, exact record queue,
-   authoritative executable phase, duplicates, and all-or-nothing claim/rollback.
+   Always checked: queue/point identity, exact record queue, authoritative
+   executable phase, duplicates, and all-or-nothing claim/rollback. Wait stages
+   the target queue or enabled features cannot execute panic in safe builds.
+   `desc` must be nonnull; `desc.command_lists` and `desc.completion_waits`
+   must not exceed `MAX_SUBMIT_COMMAND_LISTS` and `MAX_SUBMIT_COMPLETION_WAITS`;
+   every wait stage must be known and exclude host and present; and nonzero
+   readiness needs a graphics queue. Without unified layouts,
+   `desc.readiness_before` must be a valid wait mask without indirect or
+   index_input when readiness is set and empty when it is not; that rule reads
+   device state, so a violation panics in safe builds. With unified layouts,
+   `desc.readiness_before` is ignored. A command list recorded for a different
+   queue aborts.
    Runtime failures: capacity, busy, and backend faults preserve inputs;
    success consumes every list and any valid swapchain readiness. The caller
    externally synchronizes submit, present, and sparse-bind host calls on the
    same native queue, including aliased roles.
    @param queue : "Exact selected queue that executes the submission."
    @param desc : "Borrowed waits and mutable executable-token batch; success clears command tokens and invalidates valid readiness."
-   @return "A reusable completion point, or a recoverable validation, capacity, busy, or backend fault." *>
+   @return "A reusable completion point, or a recoverable capacity, busy, or backend fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::submit_desc_valid(desc) : "desc.command_lists and desc.completion_waits must not exceed MAX_SUBMIT_COMMAND_LISTS and MAX_SUBMIT_COMPLETION_WAITS, and every wait stage must be known and exclude host and present"
+   @require desc.readiness == SWAPCHAIN_READINESS_INVALID || queue.roles.graphics : "desc.readiness requires a graphics queue" *>
 fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     Device device = queue.device;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_queue(&operation, &device, queue);
-    if (desc == null) return INVALID_ARGUMENT~;
-    if (desc.command_lists.len > gpu::MAX_SUBMIT_COMMAND_LISTS) {
-        return INVALID_ARGUMENT~;
-    }
-    if (desc.completion_waits.len > gpu::MAX_SUBMIT_COMPLETION_WAITS) {
-        return INVALID_ARGUMENT~;
-    }
     foreach (wait : desc.completion_waits) {
         gpu::internal::validate_completion_point(&operation, &device, wait.point);
-        if (!gpu::internal::submit_wait_stage_mask_valid(wait.before)) {
-            return INVALID_ARGUMENT~;
-        }
     }
     if (desc.readiness != SWAPCHAIN_READINESS_INVALID) {
         if (!desc.readiness.is_valid()) abort("gpu: malformed SwapchainReadiness");
         if (desc.readiness.device != device) abort("gpu: foreign SwapchainReadiness");
-        if (!queue.roles.graphics) return INVALID_ARGUMENT~;
-        if (!operation.data.caps.unified_layouts
-            && (!gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)
-                || desc.readiness_before.indirect
-                || desc.readiness_before.index_input)) {
-            return INVALID_ARGUMENT~;
+        if (!operation.data.caps.unified_layouts) {
+            assert(
+                gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)
+                    && !desc.readiness_before.indirect
+                    && !desc.readiness_before.index_input,
+                "desc.readiness_before must be a valid wait mask without indirect or index_input when the device lacks unified layouts"
+            );
         }
-    } else if ((uint)desc.readiness_before != 0) {
-        return INVALID_ARGUMENT~;
+    } else if (!operation.data.caps.unified_layouts) {
+        assert(
+            (uint)desc.readiness_before == 0,
+            "desc.readiness_before must be empty when desc.readiness is not set"
+        );
     }
     CompletionPoint point = gpu::internal::vk::vk_submit(
         operation.state,
@@ -3218,12 +3234,12 @@ fn void? destroy_surface(Surface* surface) {
    @param device : "Live presentation-enabled device."
    @param surface : "Borrowed matching runtime-owned surface."
    @param desc : "Borrowed requested extent, format, image count, usage, and present mode."
-   @return "An owning swapchain handle, or a recoverable validation, support, capacity, allocation, or surface fault." *>
+   @return "An owning swapchain handle, or a recoverable support, capacity, allocation, or surface fault."
+   @require desc != null : "desc must not be null" *>
 fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, SwapchainDesc* desc) {
     if (surface == null) {
         abort("gpu: null Surface");
     }
-    if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::DeviceData* device_data = operation.data;
@@ -3321,14 +3337,16 @@ fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain, 
    Externally synchronize submit, present, and sparse-bind host calls on the
    same native queue, including aliased roles.
    Always checked: image/point identity, ownership, publication, and lifecycle.
+   An image that is not the swapchain's current acquired image, or a point
+   other than the one the readiness-consuming submit returned, aborts.
    Runtime failures: host/device out-of-memory and pre-submit WAIT_TIMEOUT
    preserve the image. Success and every other submitted result consume it.
    @param device : "Live device that owns the acquired image."
    @param image : "Externally synchronized acquired image; consumed results replace it with the zero value."
    @param render_completion : "Completion point returned by the readiness-consuming render submission."
-   @return "Success, or a recoverable timeout, lifecycle, surface, or backend fault." *>
+   @return "Success, or a recoverable timeout, lifecycle, surface, or backend fault."
+   @require image != null : "image must not be null" *>
 fn void? present(Device* device, AcquiredImage* image, CompletionPoint render_completion) {
-    if (image == null) return INVALID_ARGUMENT~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_completion_point(&operation, device, render_completion);

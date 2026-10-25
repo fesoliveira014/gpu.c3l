@@ -434,36 +434,6 @@ fn void record_val_target_to_attach(gpu::CommandList* cmd, gpu::TextureHandle ta
     gpu::cmd_texture_barrier(cmd, &to_attach)!!;
 }
 
-fn void submit_requires_exact_recording_queue_token() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    defer discard_test_executable(&executable)!!;
-
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-    vk::CommandRecord* record = executable.record;
-    gpu::Queue recorded_queue = record.queue;
-    record.queue.id++;
-
-    gpu::ExecutableCommandList[1] lists = { executable };
-    gpu::SubmitDesc submit = { .command_lists = lists[..] };
-    fault mismatched = @catch(gpu::submit(queue, &submit));
-    assert(mismatched == gpu::INVALID_ARGUMENT,
-        "submission requires the exact queue token captured while recording");
-    assert(lists[0].is_valid(),
-        "queue-token rejection preserves the executable token");
-
-    record.queue = recorded_queue;
-    gpu::CompletionPoint point = gpu::submit(queue, &submit)!!;
-    gpu::wait_completion(point, 1_000_000_000)!!;
-}
-
 fn bool val_distinct_graphics_compute_families(gpu::Device* device) {
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     if (state.graphics_family != state.compute_family) return true;

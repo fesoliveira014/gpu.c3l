@@ -423,21 +423,6 @@ fn void sparse_selection_reports_only_capable_selected_roles() @test {
     assert(!picked.sparse_binding_queues.transfer);
 }
 
-fn void distinct_roles_must_also_be_required() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 2),
-    };
-    gpu::QueueRequest request = {
-        .distinct_roles = { .graphics },
-    };
-
-    fault result =
-        @catch(vk::pick_queue_families_for_request(table[..], request));
-
-    assert(result == gpu::INVALID_ARGUMENT,
-        "a distinct role outside the required set is invalid");
-}
-
 fn void presentation_selects_a_surface_capable_graphics_queue() @test {
     vk::QueueFamilyProperties[3] table = {
         family(QF_G | QF_C | QF_T, 1),
@@ -548,20 +533,6 @@ fn void single_queue_presentation_rejects_private_fallback() @test {
         "single-queue presentation does not add a private queue");
 }
 
-fn void presentation_support_must_cover_every_queue_family() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 1),
-    };
-
-    fault result = @catch(vk::pick_queue_families_for_surface_request(
-        table[..],
-        {},
-        gpu::internal::default_queue_request(),
-    ));
-
-    assert(result == gpu::INVALID_ARGUMENT);
-}
-
 fn void presentation_requires_a_capable_queue_family() @test {
     vk::QueueFamilyProperties[1] table = {
         family(QF_G | QF_C | QF_T, 1),
@@ -575,25 +546,6 @@ fn void presentation_requires_a_capable_queue_family() @test {
     ));
 
     assert(result == gpu::UNSUPPORTED_FEATURE);
-}
-
-fn void presentation_without_graphics_is_rejected() @test {
-    vk::QueueFamilyProperties[2] table = {
-        family(QF_C, 1),
-        family(0, 1),
-    };
-    bool[2] presentation_support = { false, true };
-    gpu::QueueRequest request = {
-        .required = { .compute },
-    };
-
-    fault result = @catch(vk::pick_queue_families_for_surface_request(
-        table[..],
-        presentation_support[..],
-        request,
-    ));
-
-    assert(result == gpu::INVALID_ARGUMENT);
 }
 
 fn void presentation_queue_selection_requires_instance_dispatch() @test {

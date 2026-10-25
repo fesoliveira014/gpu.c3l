@@ -506,3 +506,36 @@ fn void command_allocator_rules_reject_each_clause() @test {
     desc.command_buffer_capacity = 0;
     assert(!gpu::internal::command_allocator_geometry_capacity_fits(&desc), "the defaulted capacity counts");
 }
+
+fn void submit_desc_rules_reject_each_clause() @test {
+    assert(!gpu::internal::submit_desc_valid(null), "a null descriptor is invalid");
+    SubmitDesc empty;
+    assert(gpu::internal::submit_desc_valid(&empty), "the zero descriptor is valid");
+
+    ExecutableCommandList[MAX_SUBMIT_COMMAND_LISTS + 1] lists;
+    SubmitDesc at_limit = { .command_lists = lists[:MAX_SUBMIT_COMMAND_LISTS] };
+    assert(gpu::internal::submit_desc_valid(&at_limit), "the list limit itself is allowed");
+    SubmitDesc too_many_lists = { .command_lists = lists[:MAX_SUBMIT_COMMAND_LISTS + 1] };
+    assert(!gpu::internal::submit_desc_valid(&too_many_lists), "one list over the limit");
+    SubmitDesc null_lists = { .command_lists = ((ExecutableCommandList*)null)[:1] };
+    assert(!gpu::internal::submit_desc_valid(&null_lists), "a null list slice needs length 0");
+
+    CompletionWait[MAX_SUBMIT_COMPLETION_WAITS + 1] waits;
+    foreach (&wait : waits) wait.before = { .compute };
+    SubmitDesc waits_at_limit = { .completion_waits = waits[:MAX_SUBMIT_COMPLETION_WAITS] };
+    assert(gpu::internal::submit_desc_valid(&waits_at_limit), "the wait limit itself is allowed");
+    SubmitDesc too_many_waits = { .completion_waits = waits[:MAX_SUBMIT_COMPLETION_WAITS + 1] };
+    assert(!gpu::internal::submit_desc_valid(&too_many_waits), "one wait over the limit");
+    SubmitDesc null_waits = { .completion_waits = ((CompletionWait*)null)[:1] };
+    assert(!gpu::internal::submit_desc_valid(&null_waits), "a null wait slice needs length 0");
+
+    CompletionWait[1] bad = {{ .before = { .host } }};
+    SubmitDesc host_wait = { .completion_waits = bad[..] };
+    assert(!gpu::internal::submit_desc_valid(&host_wait), "a wait stage excludes host");
+    bad[0].before = { .present };
+    assert(!gpu::internal::submit_desc_valid(&host_wait), "a wait stage excludes present");
+    bad[0].before = {};
+    assert(!gpu::internal::submit_desc_valid(&host_wait), "a wait stage must be nonempty");
+    bad[0].before = { .compute };
+    assert(gpu::internal::submit_desc_valid(&host_wait));
+}

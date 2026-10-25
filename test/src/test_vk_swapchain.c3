@@ -576,13 +576,11 @@ fn void swapchain_requires_a_presentation_request() @test {
 }
 
 fn void swapchain_submit_guard_lifecycle() @test {
-    gpu::QueueRoles graphics = { .graphics };
     fault not_acquired = @catch(gpu::internal::vk::swapchain_submit_guard(
         acquire_pending:      false,
         readiness_consumed:   false,
         expected_acquisition: 0,
         provided_acquisition: 1,
-        roles:                graphics,
     ));
     assert(not_acquired == gpu::INVALID_RESOURCE_STATE, "submit with no pending acquire faults INVALID_RESOURCE_STATE");
 
@@ -591,7 +589,6 @@ fn void swapchain_submit_guard_lifecycle() @test {
         readiness_consumed:   false,
         expected_acquisition: 7,
         provided_acquisition: 7,
-        roles:                graphics,
     )!!;
 
     fault double_submit = @catch(gpu::internal::vk::swapchain_submit_guard(
@@ -599,7 +596,6 @@ fn void swapchain_submit_guard_lifecycle() @test {
         readiness_consumed:   true,
         expected_acquisition: 7,
         provided_acquisition: 7,
-        roles:                graphics,
     ));
     assert(double_submit == gpu::INVALID_RESOURCE_STATE, "second readiness submit faults INVALID_RESOURCE_STATE");
 
@@ -608,7 +604,6 @@ fn void swapchain_submit_guard_lifecycle() @test {
         readiness_consumed:   false,
         expected_acquisition: 7,
         provided_acquisition: 6,
-        roles:                graphics,
     ));
     assert(stale_readiness == gpu::INVALID_RESOURCE_STATE, "stale readiness faults INVALID_RESOURCE_STATE");
 
@@ -617,20 +612,9 @@ fn void swapchain_submit_guard_lifecycle() @test {
         readiness_consumed:   false,
         expected_acquisition: 7,
         provided_acquisition: 8,
-        roles:                graphics,
     ));
     assert(future_readiness == gpu::INVALID_RESOURCE_STATE,
         "future readiness faults INVALID_RESOURCE_STATE");
-
-    gpu::QueueRoles compute = { .compute };
-    fault compute_coupled = @catch(gpu::internal::vk::swapchain_submit_guard(
-        acquire_pending:      true,
-        readiness_consumed:   false,
-        expected_acquisition: 7,
-        provided_acquisition: 7,
-        roles:                compute,
-    ));
-    assert(compute_coupled == gpu::INVALID_ARGUMENT, "COMPUTE readiness submit faults INVALID_ARGUMENT");
 }
 
 fn void swapchain_present_guard_lifecycle() @test {
@@ -686,16 +670,6 @@ fn void swapchain_present_guard_lifecycle() @test {
     ));
     assert(future_image == gpu::INVALID_RESOURCE_STATE,
         "future acquired image faults INVALID_RESOURCE_STATE");
-
-    fault wrong_completion = @catch(gpu::internal::vk::swapchain_present_guard(
-        acquire_pending:      true,
-        readiness_consumed:   true,
-        expected_acquisition: 7,
-        provided_acquisition: 7,
-        expected_completion:  expected,
-        provided_completion:  other,
-    ));
-    assert(wrong_completion == gpu::INVALID_ARGUMENT, "unrelated completion faults INVALID_ARGUMENT");
 }
 
 fn void present_path_guards_precede_native_mutation() @test {
@@ -754,39 +728,8 @@ fn void present_path_guards_precede_native_mutation() @test {
         .index     = 0,
     };
     gpu::AcquiredImage replay = image;
-    gpu::CompletionPoint unrelated = expected;
-    unrelated.payload++;
     captured_present_calls = 0;
     capture = {};
-
-    fault completion_fault = @catch(gpu::internal::vk::vk_present_with(
-        state:             state,
-        image:             &image,
-        render_completion: unrelated,
-        present_fn:        &capture_present,
-    ));
-    assert(completion_fault == gpu::INVALID_ARGUMENT,
-        "present path rejects an unrelated completion point");
-    assert(captured_present_calls == 0,
-        "completion rejection precedes native present");
-    assert(capture.calls == 1 && capture.last.category.public_contract,
-        "completion rejection emits one contract diagnostic");
-
-    capture = {};
-    gpu::AcquiredImage wrong_image = image;
-    wrong_image.index = 1;
-    fault image_fault = @catch(gpu::internal::vk::vk_present_with(
-        state:             state,
-        image:             &wrong_image,
-        render_completion: expected,
-        present_fn:        &capture_present,
-    ));
-    assert(image_fault == gpu::INVALID_ARGUMENT,
-        "present path rejects the wrong acquired image");
-    assert(captured_present_calls == 0,
-        "image rejection precedes native present");
-    assert(capture.calls == 1 && capture.last.category.public_contract,
-        "image rejection emits one contract diagnostic");
 
     capture = {};
     gpu::internal::vk::vk_present_with(
@@ -2279,19 +2222,6 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
     gpu::cmd_end_render_pass(&commands)!!;
     unified_application_buffer = gpu::internal::recording_command(&commands).command_buffer;
     gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)!! };
-
-    gpu::SubmitDesc wrong = {
-        .command_lists    = lists[..],
-        .readiness_before = { .compute },
-    };
-    assert(@catch(gpu::internal::vk::vk_submit_with_ops(
-        state: state,
-        queue: queue,
-        desc: &wrong,
-        ops: &submit_ops,
-    ))
-        == gpu::INVALID_ARGUMENT,
-        "readiness stages without readiness stay rejected");
 
     unified_submit_buffer_count = 0;
     gpu::SubmitDesc desc = {

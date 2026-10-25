@@ -154,8 +154,18 @@ gpu::CompletionPoint point = gpu::submit(queue, &desc)!;
 in one submit behave like one long list: a barrier in a later list orders
 against commands in earlier ones. Each `CompletionWait` names a prior
 point and the first stages on this queue that must wait for it. Host and
-present are not valid wait destinations, and a transfer-only queue rejects
-ray stages.
+present are not valid wait destinations, and a transfer-only queue cannot wait
+at ray stages.
+
+These are contracts: a violation panics in safe builds. `desc` is not null;
+`command_lists` and `completion_waits` hold at most `MAX_SUBMIT_COMMAND_LISTS`
+and `MAX_SUBMIT_COMPLETION_WAITS` entries; every wait stage is known and
+excludes host and present; and `readiness` needs a graphics queue. A wait
+stage the target queue or the enabled features cannot execute also panics.
+Without unified layouts, `readiness_before` is a valid wait mask without
+`indirect` or `index_input` when `readiness` is set, and empty when it is not.
+Under unified layouts `readiness_before` is ignored. A list recorded for a
+different queue than the submit queue terminates instead of returning a fault.
 
 On success every list token and the readiness are consumed. On any
 failure the lists stay executable and readiness stays unconsumed.
@@ -203,13 +213,21 @@ never waits and returns `DEVICE_BUSY` with unspecified output when values
 are not ready. `timestamp_delta_ns` applies the role's valid-bit width and
 tick period from `TimestampCaps`; values from different native queues are
 not comparable. `TimestampCaps.queues` lists the roles that support
-timestamps.
+timestamps; `timestamp_delta_ns` returns `UNSUPPORTED_FEATURE` for another
+role.
+
+These are contracts: a violation panics in safe builds. `desc.capacity`
+is greater than 0. `count` is greater than 0 for `cmd_reset_timestamps`,
+`cmd_resolve_timestamps`, and `read_timestamps`, and `out` holds at least
+`count` values. `first + count` (or `index` for `cmd_write_timestamp`) stays
+inside the pool capacity. `timestamp_delta_ns` takes a non-null `caps`, a
+defined `QueueKind`, and capabilities that report 1 to 64 valid bits for the
+role and a positive `period_ns`.
 
 ## Faults
 
 | Cause | Fault |
 |---|---|
-| invalid submission wait stage, descriptor, or host-lowering range | `INVALID_ARGUMENT` |
 | incompatible library-owned state | `INVALID_RESOURCE_STATE` |
 | list already being submitted by another call | `COMMAND_RECORDING_ERROR` |
 | wait elapsed | `WAIT_TIMEOUT` |

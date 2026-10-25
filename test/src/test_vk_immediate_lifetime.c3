@@ -304,7 +304,7 @@ fn void incomplete_command_drain_is_deterministic() @test {
     append_submitted_command_fixture(
         completion: &completions[0],
         record:     submitted_command_fixture_record(&state, allocator, 0),
-        point:      gpu::internal::make_completion_point(queue, 7)!!,
+        point:      gpu::internal::make_completion_point(queue, 7),
     );
 
     lifetime_counter_value = 6;
@@ -413,7 +413,7 @@ fn void successful_observation_drains_distinct_upstream_identity() @test {
     append_submitted_command_fixture(
         completion: &completions[0],
         record:     submitted_command_fixture_record(&state, allocator, 0),
-        point:      gpu::internal::make_completion_point(upstream_queue, 3)!!,
+        point:      gpu::internal::make_completion_point(upstream_queue, 3),
     );
     distinct_upstream_counter_value = 3;
     distinct_upstream_query_calls = 0;
@@ -546,7 +546,7 @@ fn void completed_submission_release_boundary_is_exact() @test {
             first_allocator,
             0,
         ),
-        point:      gpu::internal::make_completion_point(queue, 7)!!,
+        point:      gpu::internal::make_completion_point(queue, 7),
     );
     append_submitted_command_fixture(
         completion: &completions[0],
@@ -555,7 +555,7 @@ fn void completed_submission_release_boundary_is_exact() @test {
             second_allocator,
             0,
         ),
-        point:      gpu::internal::make_completion_point(queue, 8)!!,
+        point:      gpu::internal::make_completion_point(queue, 8),
     );
     append_submitted_command_fixture(
         completion: &completions[0],
@@ -564,7 +564,7 @@ fn void completed_submission_release_boundary_is_exact() @test {
             second_allocator,
             1,
         ),
-        point:      gpu::internal::make_completion_point(queue, 8)!!,
+        point:      gpu::internal::make_completion_point(queue, 8),
     );
 
     assert(completions[0].submitted_count == 3,
@@ -700,7 +700,7 @@ fn void device_loss_teardown_returns_each_in_flight_allocator_unit() @test {
             first_allocator,
             0,
         ),
-        point:      gpu::internal::make_completion_point(queue, 1)!!,
+        point:      gpu::internal::make_completion_point(queue, 1),
     );
     append_submitted_command_fixture(
         completion: &completions[0],
@@ -709,7 +709,7 @@ fn void device_loss_teardown_returns_each_in_flight_allocator_unit() @test {
             second_allocator,
             0,
         ),
-        point:      gpu::internal::make_completion_point(queue, 2)!!,
+        point:      gpu::internal::make_completion_point(queue, 2),
     );
 
     vk::destroy_submitted_commands(&state);
@@ -793,7 +793,7 @@ fn void threshold_drain_queries_once_and_publishes_retirement() @test {
             point:      gpu::internal::make_completion_point(
                 queue,
                 (ulong)i + 1,
-            )!!,
+            ),
         );
     }
     lifetime_counter_value = vk::SUBMITTED_COMMAND_DRAIN_THRESHOLD;

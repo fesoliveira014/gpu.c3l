@@ -537,7 +537,6 @@ fn void? swapchain_submit_guard(
     bool readiness_consumed,
     uint expected_acquisition,
     uint provided_acquisition,
-    gpu::QueueRoles roles,
 ) {
     if (!acquire_pending
         || readiness_consumed
@@ -545,7 +544,6 @@ fn void? swapchain_submit_guard(
         || provided_acquisition != expected_acquisition) {
         return gpu::INVALID_RESOURCE_STATE~;
     }
-    if (!roles.graphics) return gpu::INVALID_ARGUMENT~;
 }
 
 fn void? swapchain_present_guard(
@@ -563,7 +561,7 @@ fn void? swapchain_present_guard(
         return gpu::INVALID_RESOURCE_STATE~;
     }
     if (provided_completion != expected_completion) {
-        return gpu::INVALID_ARGUMENT~;
+        abort("gpu: mismatched CompletionPoint");
     }
 }
 

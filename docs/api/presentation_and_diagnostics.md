@@ -66,7 +66,7 @@ gpu::SwapchainInfo info = gpu::get_swapchain_info(&device, swapchain);
 gpu::PresentModeSupport modes = gpu::get_present_mode_support(&device, swapchain)!;
 ```
 
-The device must have been created with this exact surface. `SwapchainInfo`
+`desc` is not null; a violation panics in safe builds. The device must have been created with this exact surface. `SwapchainInfo`
 reports the actual format, extent, image count, mode, `usage`, and `dormant`.
 Build pipelines against `info.format`. `info.usage` is the usage of every
 swapchain image: `color_attach` always, and `transfer_src` when the surface
@@ -122,6 +122,11 @@ value and ignored, and the library places the acquire and present
 transitions around the application's lists in that submit. `present` takes
 that submit's completion point and consumes the image on success. `WAIT_TIMEOUT` from `present` leaves the image
 intact.
+
+`image` is not null; a violation panics in safe builds. A completion point
+other than the one that submit returned, or an image that is not the
+swapchain's current acquired image (for example a copy that was already
+presented), terminates instead of returning a fault.
 
 ## Resize and destroy
 

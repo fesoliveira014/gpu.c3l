@@ -450,7 +450,7 @@ fn gpu::CompletionPoint? vk_submit(
     gpu::CompletionPoint point = gpu::internal::make_completion_point(
         queue,
         state.completion_sequence,
-    )!;
+    );
     if (state.lose_during_submit) {
         gpu::internal::mark_device_lost(&queue.device);
     }
@@ -1601,7 +1601,6 @@ fn gpu::SwapchainHandle? vk_create_swapchain(
     gpu::SwapchainDesc* desc,
 ) {
     swapchain_create_attempts++;
-    if (state == null || surface == null || desc == null) return gpu::INVALID_ARGUMENT~;
     if (state.swapchain_live) return gpu::INVALID_RESOURCE_STATE~;
     if (configured_swapchain_create_failure) return gpu::BACKEND_ERROR~;
 

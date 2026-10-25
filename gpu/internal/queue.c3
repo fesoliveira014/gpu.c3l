@@ -36,15 +36,16 @@ fn ulong completion_point_sequence(CompletionPoint point) @private {
     return point.payload >> COMPLETION_QUEUE_BITS;
 }
 
-fn CompletionPoint? make_completion_point(
+fn CompletionPoint make_completion_point(
     Queue queue,
     ulong sequence,
 ) @private {
     if (!queue.is_valid()) abort("gpu: zero Queue");
     if (queue.id >= MAX_SELECTED_QUEUE_IDENTITIES) abort("gpu: malformed Queue");
-    if (sequence == 0 || sequence > MAX_COMPLETION_SEQUENCE) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        sequence != 0 && sequence <= MAX_COMPLETION_SEQUENCE,
+        "completion sequence must be in [1, MAX_COMPLETION_SEQUENCE]"
+    );
     return {
         .device  = queue.device,
         .payload = (sequence << COMPLETION_QUEUE_BITS) | (ulong)queue.id,
@@ -55,9 +56,9 @@ fn CompletionPoint? next_completion_point(
     Queue queue,
     ulong* sequence,
 ) @private {
-    if (sequence == null) return gpu::INVALID_ARGUMENT~;
+    assert(sequence != null, "sequence must not be null");
     if (*sequence == MAX_COMPLETION_SEQUENCE) return gpu::SLOT_TABLE_FULL~;
-    CompletionPoint point = make_completion_point(queue, *sequence + 1)!;
+    CompletionPoint point = make_completion_point(queue, *sequence + 1);
     (*sequence)++;
     return point;
 }
@@ -87,6 +88,31 @@ fn bool queue_role_is_selected(QueueRoles selected, QueueKind kind) @private {
         case QueueKind.COMPUTE:  return selected.compute;
         case QueueKind.TRANSFER: return selected.transfer;
     }
+}
+
+fn bool queue_kind_valid(QueueKind kind) @private {
+    switch (kind) {
+        case QueueKind.GRAPHICS:
+        case QueueKind.COMPUTE:
+        case QueueKind.TRANSFER:
+            return true;
+        default:
+            return false;
+    }
+}
+
+<* True when the role's timestamp width and the period can convert values. A
+   role the capabilities do not support is judged by the caller's fault. *>
+fn bool timestamp_caps_valid(TimestampCaps* caps, QueueKind queue) @private {
+    if (caps == null || !queue_kind_valid(queue)) return false;
+    if (!queue_role_is_selected(caps.queues, queue)) return true;
+    uint valid_bits;
+    switch (queue) {
+        case QueueKind.GRAPHICS: valid_bits = caps.graphics_valid_bits;
+        case QueueKind.COMPUTE:  valid_bits = caps.compute_valid_bits;
+        case QueueKind.TRANSFER: valid_bits = caps.transfer_valid_bits;
+    }
+    return valid_bits >= 1 && valid_bits <= 64 && caps.period_ns > 0.0f;
 }
 
 fn uint queue_selection_id(

@@ -401,55 +401,6 @@ fn void timestamp_transfer_stage_accepts_implicit_graphics_support() @test {
             vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT);
 }
 
-fn void timestamp_range_validation_prevents_native_emission() @test {
-    TimestampCommandFixture fixture =
-        create_timestamp_command_fixture(
-        )!!;
-    defer destroy_timestamp_command_fixture(&fixture)!!;
-    TimestampCommandProbe probe;
-    TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
-
-    assert(@catch(vk_cmd_reset_timestamps_with(
-        record: fixture.record,
-        pool:   fixture.pool,
-        first:  0,
-        count:  0,
-        ops:    &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk_cmd_reset_timestamps_with(
-        record: fixture.record,
-        pool:   fixture.pool,
-        first:  uint::max,
-        count:  2,
-        ops:    &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk_cmd_reset_timestamps_with(
-        record: fixture.record,
-        pool:   fixture.pool,
-        first:  TIMESTAMP_COMMAND_POOL_CAPACITY,
-        count:  1,
-        ops:    &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk_cmd_write_timestamp_with(
-        record: fixture.record,
-        pool:   fixture.pool,
-        index:  TIMESTAMP_COMMAND_POOL_CAPACITY,
-        stage:  { .compute },
-        ops:    &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk_cmd_resolve_timestamps_with(
-        record:      fixture.record,
-        pool:        fixture.pool,
-        first:       0,
-        count:       0,
-        destination: fixture.destination,
-        ops:         &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(probe.reset_calls == 0
-        && probe.write_calls == 0
-        && probe.resolve_calls == 0);
-}
-
 fn void timestamp_render_phase_allows_only_writes() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(

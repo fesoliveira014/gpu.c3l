@@ -711,7 +711,7 @@ fn void sparse_bind_lowers_one_transaction_and_publishes_completion() @test {
         .allocation_offset = 8192,
     }};
     gpu::CompletionPoint[2] waits = {
-        gpu::internal::make_completion_point(fixture.queue, 1)!!,
+        gpu::internal::make_completion_point(fixture.queue, 1),
         gpu::internal::make_completion_point(
             {
                 .device = fixture.device,
@@ -719,7 +719,7 @@ fn void sparse_bind_lowers_one_transaction_and_publishes_completion() @test {
                 .roles  = { .compute },
             },
             1,
-        )!!,
+        ),
     };
     gpu::SparseTextureBindDesc desc = {
         .texture = fixture.texture,
@@ -1011,7 +1011,7 @@ fn void sparse_bind_preserves_a_same_queue_wait() @test {
         .allocation = fixture.allocation,
     }};
     gpu::CompletionPoint[1] waits = {
-        gpu::internal::make_completion_point(fixture.queue, 1)!!,
+        gpu::internal::make_completion_point(fixture.queue, 1),
     };
     gpu::SparseTextureBindDesc desc = {
         .texture = fixture.texture,
@@ -1358,7 +1358,7 @@ fn void sparse_bind_host_allocation_failure_sweep_is_transactional() @test {
                     .roles  = { .compute },
                 },
                 1,
-            )!!,
+            ),
         };
         gpu::SparseTextureBindDesc desc = {
             .texture = fixture.texture,
@@ -1422,7 +1422,7 @@ fn void sparse_bind_validation_precedes_host_allocation() @test {
     tiles[0].allocation = fixture.allocation;
 
     gpu::CompletionPoint[1] waits = {
-        gpu::internal::make_completion_point(fixture.queue, 1)!!,
+        gpu::internal::make_completion_point(fixture.queue, 1),
     };
     desc.waits = waits[..];
 

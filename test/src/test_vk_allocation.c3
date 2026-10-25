@@ -625,7 +625,7 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
         .device = { .generation = 1 },
         .id     = 0,
     };
-    gpu::CompletionPoint completion = gpu::internal::make_completion_point(queue, 1)!!;
+    gpu::CompletionPoint completion = gpu::internal::make_completion_point(queue, 1);
     vk::QueueCompletionState[1] completions = {{ .bound = true }};
     fixture.state.queue_completions = completions[..];
     completions[0].retirement_mutex.init()!!;
