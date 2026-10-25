@@ -498,7 +498,7 @@ command list; label text is borrowed only for the begin call.
 |---|---|
 | wrong token phase or unbalanced pass | `COMMAND_RECORDING_ERROR` |
 | unusable pipeline snapshot or incompatible implementation state | `INVALID_RESOURCE_STATE` |
-| bad acceleration-structure build descriptor | `INVALID_ARGUMENT` |
+| bad acceleration-structure build descriptor, shader binding table region, or ray-tracing stack size | `INVALID_ARGUMENT` |
 | unavailable capability or native procedure | `UNSUPPORTED_FEATURE` |
 | every unit held by unsubmitted lists, or geometry capacity exceeded | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` |
 | generated reservation exceeded | `GENERATED_SCRATCH_EXHAUSTED` |

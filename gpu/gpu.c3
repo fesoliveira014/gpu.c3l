@@ -2868,7 +2868,7 @@ fn TextureBarrier texture_transition(TextureHandle texture, TextureState before,
    `index_input` on the source side.
    @param commands : "Live recording token."
    @param barrier : "Borrowed source and destination execution scopes."
-   @return "Success, or a recoverable command, validation, or queue-support fault."
+   @return "Success, or a recoverable command fault."
    @require barrier != null : "barrier must not be null" *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
@@ -2883,7 +2883,7 @@ fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
    state, so a violation panics in safe builds.
    @param commands : "Live recording token."
    @param barrier : "Borrowed texture, subresource range, and semantic states."
-   @return "Success, or a recoverable command, validation, or support fault."
+   @return "Success, or a recoverable command fault."
    @require barrier != null : "barrier must not be null"
    @require barrier.view.aspect == TextureAspect.AUTO : "barrier.view.aspect must be AUTO" *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
