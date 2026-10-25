@@ -162,7 +162,8 @@ gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
 defer (void)gpu::destroy_runtime(&runtime);
 
 gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
-gpu::Adapter adapter = adapters.get(0)!;
+if (adapters.count == 0) return gpu::UNSUPPORTED_FEATURE~;
+gpu::Adapter adapter = adapters.get(0);
 gpu::Device device = gpu::create_device(&adapter)!;
 defer (void)gpu::destroy_device(&device);
 ```
@@ -260,7 +261,7 @@ queue and returns the [completion point](concepts.md#completion-points) to
 wait on.
 
 ```c3
-gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!;
+gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
 gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!;
 defer (void)gpu::destroy_command_allocator(&allocator);
 
@@ -409,7 +410,7 @@ fn gpu::Device? create_presentation_device(gpu::Runtime* runtime, gpu::Surface* 
     gpu::DeviceDesc desc = { .surface = *surface };
     gpu::AdapterList adapters = gpu::enumerate_adapters(runtime);
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::Adapter adapter = adapters.get(i);
         if (!gpu::supports_device_desc(&adapter, &desc)!.supported) continue;
         return gpu::create_device(&adapter, &desc);
     }

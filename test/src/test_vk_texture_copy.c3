@@ -125,7 +125,7 @@ fn void copy_texture_moves_mip_between_textures() @test {
     )!!;
     defer free_owned_span(&device, &readback)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -223,7 +223,7 @@ fn void copy_texture_moves_block_compressed_tail_mips() @test {
     )!!;
     defer free_owned_span(&device, &readback)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -302,7 +302,7 @@ fn void copy_texture_validation_faults_at_the_command() @test {
     gpu::TextureHandle other = gpu::create_texture(&device, &other_desc)!!;
     defer gpu::destroy_texture(&device, other)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;

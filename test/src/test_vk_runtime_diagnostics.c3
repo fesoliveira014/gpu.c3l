@@ -132,7 +132,7 @@ fn void command_completion_retires_its_unit() @test {
     );
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     vk::VkDeviceState* state = diagnostic_device_state(&device);
@@ -150,7 +150,7 @@ fn void command_completion_retires_its_unit() @test {
     gpu::ExecutableCommandList[1] lists = { executable };
     gpu::SubmitDesc submit = { .command_lists = lists[..] };
     gpu::CompletionPoint completion = gpu::submit(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS),
         &submit,
     )!!;
     vk::QueueCompletionState* completion_state =
@@ -172,7 +172,7 @@ fn void commands_reject_null_descriptors() @test {
     );
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(
@@ -209,7 +209,7 @@ fn void partial_creation_rolls_back_before_publication() @test {
         gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
         bool exercised;
         for (uint i = 0; i < adapters.count; i++) {
-            gpu::Adapter adapter = adapters.get(i)!!;
+            gpu::Adapter adapter = adapters.get(i);
             if (!gpu::supports_device_desc(&adapter)!!
                 .supported) continue;
             exercised = true;
@@ -251,7 +251,7 @@ fn void lost_device_discards_commands() @test {
             capture:         &capture,
         );
         gpu::Device device = create_test_device(&desc)!!;
-        gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+        gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
         gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
         OwnedSpan owned = command_family_span(&device, { .graphics }, "lost_command");
         gpu::CommandList commands = record_diagnostic_fill(&allocator, owned.span);

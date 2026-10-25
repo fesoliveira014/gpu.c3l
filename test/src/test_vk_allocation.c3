@@ -1307,7 +1307,7 @@ fn void native_mapped_visibility_round_trip() @test {
     }
     gpu::flush_mapped_span(&device, written)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -1398,7 +1398,7 @@ fn void native_allocation_spans_support_fill_upload_and_readback() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,

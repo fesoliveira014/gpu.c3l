@@ -231,7 +231,7 @@ fn void concurrent_same_device_submits_allocate_distinct_visit_epochs() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     Atomic{uint} ready;
     Atomic{bool} release;
     ConcurrentSubmitWorkerArgs[WORKER_COUNT] args;
@@ -282,15 +282,15 @@ fn void distinct_selected_queues_reach_native_submit_concurrently() @test {
     gpu::DeviceDesc device_desc = { .queues = request };
 
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::Adapter adapter = adapters.get(i);
         if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
         gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
         defer gpu::destroy_device(&device)!!;
         gpu::Queue[2] queues = {
-            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
-            gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!,
+            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS),
+            gpu::get_queue(&device, gpu::QueueKind.COMPUTE),
         };
         assert(queues[0].id != queues[1].id,
             "the concurrency regression requires distinct queue identities");
@@ -368,7 +368,7 @@ fn void validation_failure_preserves_recording_and_allocator_state() @test {
     gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList unfinished = gpu::begin_commands(&command_allocator)!!;
@@ -425,7 +425,7 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
     gpu::DeviceDesc device_desc = { .queues = request };
 
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::Adapter adapter = adapters.get(i);
         if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
@@ -434,11 +434,11 @@ fn void different_queue_submit_preserves_executable_allocator_unit_when_availabl
         gpu::Queue graphics = gpu::get_queue(
             &device,
             gpu::QueueKind.GRAPHICS,
-        )!!;
+        );
         gpu::Queue compute = gpu::get_queue(
             &device,
             gpu::QueueKind.COMPUTE,
-        )!!;
+        );
         assert(graphics.id != compute.id,
             "the supported distinct request publishes different queue identities");
         gpu::CommandAllocatorDesc allocator_desc = {
@@ -602,7 +602,7 @@ fn void prove_submission_publication_gap(
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -750,7 +750,7 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
     vk::QueueCompletionState* completion =
         &state.queue_completions[state.graphics_completion_id];
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
@@ -772,7 +772,7 @@ fn void native_submit_failure_rolls_back_completion_and_tokens() @test {
     );
     assert(@catch(vk::vk_submit_with(
         state,
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS),
         &desc,
         &reject_user_submit,
     ))
@@ -898,7 +898,7 @@ fn void native_submit_failure_preserves_swapchain_readiness() @test {
 
     assert(@catch(vk::vk_submit_with(
         state,
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS),
         &desc,
         &reject_swapchain_submit,
     )) == gpu::OUT_OF_HOST_MEMORY,
@@ -947,7 +947,7 @@ fn void swapchain_submit_path_guards_precede_native_mutation() @test {
     gpu::Queue graphics = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::SubmitDesc empty_submit;
     gpu::CompletionPoint prior = gpu::submit(graphics, &empty_submit)!!;
     vk::QueueCompletionState* completion =
@@ -1134,7 +1134,7 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
     vk::QueueCompletionState* completion =
         &state.queue_completions[state.graphics_completion_id];
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
@@ -1172,7 +1172,7 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
         queue:            gpu::get_queue(
             &device,
             gpu::QueueKind.GRAPHICS,
-        )!!,
+        ),
         desc:             &desc,
         submit_fn:        &reject_counted_user_submit,
         counter_query_fn: &query_completion_counter,
@@ -1208,7 +1208,7 @@ fn void completion_distance_backpressure_preserves_submit_state() @test {
         queue:            gpu::get_queue(
             &device,
             gpu::QueueKind.GRAPHICS,
-        )!!,
+        ),
         desc:             &desc,
         submit_fn:        &reject_counted_user_submit,
         counter_query_fn: &query_completion_counter,
@@ -1241,7 +1241,7 @@ fn void completion_sequence_exhaustion_precedes_native_submit() @test {
     vk::QueueCompletionState* completion =
         &state.queue_completions[state.graphics_completion_id];
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
@@ -1261,7 +1261,7 @@ fn void completion_sequence_exhaustion_precedes_native_submit() @test {
         queue:            gpu::get_queue(
             &device,
             gpu::QueueKind.GRAPHICS,
-        )!!,
+        ),
         desc:             &desc,
         submit_fn:        &reject_counted_user_submit,
         counter_query_fn: &query_completion_counter,
@@ -1284,7 +1284,7 @@ fn void completion_sequence_exhaustion_precedes_native_submit() @test {
 fn void deferred_discards_survive_a_successful_submit() @test {
     gpu::Device device = make_submit_test_device();
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CompletionPoint done;
@@ -1309,7 +1309,7 @@ fn void native_device_loss_publishes_complete_point() @test {
     vk::QueueCompletionState* completion =
         &state.queue_completions[state.graphics_completion_id];
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
@@ -1457,7 +1457,7 @@ fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
     gpu::DeviceDesc device_desc = { .queues = request };
 
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::Adapter adapter = adapters.get(i);
         if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
@@ -1467,11 +1467,11 @@ fn void cross_queue_draw_argument_wait_reaches_exact_submit_scope() @test {
         gpu::Queue compute = gpu::get_queue(
             &device,
             gpu::QueueKind.COMPUTE,
-        )!!;
+        );
         gpu::Queue graphics = gpu::get_queue(
             &device,
             gpu::QueueKind.GRAPHICS,
-        )!!;
+        );
         assert(compute.id != graphics.id,
             "the requested compute and graphics identities are distinct");
         gpu::SubmitDesc producer;
@@ -1514,7 +1514,7 @@ fn void invalid_completion_wait_stage_preserves_token() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::SubmitDesc empty;
@@ -1572,7 +1572,7 @@ fn void queue_incompatible_completion_stage_rejects_through_submit() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::SubmitDesc empty;
@@ -1619,7 +1619,7 @@ fn void same_queue_wait_is_preserved_through_full_submit_path() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::SubmitDesc empty;
@@ -1672,7 +1672,7 @@ fn void directly_published_sparse_origin_point_orders_normal_submit() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::QueueCompletionState* completion =
@@ -1748,7 +1748,7 @@ fn void foreign_completion_wait_rejects_before_native_submit() @test {
     )!!;
     gpu::wait_completion(foreign, 1_000_000_000)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&consumer, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&consumer, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&consumer, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;

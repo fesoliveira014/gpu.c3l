@@ -202,7 +202,7 @@ fn double run_upload_combo(
     gpu::Queue transfer_queue = gpu::get_queue(
         device,
         gpu::QueueKind.TRANSFER,
-    )!!;
+    );
     for (uint worker = 0; worker < workers; worker++) {
         command_allocators[worker] = gpu::create_command_allocator(
             device,

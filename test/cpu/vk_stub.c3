@@ -784,45 +784,49 @@ fn gpu::AdapterInfo vk_get_adapter_info(VkRuntimeState* state, uint index) {
     };
 }
 
-fn bool? vk_adapter_supports_device_baseline(
+fn bool vk_adapter_supports_device_baseline(
     VkRuntimeState* state,
     uint adapter_index,
 ) {
-    if (state == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapter_count,
+        "adapter index must be inside the runtime adapter list"
+    );
     return configured_device_baseline_support
         && !(adapter_index < configured_adapter_unsupported.len
             && configured_adapter_unsupported[adapter_index]);
 }
 
-fn bool? vk_adapter_supports_ray_queries(
+fn bool vk_adapter_supports_ray_queries(
     VkRuntimeState* state,
     uint adapter_index,
 ) {
-    if (state == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapter_count,
+        "adapter index must be inside the runtime adapter list"
+    );
     return configured_ray_query_support;
 }
 
-fn bool? vk_adapter_supports_ray_tracing_pipelines(
+fn bool vk_adapter_supports_ray_tracing_pipelines(
     VkRuntimeState* state,
     uint adapter_index,
 ) {
-    if (state == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapter_count,
+        "adapter index must be inside the runtime adapter list"
+    );
     return configured_ray_tracing_pipeline_support;
 }
 
-fn bool? vk_adapter_supports_mesh_shaders(
+fn bool vk_adapter_supports_mesh_shaders(
     VkRuntimeState* state,
     uint adapter_index,
 ) {
-    if (state == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapter_count,
+        "adapter index must be inside the runtime adapter list"
+    );
     return true;
 }
 
@@ -833,14 +837,15 @@ fn bool ray_tracing_queue_request_compatible(gpu::QueueRequest* request) {
     return normalized.required.graphics || normalized.required.compute;
 }
 
-fn bool? vk_adapter_supports_ray_query_heap(
+fn bool vk_adapter_supports_ray_query_heap(
     VkRuntimeState* state,
     uint adapter_index,
     uint heap_capacity,
 ) {
-    if (state == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapter_count,
+        "adapter index must be inside the runtime adapter list"
+    );
     return heap_capacity > 0
         && heap_capacity <= configured_ray_query_heap_limit;
 }
@@ -871,9 +876,7 @@ fn void*? vk_create_win32_surface(
     void* instance,
     void* window,
 ) {
-    if (state == null || instance == null || window == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(state != null, "runtime state must not be null");
     surface_creates++;
     return mem::new(char);
 }
@@ -895,9 +898,7 @@ fn void*? vk_create_x11_surface(
     void* display,
     ulong window,
 ) {
-    if (state == null || display == null || window == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(state != null, "runtime state must not be null");
     surface_creates++;
     return mem::new(char);
 }
@@ -1747,7 +1748,7 @@ fn gpu::Device? create_vk_device(
     gpu::Runtime* retained_runtime,
 ) {
     gpu::DeviceDesc normalized =
-        gpu::internal::normalize_device_desc(device_desc)!;
+        gpu::internal::normalize_device_desc(device_desc);
     VkDeviceState* state = mem::new(VkDeviceState);
     state.free_on_destroy = true;
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;

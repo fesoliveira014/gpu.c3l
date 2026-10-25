@@ -85,7 +85,7 @@ fn void rendering_attachments_use_classic_layouts() @test {
     gpu::AttachmentViewHandle depth_view =
         create_test_attachment_view(&device, depth)!!;
     defer destroy_test_attachment_view(&device, &depth_view)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -205,7 +205,7 @@ fn void multisample_color_depth_resolves_to_readback() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -549,7 +549,7 @@ fn void multisample_texture_reads_each_sample() @test {
         if (with_unsigned) free_sample_readback(&device, &unsigned_values);
     }
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
@@ -820,7 +820,7 @@ fn void check_depth_resolve(
     );
     defer free_sample_readback(device, &target_values);
 
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
@@ -906,7 +906,7 @@ fn fault begin_depth_resolve_fault(
     gpu::AttachmentViewHandle resolve_view,
     gpu::DepthResolveMode mode,
 ) {
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
@@ -1055,7 +1055,7 @@ fn void check_sample_coverage(
     );
     defer free_sample_readback(device, &values);
 
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;

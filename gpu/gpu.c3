@@ -174,13 +174,13 @@ fn bool Adapter.is_valid(self) => (ulong)self != 0;
 
 <* Return one borrowed adapter from this runtime-owned view.
    @param index : "Zero-based index within the view."
-   @return "A borrowed adapter valid until runtime destruction, or a recoverable range fault." *>
-fn Adapter? AdapterList.get(&self, uint index) {
+   @return "A borrowed adapter valid until runtime destruction."
+   @require self != null : "self must not be null"
+   @require index < self.count : "index must be less than the adapter count" *>
+fn Adapter AdapterList.get(&self, uint index) {
     gpu::internal::RuntimeData* data = gpu::internal::require_runtime(&self.runtime);
-    if (index >= self.count || index >= data.adapter_count || index > ushort::max) {
-        return INVALID_ARGUMENT~;
-    }
-    return (Adapter){
+    assert(index < data.adapter_count, "index must be less than the runtime adapter count");
+    return {
         .adapter_index      = (ushort)index,
         .runtime_index      = (ushort)self.runtime.index,
         .runtime_generation = self.runtime.generation,
@@ -207,9 +207,10 @@ fn bool Queue.equals(self, Queue other) @operator(==) {
    The descriptor is borrowed only for the call; callback user data must remain
    valid for every callback until runtime destruction.
    @param desc : "Borrowed runtime configuration."
-   @return "An owning runtime token, or a recoverable validation, initialization, or allocation fault." *>
+   @return "An owning runtime token, or a recoverable initialization or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::runtime_desc_valid(desc) : "desc capacities must not exceed MAX_SHADER_HEAP_CAPACITY and desc.pipeline_cache_data must have a pointer when nonempty" *>
 fn Runtime? create_runtime(RuntimeDesc* desc) {
-    gpu::internal::validate_runtime_desc(desc)!;
     return gpu::internal::vk::create_vk_runtime(desc);
 }
 
@@ -272,12 +273,15 @@ fn AdapterDiagnostics get_adapter_diagnostics(Adapter* adapter) {
 }
 
 <* Query semantic descriptor support without enabling device state.
-   `unmet_requirement` is a borrowed static label.
+   A requirement the adapter cannot meet is reported in the result, with
+   `unmet_requirement` as a borrowed static label. Ray queries and ray-tracing
+   pipelines need a nonzero `RuntimeDesc.acceleration_structure_heap_capacity`.
    @param adapter : "Borrowed adapter to evaluate."
    @param desc : "Borrowed requirements; null selects the zero-value defaults."
-   @return "The support result, or a recoverable invalid-argument fault." *>
+   @return "The support result, or a recoverable backend query fault."
+   @require gpu::internal::device_desc_valid(desc) : "desc.queues must be zero or a valid queue request that includes graphics when desc.surface is set" *>
 fn DeviceSupport? supports_device_desc(Adapter* adapter, DeviceDesc* desc = null) {
-    DeviceDesc normalized = gpu::internal::normalize_device_desc(desc)!;
+    DeviceDesc normalized = gpu::internal::normalize_device_desc(desc);
     gpu::internal::RuntimeData* data = gpu::internal::require_adapter(adapter);
     return gpu::internal::evaluate_device_desc_support(
         data,
@@ -332,12 +336,14 @@ fn DeviceCaps get_device_caps(Device* device) {
 
 <* Create a device from one exact borrowed adapter.
    The descriptor is borrowed only for the call. The caller owns the returned
-   token and releases it with `destroy_device`.
+   token and releases it with `destroy_device`. Ray queries and ray-tracing
+   pipelines need a nonzero `RuntimeDesc.acceleration_structure_heap_capacity`.
    @param adapter : "Borrowed adapter that owns the requested capabilities."
    @param desc : "Borrowed semantic requirements; null selects the documented defaults."
-   @return "An owning device token, or a recoverable support, capacity, allocation, or backend fault." *>
+   @return "An owning device token, or a recoverable support, capacity, allocation, or backend fault."
+   @require gpu::internal::device_desc_valid(desc) : "desc.queues must be zero or a valid queue request that includes graphics when desc.surface is set" *>
 fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
-    DeviceDesc normalized = gpu::internal::normalize_device_desc(desc)!;
+    DeviceDesc normalized = gpu::internal::normalize_device_desc(desc);
     gpu::internal::RuntimeData* runtime_data = gpu::internal::require_adapter(adapter);
     DeviceSupport support = gpu::internal::evaluate_device_desc_support(
         data:                 runtime_data,
@@ -445,15 +451,16 @@ fn void? destroy_device(Device* device) {
 }
 
 <* Return a device-owned queue identity for a semantic role. Aliased roles
-   return the same token. A dead device terminates; an unavailable
-   role faults INVALID_ARGUMENT. The token remains valid while the device is live.
+   return the same token. A dead device terminates. `kind` must be a role the
+   device exposes, as listed in `DeviceCaps.queues`. The token remains valid
+   while the device is live.
    @param device : "Live device whose selected queue is queried."
-   @param kind : "Semantic queue role."
-   @return "A device-owned queue token, or a recoverable unavailable-role fault." *>
-fn Queue? get_queue(Device* device, QueueKind kind) {
+   @param kind : "Semantic queue role the device exposes."
+   @return "A device-owned queue token." *>
+fn Queue get_queue(Device* device, QueueKind kind) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_selected_queue_kind(&operation, kind)!;
+    gpu::internal::validate_selected_queue_kind(&operation, kind);
     return {
         .device = *device,
         .id     = gpu::internal::selected_queue_id(&operation, kind),

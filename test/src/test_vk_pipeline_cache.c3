@@ -391,7 +391,7 @@ fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
     }
     gpu::flush_mapped_span(&device, vertices.span)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
@@ -648,7 +648,7 @@ fn void caller_shader_storage_is_call_scoped_and_deduplicates() @test {
     assert(cache_entry_count(&device) == 1,
         "released caller storage does not change exact cache identity");
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -1296,7 +1296,7 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
     gpu::flush_mapped_span(&device, verts_span)!!;
     gpu::flush_mapped_span(&device, frag_span)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -1492,7 +1492,7 @@ fn void alias_survives_peer_destroy() @test {
     defer free_owned_span(&device, &frag_owned)!!;
     gpu::GpuSpan frag_span = frag_owned.span;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -1842,7 +1842,7 @@ fn void generated_dispatch_layout_survives_concurrent_pipeline_creation() @test 
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::GeneratedWorkReservationDesc scratch = {
         .pipeline              = pipeline,
         .kind                  = gpu::GeneratedWorkKind.DISPATCH,
@@ -2221,7 +2221,7 @@ fn void repeated_format_only_graphics_calls_alias_one_pipeline_identity() @test 
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,

@@ -1,6 +1,7 @@
 module gpu::internal::vk;
 
 import gpu @public;
+import gpu::internal @public;
 
 fn void pow2_helper() @test {
     assert(is_pow2(1) && is_pow2(16) && is_pow2(4096), "powers of two accepted");
@@ -8,21 +9,14 @@ fn void pow2_helper() @test {
 }
 
 fn void descriptor_capacity_resolution() @test {
-    uint defaulted = resolve_descriptor_capacity(0, gpu::DEFAULT_TEXTURE_HEAP_CAPACITY)!!;
+    uint defaulted = resolve_descriptor_capacity(0, gpu::DEFAULT_TEXTURE_HEAP_CAPACITY);
     assert(defaulted == gpu::DEFAULT_TEXTURE_HEAP_CAPACITY, "zero requests the default capacity");
 
-    uint explicit_capacity = resolve_descriptor_capacity(16, gpu::DEFAULT_TEXTURE_HEAP_CAPACITY)!!;
+    uint explicit_capacity = resolve_descriptor_capacity(16, gpu::DEFAULT_TEXTURE_HEAP_CAPACITY);
     assert(explicit_capacity == 16, "explicit capacity is honored");
 
-    uint at_ceiling = resolve_descriptor_capacity(gpu::MAX_SHADER_HEAP_CAPACITY, gpu::DEFAULT_TEXTURE_HEAP_CAPACITY)!!;
+    uint at_ceiling = resolve_descriptor_capacity(gpu::MAX_SHADER_HEAP_CAPACITY, gpu::DEFAULT_TEXTURE_HEAP_CAPACITY);
     assert(at_ceiling == gpu::MAX_SHADER_HEAP_CAPACITY, "the descriptor heap capacity limit itself is allowed");
-
-    fault ceiling_fault = @catch(resolve_descriptor_capacity(
-        gpu::MAX_SHADER_HEAP_CAPACITY + 1,
-        gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
-    ));
-    assert(ceiling_fault == gpu::INVALID_ARGUMENT,
-        "capacity above the descriptor heap limit faults INVALID_ARGUMENT");
 }
 
 fn IndexingHeapLimits exact_indexing_heap_limits(
@@ -130,10 +124,9 @@ fn void shader_heap_hard_ceiling_is_separate_from_native_limits() @test {
         0,
         limits,
     ) == IndexingHeapLimitFailure.NONE);
-    assert(@catch(resolve_descriptor_capacity(
-        above_hard_ceiling,
-        gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
-    )) == gpu::INVALID_ARGUMENT);
+    gpu::RuntimeDesc desc = { .texture_heap_capacity = above_hard_ceiling };
+    assert(!gpu::internal::runtime_desc_valid(&desc),
+        "the hard ceiling is a runtime descriptor rule");
 }
 
 fn void resource_handle_generation_exhaustion_has_no_successor() @test {

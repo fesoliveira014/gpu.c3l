@@ -255,10 +255,10 @@ fn void caller_owned_span_crosses_compute_and_graphics_families_when_available()
     defer free_owned_span(&device, &compute_root_owned)!!;
     OwnedSpan graphics_root_owned = alloc_empty_compute_root(&device, { .graphics });
     defer free_owned_span(&device, &graphics_root_owned)!!;
-    gpu::Queue compute_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue compute_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(&device, compute_queue)!!;
     defer gpu::destroy_command_allocator(&compute_allocator)!!;
-    gpu::Queue graphics_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue graphics_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator graphics_allocator = gpu::create_command_allocator(&device, graphics_queue)!!;
     defer gpu::destroy_command_allocator(&graphics_allocator)!!;
 
@@ -327,10 +327,10 @@ fn void caller_owned_span_reuses_across_queue_families_after_wait() @test {
     defer free_owned_span(&device, &compute_root_owned)!!;
     OwnedSpan graphics_root_owned = alloc_empty_compute_root(&device, { .graphics });
     defer free_owned_span(&device, &graphics_root_owned)!!;
-    gpu::Queue compute_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue compute_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(&device, compute_queue)!!;
     defer gpu::destroy_command_allocator(&compute_allocator)!!;
-    gpu::Queue graphics_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue graphics_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator graphics_allocator = gpu::create_command_allocator(&device, graphics_queue)!!;
     defer gpu::destroy_command_allocator(&graphics_allocator)!!;
 
@@ -495,11 +495,11 @@ fn void compute_generated_indexed_indirect_draw() @test {
     gpu::Queue producer_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
-    )!!;
+    );
     gpu::Queue consumer_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator producer_allocator = gpu::create_command_allocator(
         &device,
         producer_queue,
@@ -877,13 +877,13 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::Queue producer_queue = queue;
     if (cross_family_generated_wait) {
         producer_queue = gpu::get_queue(
             &device,
             gpu::QueueKind.COMPUTE,
-        )!!;
+        );
     }
     gpu::GeneratedWorkReservationDesc dispatch_scratch = {
         .pipeline              = dispatch_pipeline,
@@ -1269,7 +1269,7 @@ fn void plain_indirect_draw_from_caller_owned_span() @test {
     *args = { .vertex_count = 3, .instance_count = 1 };
     gpu::flush_mapped_span(&device, args_span)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -1397,7 +1397,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     gpu::flush_mapped_span(&device, io_span)!!;
     gpu::flush_mapped_span(&device, double_root_span)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -1553,7 +1553,7 @@ fn void count_buffer_limits_draws() @test {
     gpu::GpuSpan count_zero = counts.checked_subspan(0, 4)!!;
     gpu::GpuSpan count_one = counts.checked_subspan(4, 4)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -1618,7 +1618,7 @@ fn void discard_consumes_active_render_pass_recording() @test {
         target,
     )!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
     record_target_to_attach(&commands, target);
@@ -1686,7 +1686,7 @@ fn void indirect_argument_validation() @test {
     defer free_owned_span(&device, &args_owned)!!;
     gpu::GpuSpan args_span = args_owned.span;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;

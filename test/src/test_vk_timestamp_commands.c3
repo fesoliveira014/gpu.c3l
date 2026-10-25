@@ -119,7 +119,7 @@ fn TimestampCommandFixture? create_timestamp_command_fixture(
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::Device device;
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::Adapter adapter = adapters.get(i);
         gpu::DeviceSupport support =
             gpu::supports_device_desc(&adapter)!;
         if (!support.supported) continue;
@@ -161,7 +161,7 @@ fn TimestampCommandFixture? create_timestamp_command_fixture(
         gpu::get_allocation_span(&device, allocation)!;
 
     gpu::Queue queue =
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity          = 1,
     };

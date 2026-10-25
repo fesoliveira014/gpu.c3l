@@ -159,7 +159,7 @@ fn DynamicStateFixture make_dynamic_state_fixture_before_pass(
     gpu::Queue queue = gpu::get_queue(
         &fixture.device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     fixture.allocator = gpu::create_command_allocator(
         &fixture.device,
         queue,
@@ -868,7 +868,7 @@ fn void preserves_graphics_binding_across_render_passes() @test {
     };
     graphics_state.color.targets = color_targets[..];
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -912,7 +912,7 @@ fn void graphics_alias_updates_logical_handle() @test {
         gpu::Format.RGBA8_UNORM,
     );
     defer gpu::destroy_pipeline(&device, alias_pipeline)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -944,7 +944,7 @@ fn void mesh_state_replays_topology_on_graphics_bind() @test {
     defer destroy_test_device(&device)!!;
     ValDrawCtx draw = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &draw);
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
@@ -973,7 +973,7 @@ fn void alternating_bind_points_preserve_native_caches() @test {
     defer destroy_val_compute_ctx(&device, &compute);
     ValDrawCtx draw = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &draw);
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -1023,7 +1023,7 @@ fn void distinct_pipelines_on_one_bind_point_emit_distinct_binds() @test {
     defer destroy_val_compute_ctx(&device, &compute);
     gpu::PipelineHandle other = review_distinct_compute_pipeline(&device);
     defer gpu::destroy_pipeline(&device, other)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -1071,7 +1071,7 @@ fn void command_buffer_reuse_resets_graphics_and_descriptor_state() @test {
         .width  = VAL_RT,
         .height = VAL_RT,
     };
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity = 1,
     };

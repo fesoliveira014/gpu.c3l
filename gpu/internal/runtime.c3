@@ -49,7 +49,7 @@ fn Runtime? register_runtime(
     gpu::internal::vk::VkRuntimeState* state,
     uint adapter_count,
 ) @private {
-    if (state == null) return gpu::INVALID_ARGUMENT~;
+    assert(state != null, "runtime state must not be null");
     if (adapter_count > MAX_ADAPTERS_PER_RUNTIME) return gpu::SLOT_TABLE_FULL~;
     for (uint i = 0; i < MAX_RUNTIMES; i++) {
         RuntimeData* data = &runtime_slots[i];
@@ -114,16 +114,12 @@ fn void? runtime_release_device(Runtime* runtime) @private {
     }
 }
 
-fn void? validate_runtime_desc(RuntimeDesc* desc) @private {
-    if (desc == null) return gpu::INVALID_ARGUMENT~;
-    if (desc.texture_heap_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
-        || desc.sampler_heap_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
-        || desc.texture_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
-        || desc.pipeline_capacity > gpu::MAX_SHADER_HEAP_CAPACITY
-        || desc.acceleration_structure_heap_capacity
-            > gpu::MAX_SHADER_HEAP_CAPACITY) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (desc.pipeline_cache_data.len > 0
-        && desc.pipeline_cache_data.ptr == null) return gpu::INVALID_ARGUMENT~;
+fn bool runtime_desc_valid(RuntimeDesc* desc) @private {
+    return desc != null
+        && desc.texture_heap_capacity <= gpu::MAX_SHADER_HEAP_CAPACITY
+        && desc.sampler_heap_capacity <= gpu::MAX_SHADER_HEAP_CAPACITY
+        && desc.texture_capacity <= gpu::MAX_SHADER_HEAP_CAPACITY
+        && desc.pipeline_capacity <= gpu::MAX_SHADER_HEAP_CAPACITY
+        && desc.acceleration_structure_heap_capacity <= gpu::MAX_SHADER_HEAP_CAPACITY
+        && (desc.pipeline_cache_data.len == 0 || desc.pipeline_cache_data.ptr != null);
 }

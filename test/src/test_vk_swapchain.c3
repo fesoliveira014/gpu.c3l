@@ -1593,7 +1593,7 @@ fn void borrowed_swapchain_view_lifecycle_reaches_resize_invalidation() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -2269,7 +2269,7 @@ fn void unified_swapchain_submit_wraps_application_lists() @test {
     assert(acquired.prior_state.layout == gpu::TextureLayout.GENERAL,
         "unified mode reports the image in GENERAL");
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
@@ -2365,7 +2365,7 @@ fn void acquire_present_after_loss() @test {
     install_borrowed_swapchain(state, &fixture);
     defer restore_borrowed_swapchain(&fixture);
     state.device_dispatch.presentation.queue_present = &capture_present;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,

@@ -113,7 +113,7 @@ fn void u16v_draw(
     gpu::Queue queue = gpu::get_queue(
         device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         device,
         queue,
@@ -301,7 +301,7 @@ fn void compute_queue_indices_wait_on_index_input() @test {
     QuadInputs inputs = u16v_quad_inputs(&device, { .graphics, .compute });
     defer free_quad_inputs(&device, &inputs);
 
-    gpu::Queue compute_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue compute_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(&device, compute_queue)!!;
     defer gpu::destroy_command_allocator(&compute_allocator)!!;
     gpu::CommandList compute = gpu::begin_commands(&compute_allocator)!!;

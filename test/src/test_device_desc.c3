@@ -23,10 +23,10 @@ fn bool device_desc_equal(gpu::DeviceDesc first, gpu::DeviceDesc second) {
 
 fn void null_and_zero_device_desc_use_default_queues() @test {
     gpu::DeviceDesc null_normalized =
-        gpu::internal::normalize_device_desc(null)!!;
+        gpu::internal::normalize_device_desc(null);
     gpu::DeviceDesc zero;
     gpu::DeviceDesc zero_normalized =
-        gpu::internal::normalize_device_desc(&zero)!!;
+        gpu::internal::normalize_device_desc(&zero);
 
     assert(null_normalized.queues.required.graphics);
     assert(null_normalized.queues.required.compute);
@@ -66,65 +66,8 @@ fn void normalization_preserves_explicit_desc_without_mutation() @test {
     gpu::DeviceDesc original = desc;
 
     gpu::DeviceDesc normalized =
-        gpu::internal::normalize_device_desc(&desc)!!;
+        gpu::internal::normalize_device_desc(&desc);
 
     assert(device_desc_equal(desc, original));
     assert(device_desc_equal(normalized, original));
-}
-
-fn void normalization_rejects_invalid_queue_descriptions() @test {
-    gpu::DeviceDesc missing_role = {
-        .queues = {
-            .required = { .graphics },
-            .distinct_roles = { .compute },
-        },
-    };
-    gpu::DeviceDesc unknown_role = {
-        .queues = {
-            .required = (gpu::QueueRoles)8,
-        },
-    };
-    gpu::DeviceDesc unknown_distinct = {
-        .queues = {
-            .required = { .graphics },
-            .distinct_roles = (gpu::QueueRoles)8,
-        },
-    };
-    gpu::DeviceDesc presentation_without_graphics = {
-        .surface = {
-            .index      = 1,
-            .generation = 1,
-        },
-        .queues = { .required = { .compute } },
-    };
-
-    assert(@catch(gpu::internal::normalize_device_desc(&missing_role))
-        == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::internal::normalize_device_desc(&unknown_role))
-        == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::internal::normalize_device_desc(&unknown_distinct))
-        == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::internal::normalize_device_desc(
-        &presentation_without_graphics,
-    )) == gpu::INVALID_ARGUMENT);
-}
-
-fn void normalization_rejects_single_queue_without_required_or_with_distinct() @test {
-    gpu::DeviceDesc empty_required = {
-        .queues = {
-            .single_queue = true,
-        },
-    };
-    gpu::DeviceDesc distinct_role = {
-        .queues = {
-            .required = { .graphics, .compute, .transfer },
-            .distinct_roles = { .transfer },
-            .single_queue = true,
-        },
-    };
-
-    assert(@catch(gpu::internal::normalize_device_desc(&empty_required))
-        == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::internal::normalize_device_desc(&distinct_role))
-        == gpu::INVALID_ARGUMENT);
 }

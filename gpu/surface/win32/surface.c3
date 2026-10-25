@@ -11,23 +11,19 @@ import gpu::internal::vk;
    @param runtime : "Live runtime that will own the surface."
    @param instance : "Borrowed non-null native instance handle."
    @param window : "Borrowed non-null native window handle."
-   @return "A runtime-owned surface token, or a recoverable invalid-argument, capacity, allocation, or platform fault." *>
+   @return "A runtime-owned surface token, or a recoverable capacity, allocation, or platform fault."
+   @require (void*)instance != null : "instance must not be null"
+   @require (void*)window != null : "window must not be null" *>
 fn gpu::Surface? create_surface(
     gpu::Runtime* runtime,
     InstanceHandle instance,
     WindowHandle window,
 ) {
-    void* native_instance = (void*)instance;
-    void* native_window = (void*)window;
-    if (native_instance == null || native_window == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-
     gpu::internal::RuntimeData* runtime_data = gpu::internal::require_runtime(runtime);
     void* backend_surface = gpu::internal::vk::vk_create_win32_surface(
         runtime_data.state,
-        native_instance,
-        native_window,
+        (void*)instance,
+        (void*)window,
     )!;
     defer catch gpu::internal::vk::vk_destroy_surface(
         runtime_data.state,

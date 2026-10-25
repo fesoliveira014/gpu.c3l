@@ -151,34 +151,3 @@ fn void device_heap_capacities() @test {
     assert(caps.sampler_heap_capacity == 8, "sampler capacity reflects the desc");
     destroy_test_device(&device)!!;
 }
-
-fn void device_capacity_over_ceiling_rejected() @test {
-    gpu::RuntimeDesc desc = {
-        .application_name = "gpu_vk_capacity_test",
-    };
-    uint over_ceiling = gpu::MAX_SHADER_HEAP_CAPACITY + 1;
-
-    desc.texture_heap_capacity = over_ceiling;
-    assert(
-        @catch(create_test_device(&desc)) == gpu::INVALID_ARGUMENT,
-        "texture heap capacity above the limit fails with INVALID_ARGUMENT"
-    );
-    desc.texture_heap_capacity = 0;
-    desc.sampler_heap_capacity = over_ceiling;
-    assert(
-        @catch(create_test_device(&desc)) == gpu::INVALID_ARGUMENT,
-        "sampler heap capacity above the limit fails with INVALID_ARGUMENT"
-    );
-    desc.sampler_heap_capacity = 0;
-    desc.texture_capacity = over_ceiling;
-    assert(
-        @catch(create_test_device(&desc)) == gpu::INVALID_ARGUMENT,
-        "texture capacity above the limit fails with INVALID_ARGUMENT"
-    );
-    desc.texture_capacity = 0;
-    desc.pipeline_capacity = over_ceiling;
-    assert(
-        @catch(create_test_device(&desc)) == gpu::INVALID_ARGUMENT,
-        "pipeline capacity above the limit fails with INVALID_ARGUMENT"
-    );
-}

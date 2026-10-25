@@ -41,7 +41,7 @@ fn void unified_layouts_caps_and_general_rejection() @test {
         "the optimal cap needs the mode");
     gpu::TextureHandle texture = make_unified_heap_texture(&explicit_device, "explicit_general");
     defer gpu::destroy_texture(&explicit_device, texture)!!;
-    gpu::Queue queue = gpu::get_queue(&explicit_device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&explicit_device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&explicit_device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -72,7 +72,7 @@ fn void unified_barrier_lowers_to_general() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_unified_heap_texture(&device, "unified_barrier");
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -176,7 +176,7 @@ fn void unified_storage_write_then_sampled_read() @test {
     };
     gpu::flush_mapped_span(&device, roots.span)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -224,7 +224,7 @@ fn void unified_textures_initialize_at_submit() @test {
     gpu::destroy_texture(&device, dropped)!!;
     assert(state.pending_init_count == 0, "destruction dequeues it");
 
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator graphics_allocator = gpu::create_command_allocator(&device, graphics)!!;
     defer gpu::destroy_command_allocator(&graphics_allocator)!!;
     gpu::CommandList first = gpu::begin_commands(&graphics_allocator)!!;
@@ -254,7 +254,7 @@ fn void unified_textures_initialize_at_submit() @test {
         { .texture_index = view.index, .width = TEX_SIZE, .height = TEX_SIZE };
     gpu::flush_mapped_span(&device, root.span)!!;
 
-    gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(&device, compute)!!;
     defer gpu::destroy_command_allocator(&compute_allocator)!!;
     gpu::CommandList second = gpu::begin_commands(&compute_allocator)!!;
@@ -302,7 +302,7 @@ fn void unified_failed_submit_keeps_textures_pending() @test {
     gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::TextureHandle texture = make_unified_heap_texture(&device, "unified_retry_texture");
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;

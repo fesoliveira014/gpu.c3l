@@ -29,16 +29,24 @@ fn QueueRequest default_queue_request() @private {
     };
 }
 
-fn DeviceDesc? normalize_device_desc(DeviceDesc* desc) @private {
+fn bool device_desc_valid(DeviceDesc* desc) @private {
+    if (desc == null || queue_request_is_zero(desc.queues)) return true;
+    return queue_request_is_valid(desc.queues)
+        && (!desc.surface.is_valid() || desc.queues.required.graphics);
+}
+
+fn bool ray_feature_heap_valid(
+    DeviceDesc* desc,
+    uint acceleration_structure_heap_capacity,
+) @private {
+    return !(desc.enable_ray_queries || desc.enable_ray_tracing_pipelines)
+        || acceleration_structure_heap_capacity > 0;
+}
+
+fn DeviceDesc normalize_device_desc(DeviceDesc* desc) @private {
     DeviceDesc normalized = desc == null ? {} : *desc;
     if (queue_request_is_zero(normalized.queues)) {
         normalized.queues = default_queue_request();
-    } else if (!queue_request_is_valid(normalized.queues)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (normalized.surface.is_valid()
-        && !normalized.queues.required.graphics) {
-        return gpu::INVALID_ARGUMENT~;
     }
     return normalized;
 }
@@ -51,17 +59,18 @@ fn DeviceSupport? evaluate_device_desc_support(
 ) @private {
     bool acceleration_structures = normalized.enable_ray_queries
         || normalized.enable_ray_tracing_pipelines;
-    if (acceleration_structures
-        && gpu::internal::vk::vk_acceleration_structure_heap_capacity(
-            data.state,
-        ) == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        ray_feature_heap_valid(
+            &normalized,
+            gpu::internal::vk::vk_acceleration_structure_heap_capacity(data.state),
+        ),
+        "RuntimeDesc.acceleration_structure_heap_capacity must be nonzero for ray features"
+    );
     if (normalized.enable_ray_queries
         && !gpu::internal::vk::vk_adapter_supports_ray_queries(
             data.state,
             adapter.adapter_index,
-        )!) {
+        )) {
         return {
             .supported         = false,
             .unmet_requirement = "ray queries",
@@ -71,7 +80,7 @@ fn DeviceSupport? evaluate_device_desc_support(
         && !gpu::internal::vk::vk_adapter_supports_ray_tracing_pipelines(
             data.state,
             adapter.adapter_index,
-        )!) {
+        )) {
         return {
             .supported         = false,
             .unmet_requirement = "ray tracing pipelines",
@@ -81,7 +90,7 @@ fn DeviceSupport? evaluate_device_desc_support(
         && !gpu::internal::vk::vk_adapter_supports_mesh_shaders(
             data.state,
             adapter.adapter_index,
-        )!) {
+        )) {
         return {
             .supported         = false,
             .unmet_requirement = "mesh shaders",
@@ -94,7 +103,7 @@ fn DeviceSupport? evaluate_device_desc_support(
             gpu::internal::vk::vk_acceleration_structure_heap_capacity(
                 data.state,
             ),
-        )!) {
+        )) {
         return {
             .supported         = false,
             .unmet_requirement = "acceleration structure heap capacity",
@@ -162,7 +171,7 @@ fn DeviceSupport? evaluate_device_desc_support(
     if (!gpu::internal::vk::vk_adapter_supports_device_baseline(
         data.state,
         adapter.adapter_index,
-    )!) {
+    )) {
         if (creation_diagnostics) {
             gpu::internal::vk::validate_device_baseline_support(
                 data.state,

@@ -73,7 +73,7 @@ fn void null_command_arguments_fault_without_recording_side_effects() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,

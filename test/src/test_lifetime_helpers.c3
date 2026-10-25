@@ -22,7 +22,7 @@ fn gpu::Device? create_test_device(
     defer catch (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::Adapter adapter = adapters.get(i);
         gpu::DeviceSupport support =
             gpu::supports_device_desc(&adapter)!;
         if (!support.supported) continue;
@@ -150,11 +150,11 @@ fn gpu::CompletionPoint? submit_test_queue(
     gpu::QueueKind kind,
     gpu::SubmitDesc* desc,
 ) {
-    return gpu::submit(gpu::get_queue(device, kind)!, desc);
+    return gpu::submit(gpu::get_queue(device, kind), desc);
 }
 
 fn void? wait_test_queue(gpu::Device* device, gpu::QueueKind queue) {
-    gpu::Queue target = gpu::get_queue(device, queue)!;
+    gpu::Queue target = gpu::get_queue(device, queue);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         device,
         target,
@@ -208,7 +208,7 @@ fn void? upload_test_texture_data(
     mapping[..] = data[..];
     gpu::flush_mapped_span(device, upload.span)!;
 
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         device,
         queue,
@@ -272,7 +272,7 @@ fn void? readback_test_texture_data(
     )!;
     defer (void)free_owned_span(device, &readback);
 
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         device,
         queue,

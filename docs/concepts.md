@@ -76,7 +76,8 @@ fn void? handles_and_ownership() {
     defer (void)gpu::destroy_runtime(&runtime);
 
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
-    gpu::Adapter adapter = adapters.get(0)!;
+    if (adapters.count == 0) return gpu::UNSUPPORTED_FEATURE~;
+    gpu::Adapter adapter = adapters.get(0);
     gpu::Device device = gpu::create_device(&adapter)!;
     defer (void)gpu::destroy_device(&device);
 

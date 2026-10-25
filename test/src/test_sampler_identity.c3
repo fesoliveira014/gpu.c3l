@@ -27,7 +27,7 @@ fn Runtime sampler_test_runtime() {
 }
 
 fn Device sampler_test_device(Runtime* runtime) {
-    Adapter adapter = gpu::enumerate_adapters(runtime).get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(runtime).get(0);
     return gpu::create_device(&adapter)!!;
 }
 

@@ -87,7 +87,7 @@ fn void offscreen_clear_works() @test {
         debug_name:   "offscreen_readback",
     )!!;
     defer free_owned_span(&device, &readback)!!;
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -174,7 +174,7 @@ fn void repeated_render_pass_uses_precreated_attachment() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
@@ -330,7 +330,7 @@ fn void render_textured_triangle(char[] frag_spirv, char[] inline_root, char[3] 
     gpu::flush_mapped_span(&device, verts_span)!!;
     gpu::flush_mapped_span(&device, frag_span)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -551,7 +551,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
     gpu::flush_mapped_span(&device, vertices)!!;
     gpu::flush_mapped_span(&device, color)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -785,7 +785,7 @@ fn void complete_color_state_output_matches_expected() @test {
     gpu::flush_mapped_span(&device, vertices.span)!!;
     gpu::flush_mapped_span(&device, color.span)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -906,7 +906,7 @@ fn void offscreen_render_to_mip() @test {
         debug_name:   "mip_readback",
     )!!;
     defer free_owned_span(&device, &readback)!!;
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -1034,7 +1034,7 @@ fn void render_pass_state_machine() @test {
         debug_name:   "render_pass_data",
     )!!;
     defer free_owned_span(&device, &data)!!;
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;

@@ -29,7 +29,8 @@ fn void? run() {
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
-    gpu::Adapter adapter = adapters.get(0)!;
+    if (adapters.count == 0) return gpu::UNSUPPORTED_FEATURE~;
+    gpu::Adapter adapter = adapters.get(0);
     gpu::Device device = gpu::create_device(&adapter)!;
     defer (void)gpu::destroy_device(&device);
 
@@ -107,7 +108,7 @@ fn void? run_compute(
     record.count      = COUNT;
     gpu::flush_mapped_span(device, root.span)!;
 
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE)!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(device, queue)!;
     defer (void)gpu::destroy_command_allocator(&allocator);

@@ -921,11 +921,11 @@ fn void allocator_pool_ownership_is_exact() @test {
     gpu::Device device = make_queue_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue graphics =
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::Queue compute =
-        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::Queue transfer =
-        gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+        gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
     gpu::CommandAllocator graphics_allocator =
         gpu::create_command_allocator(&device, graphics)!!;
     defer gpu::destroy_command_allocator(&graphics_allocator)!!;
@@ -969,16 +969,16 @@ fn void cross_queue_timeline_chain_validates() @test {
     };
 
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::Adapter adapter = adapters.get(i);
         if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
         gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
         defer gpu::destroy_device(&device)!!;
         gpu::Queue compute =
-            gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+            gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
         gpu::Queue graphics =
-            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
         assert(compute.id != graphics.id,
             "the timeline chain crosses distinct compute and graphics queues");
 
@@ -1017,7 +1017,7 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
     };
 
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::Adapter adapter = adapters.get(i);
         if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
@@ -1025,11 +1025,11 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
         gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
         defer gpu::destroy_device(&device)!!;
         gpu::Queue graphics =
-            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
         gpu::Queue compute =
-            gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+            gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
         gpu::Queue transfer =
-            gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+            gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
 
         assert(graphics.id != compute.id
                 && graphics.id != transfer.id

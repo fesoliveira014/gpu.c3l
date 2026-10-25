@@ -105,7 +105,7 @@ fn int main() {
     gpu::Queue graphics_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         graphics_queue,

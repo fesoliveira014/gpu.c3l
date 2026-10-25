@@ -426,10 +426,13 @@ fn Device? register_device(
     QueueSelection queues = {},
     Device* owner = null,
 ) @private {
-    if (state == null) return gpu::INVALID_ARGUMENT~;
+    assert(state != null, "device state must not be null");
     if (resource_owner == 0) resource_owner = allocate_device_resource_owner()!;
     bool has_runtime = retained_runtime != null;
-    if (has_runtime != (adapter != null)) return gpu::INVALID_ARGUMENT~;
+    assert(
+        has_runtime == (adapter != null),
+        "retained_runtime and adapter must be supplied together"
+    );
 
     Runtime runtime;
     Adapter registered_adapter;
@@ -447,7 +450,7 @@ fn Device? register_device(
 
     Surface registered_surface;
     if (presentation_surface != null) {
-        if (!has_runtime) return gpu::INVALID_ARGUMENT~;
+        assert(has_runtime, "presentation_surface must come with a retained runtime");
         SurfaceData* surface_data = require_surface(presentation_surface);
         RuntimeData* surface_runtime = resolve_runtime(&surface_data.runtime);
         if (surface_runtime != runtime_data) {
@@ -457,10 +460,10 @@ fn Device? register_device(
     }
     caps.presentation_enabled = registered_surface.is_valid();
     if ((uint)queues.selected == 0) {
-        if (queues.single_queue) return gpu::INVALID_ARGUMENT~;
+        assert(!queues.single_queue, "an empty queue selection must not request single_queue");
         queues = default_queue_selection(&caps);
     }
-    if (!queue_selection_is_well_formed(&queues)) return gpu::INVALID_ARGUMENT~;
+    assert(queue_selection_is_well_formed(&queues), "queue selection must be well formed");
     caps.queues = queues.selected;
 
     lock_device_registry();

@@ -116,7 +116,7 @@ fn gpu::Device? create_ray_tracing_test_device(
         .enable_ray_tracing_pipelines = true,
     };
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::Adapter adapter = adapters.get(i);
         gpu::DeviceSupport support =
             gpu::supports_device_desc(&adapter, &device_desc)!;
         if (!support.supported) continue;
@@ -456,7 +456,7 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         "ray-tracing pipelines require a selected compute queue");
     gpu::QueueKind queue_kind = gpu::QueueKind.COMPUTE;
     gpu::QueueRoles access = { .compute };
-    gpu::Queue queue = gpu::get_queue(&device, queue_kind)!!;
+    gpu::Queue queue = gpu::get_queue(&device, queue_kind);
 
     OwnedSpan aabbs = allocate_trace_span(
         device:       &device,

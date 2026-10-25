@@ -26,7 +26,7 @@ gpu::DeviceDesc desc = {
 };
 gpu::AdapterList adapters = gpu::enumerate_adapters(runtime);
 for (uint i = 0; i < adapters.count; i++) {
-    gpu::Adapter adapter = adapters.get(i)!;
+    gpu::Adapter adapter = adapters.get(i);
     gpu::AdapterInfo info = gpu::get_adapter_info(&adapter);
     if (info.device_class != gpu::AdapterClass.DISCRETE) continue;
     gpu::DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!;

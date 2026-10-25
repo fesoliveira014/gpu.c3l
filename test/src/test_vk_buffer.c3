@@ -96,7 +96,7 @@ fn void span_ranges_preserve_native_bounds() @test {
         == gpu::INVALID_ARGUMENT,
         "oversized invalidate range faults");
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,

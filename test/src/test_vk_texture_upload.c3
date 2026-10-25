@@ -128,7 +128,7 @@ fn void volume_texture_upload_and_readback_regions() @test {
     )!!;
 
     gpu::Queue queue =
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -379,7 +379,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -611,7 +611,7 @@ fn void compressed_upload_mip_chain_sample_and_readback() @test {
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -799,7 +799,7 @@ fn void storage_write_direct_readback() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -893,7 +893,7 @@ fn void copy_validation_faults() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -1022,7 +1022,7 @@ fn void mip_subset_view_sampled() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,

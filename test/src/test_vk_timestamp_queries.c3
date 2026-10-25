@@ -132,7 +132,7 @@ fn void host_timestamp_read_of_unwritten_slots_faults_device_busy() @test {
     defer gpu::destroy_timestamp_pool(&device, pool);
 
     gpu::Queue queue =
-        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -186,7 +186,7 @@ fn void host_timestamp_read_after_loss_succeeds() @test {
     defer gpu::destroy_timestamp_pool(&device, pool);
 
     gpu::Queue queue =
-        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -259,7 +259,7 @@ fn void run_timestamp_query_measurement(
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     gpu::Queue queue =
-        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;

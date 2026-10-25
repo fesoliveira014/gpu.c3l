@@ -17,7 +17,7 @@ stateDiagram-v2
 ## Command allocators
 
 ```c3
-gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
+gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
 gpu::CommandAllocatorDesc desc = {
     .command_buffer_capacity          = 8,    // 0 selects 32
     .debug_name                       = "frame_allocator",

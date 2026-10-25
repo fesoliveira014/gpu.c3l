@@ -23,7 +23,8 @@ sequenceDiagram
 ## Surfaces
 
 One `create_surface` per platform module. Native handles are borrowed;
-keep the window alive until `destroy_surface`.
+keep the window alive until `destroy_surface`. Each handle must be non-null,
+and the X11 window must be nonzero; a safe build panics otherwise.
 
 ```c3
 gpu::Surface surface = gpu::surface::x11::create_surface(

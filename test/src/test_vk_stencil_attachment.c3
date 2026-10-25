@@ -83,7 +83,7 @@ fn void stencil_mask_selects_fragments() @test {
     DepthCtx ctx = make_depth_ctx();
     gpu::PipelineHandle pipeline = make_stencil_pipeline(&device, &ctx, format);
     defer gpu::destroy_pipeline(&device, pipeline)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
 
@@ -234,7 +234,7 @@ fn void depth_only_pass_preserves_stencil() @test {
         with_color: false,
     );
     defer gpu::destroy_pipeline(&device, pipeline)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::TextureHandle ds = make_stencil_texture(&device, format);
@@ -313,7 +313,7 @@ fn void stencil_aspect_samples_through_the_heap() @test {
     gpu::ComputePipelineDesc fetch_desc = { .shader = fetch_shader };
     gpu::PipelineHandle fetch = gpu::create_compute_pipeline(&device, &fetch_desc)!!;
     defer gpu::destroy_pipeline(&device, fetch)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::TextureHandle ds = make_stencil_texture(&device, format, true);
@@ -423,7 +423,7 @@ fn void stencil_only_format_when_supported() @test {
         with_color: false,
     );
     defer gpu::destroy_pipeline(&device, pipeline)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::TextureHandle stencil = make_stencil_texture(&device, gpu::Format.S8_UINT);
@@ -519,7 +519,7 @@ fn void stencil_validation_faults_under() {
     assert(!gpu::supports_texture_desc(&device, &storage_stencil)!!,
         "depth-stencil formats reject storage usage");
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::PipelineHandle pipeline = make_stencil_pipeline(&device, &ctx, gpu::Format.UNDEFINED);
@@ -574,7 +574,7 @@ fn void stencil_aspect_fetches_in_fragment_stage() @test {
     };
     gpu::PipelineHandle fetch = gpu::create_graphics_pipeline(&device, &fetch_desc)!!;
     defer gpu::destroy_pipeline(&device, fetch)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::TextureHandle ds = make_stencil_texture(&device, format, true);

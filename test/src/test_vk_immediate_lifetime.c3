@@ -138,7 +138,7 @@ fn void quiescent_release_ignores_unrelated_stalled_queue() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     vk::QueueCompletionState* completion =
         vk::queue_completion_state(state, queue.id);
     vk::Semaphore blocker;

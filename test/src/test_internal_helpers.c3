@@ -117,7 +117,7 @@ fn void completion_points_poll_and_wait_without_consumption() @test {
         state:  &fixture.state,
         caps:   {},
     )!!;
-    Queue queue = get_queue(&device, QueueKind.GRAPHICS)!!;
+    Queue queue = get_queue(&device, QueueKind.GRAPHICS);
     CompletionPoint point = gpu::internal::make_completion_point(queue, 7)!!;
     CompletionPoint original = point;
 
@@ -155,7 +155,7 @@ fn void completion_point_creation_allocates_no_public_object() @test {
         state:  &fixture.state,
         caps:   {},
     )!!;
-    Queue queue = get_queue(&device, QueueKind.GRAPHICS)!!;
+    Queue queue = get_queue(&device, QueueKind.GRAPHICS);
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     ulong children_before = slot.live_children.load(AtomicOrdering.ACQUIRE);
     ulong sequence;

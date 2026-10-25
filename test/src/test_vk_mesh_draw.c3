@@ -53,7 +53,7 @@ fn gpu::Device? make_mesh_device(
     defer catch (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::Adapter adapter = adapters.get(i);
         gpu::DeviceSupport support = gpu::supports_device_desc(&adapter, &device_desc)!;
         if (!support.supported) continue;
         gpu::Device? candidate = gpu::create_device(&adapter, &device_desc);
@@ -119,7 +119,7 @@ fn void mesh_shaders_gate_on_the_feature() @test {
     assert(@catch(gpu::create_mesh_pipeline(&device, &desc)) == gpu::UNSUPPORTED_FEATURE,
         "mesh pipelines need enable_mesh_shaders");
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -164,7 +164,7 @@ fn void mesh_pipeline_draws_meshlet_triangle() @test {
     OwnedSpan readback = make_readback(&device, DP_RT * DP_RT * 4);
     defer free_owned_span(&device, &readback)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -270,7 +270,7 @@ fn void mesh_indirect_draws_execute_gpu_written_arguments() @test {
     };
     gpu::flush_mapped_span(&device, root.span)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -350,7 +350,7 @@ fn void mesh_and_vertex_pipelines_alternate_in_one_pass() @test {
     defer free_owned_span(&device, &tri)!!;
     OwnedSpan color = write_color(&device, { 1.0f, 0.0f, 0.0f, 1.0f });
     defer free_owned_span(&device, &color)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;

@@ -127,7 +127,7 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -344,7 +344,7 @@ fn void bindless_volume_write_load_and_sample() @test {
     defer gpu::destroy_pipeline(&device, sample_pipeline)!!;
 
     gpu::Queue queue =
-        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -578,7 +578,7 @@ fn void bindless_cube_upload_and_sample() @test {
         gpu::create_compute_pipeline(&device, &sample_desc)!!;
     defer gpu::destroy_pipeline(&device, sample_pipeline)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -809,7 +809,7 @@ fn void storage_write_then_fragment_sample() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -1127,7 +1127,7 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
     };
     gpu::flush_mapped_span(&device, roots.span)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -1346,7 +1346,7 @@ fn void reserved_row_addressing_samples_correct_texture() @test {
     }
     gpu::flush_mapped_span(&device, roots.span)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -1544,7 +1544,7 @@ fn void row_addressed_render_samples_shader_computed_index() @test {
     };
     gpu::TextureState target_state = { .layout = gpu::TextureLayout.UNDEFINED };
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
 

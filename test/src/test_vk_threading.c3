@@ -261,7 +261,7 @@ fn void render_view_recording_avoids_texture_view_cache_lock() @test {
     )!!;
     defer destroy_test_attachment_view(&device, &view)!!;
     vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     RenderViewGateArgs args = {
@@ -497,7 +497,7 @@ fn void? run_fresh_allocator_worker(FreshAllocatorWorkerArgs* args) {
     gpu::Queue queue = gpu::get_queue(
         args.device,
         gpu::QueueKind.GRAPHICS,
-    )!;
+    );
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 1,
     };
@@ -558,7 +558,7 @@ fn void worker_thread_reuses_explicit_allocator_buffers() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     ReuseWorkerArgs args = { .allocator = &allocator };
     Thread worker;
@@ -591,7 +591,7 @@ fn void worker_thread_reuses_explicit_allocator_buffers() @test {
 fn void begin_retry_survives_concurrent_submits_on_one_queue() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc desc = { .command_buffer_capacity = 1 };
     gpu::CommandAllocator worker_allocator = gpu::create_command_allocator(&device, queue, &desc)!!;
     gpu::CommandAllocator main_allocator = gpu::create_command_allocator(&device, queue, &desc)!!;
@@ -620,7 +620,7 @@ fn void begin_retry_survives_concurrent_submits_on_one_queue() @test {
 fn void contended_allocator_does_not_hold_the_device_resource_lock() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator blocked = gpu::create_command_allocator(
         &device,
         queue,
@@ -670,7 +670,7 @@ fn void contended_allocator_does_not_hold_the_device_resource_lock() @test {
 fn void shared_allocator_rejects_concurrent_recording() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -689,7 +689,7 @@ fn void shared_allocator_rejects_concurrent_recording() @test {
 fn void allocator_migrates_after_last_end_and_discard() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 2,
     };
@@ -732,7 +732,7 @@ fn void allocator_migrates_after_last_end_and_discard() @test {
 fn void executable_handoff_to_submit_thread_retires_to_allocator() @test {
     gpu::Device device = make_thr_device();
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 1,
     };
@@ -831,7 +831,7 @@ fn void generated_scratch_reservations_are_allocator_local() @test {
         &pipeline_desc,
     )!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::CommandAllocatorDesc allocator_desc = {
@@ -924,7 +924,7 @@ fn void concurrent_caller_owned_explicit_transfers_preserve_bytes() @test {
     gpu::Queue transfer_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.TRANSFER,
-    )!!;
+    );
     defer {
         foreach (&worker_args : args) {
             (void)free_owned_span(&device, &worker_args.readback);
@@ -1061,7 +1061,7 @@ fn void parallel_recording_across_workers() @test {
     gpu::Queue graphics_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     OwnedSpan[THR_THREADS] io_owned;
     OwnedSpan[THR_THREADS] root_owned;
     defer for (uint i = 0; i < THR_THREADS; i++) {
@@ -1177,7 +1177,7 @@ fn void parallel_recording_disjoint_texture_transitions() @test {
     gpu::Queue graphics_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     for (uint i = 0; i < THR_THREADS; i++) {
         allocators[i] = gpu::create_command_allocator(
             &device,

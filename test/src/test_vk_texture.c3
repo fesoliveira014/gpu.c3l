@@ -452,7 +452,7 @@ fn void three_dimensional_texture_barriers_use_one_array_layer() @test {
 
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -610,7 +610,7 @@ fn void texture_barrier_records_texture_states() @test {
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -685,7 +685,7 @@ fn void texture_multi_mip_barrier_covers_chain() @test {
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -723,7 +723,7 @@ fn void texture_barrier_valid_path_lowers_and_emits_once() @test {
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
@@ -808,7 +808,7 @@ fn void texture_barrier_emit_seam_captures_composed_state_masks() @test {
     };
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&command_allocator)!!;
@@ -941,7 +941,7 @@ fn void assert_present_barrier_emission(
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     defer gpu::destroy_texture(&device, texture)!!;
     gpu::Queue command_queue =
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator =
         gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;

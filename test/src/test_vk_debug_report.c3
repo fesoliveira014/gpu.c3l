@@ -562,7 +562,7 @@ fn void leak_reporters_count_leaks() @test {
     gpu::PipelineHandle first_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     gpu::PipelineHandle second_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc allocator_desc = {
         .debug_name = "leaky_command_allocator",
     };
@@ -849,7 +849,7 @@ fn void labels_record_validation_clean() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,

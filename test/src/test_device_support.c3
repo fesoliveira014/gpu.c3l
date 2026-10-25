@@ -11,7 +11,7 @@ fn RuntimeDesc device_support_runtime_desc() {
 }
 
 fn Adapter first_support_adapter(Runtime* runtime) {
-    return gpu::enumerate_adapters(runtime).get(0)!!;
+    return gpu::enumerate_adapters(runtime).get(0);
 }
 
 fn void descriptor_support_is_semantic_and_does_not_enable_state() @test {
@@ -73,9 +73,9 @@ fn void single_queue_support_and_creation_publish_one_identity() @test {
 
     Device device = gpu::create_device(&adapter, &desc)!!;
     defer gpu::destroy_device(&device)!!;
-    Queue graphics = gpu::get_queue(&device, QueueKind.GRAPHICS)!!;
-    Queue compute = gpu::get_queue(&device, QueueKind.COMPUTE)!!;
-    Queue transfer = gpu::get_queue(&device, QueueKind.TRANSFER)!!;
+    Queue graphics = gpu::get_queue(&device, QueueKind.GRAPHICS);
+    Queue compute = gpu::get_queue(&device, QueueKind.COMPUTE);
+    Queue transfer = gpu::get_queue(&device, QueueKind.TRANSFER);
 
     assert(graphics == compute && compute == transfer,
         "created single-queue roles share one queue token");
@@ -137,9 +137,9 @@ fn void single_queue_presentation_uses_selected_identity() @test {
 
     Device device = gpu::create_device(&adapter, &desc)!!;
     defer gpu::destroy_device(&device)!!;
-    Queue graphics = gpu::get_queue(&device, QueueKind.GRAPHICS)!!;
-    Queue compute = gpu::get_queue(&device, QueueKind.COMPUTE)!!;
-    Queue transfer = gpu::get_queue(&device, QueueKind.TRANSFER)!!;
+    Queue graphics = gpu::get_queue(&device, QueueKind.GRAPHICS);
+    Queue compute = gpu::get_queue(&device, QueueKind.COMPUTE);
+    Queue transfer = gpu::get_queue(&device, QueueKind.TRANSFER);
     assert(graphics == compute && compute == transfer,
         "presentation preserves the selected all-role identity");
     assert(gpu::get_device_caps(&device).presentation_enabled);
@@ -175,44 +175,6 @@ fn void single_queue_presentation_rejects_private_fallback() @test {
         == gpu::UNSUPPORTED_FEATURE);
     assert(gpu::internal::vk::stub_device_temporary_create_count() == 0,
         "private presentation fallback is rejected before device allocation");
-}
-
-fn void invalid_desc_and_stale_adapter_fault_before_backend_work() @test {
-    gpu::internal::vk::stub_set_adapter_count(1);
-    gpu::internal::vk::stub_set_device_baseline_support(true);
-    gpu::internal::vk::stub_reset_device_counts();
-    RuntimeDesc runtime_desc = device_support_runtime_desc();
-    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
-    Adapter adapter = first_support_adapter(&runtime);
-    DeviceDesc invalid = {
-        .queues = {
-            .required = { .graphics },
-            .distinct_roles = { .compute },
-        },
-    };
-
-    assert(@catch(gpu::supports_device_desc(&adapter, &invalid))
-        == gpu::INVALID_ARGUMENT);
-    assert(gpu::internal::vk::stub_device_support_query_count() == 0);
-
-    gpu::destroy_runtime(&runtime)!!;
-    assert(gpu::internal::vk::stub_device_support_query_count() == 0);
-}
-
-fn void ray_query_opt_in_requires_a_configured_runtime_heap() @test {
-    gpu::internal::vk::stub_set_adapter_count(1);
-    gpu::internal::vk::stub_set_device_baseline_support(true);
-    gpu::internal::vk::stub_reset_device_counts();
-    RuntimeDesc runtime_desc = device_support_runtime_desc();
-    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
-    defer gpu::destroy_runtime(&runtime)!!;
-    Adapter adapter = first_support_adapter(&runtime);
-    DeviceDesc desc = { .enable_ray_queries = true };
-
-    assert(@catch(gpu::supports_device_desc(&adapter, &desc))
-        == gpu::INVALID_ARGUMENT);
-    assert(gpu::internal::vk::stub_device_support_query_count() == 0,
-        "incoherent opt-in faults before backend capability work");
 }
 
 fn void coherent_ray_query_opt_in_reaches_capability_evaluation() @test {
@@ -262,7 +224,7 @@ fn void ray_tracing_pipeline_opt_in_is_independent_and_actionable() @test {
     assert(!caps.ray_queries.enabled);
     assert(caps.ray_tracing_pipelines.enabled
             && caps.ray_tracing_pipelines.max_recursion_depth == 4);
-    Queue queue = gpu::get_queue(&device, QueueKind.GRAPHICS)!!;
+    Queue queue = gpu::get_queue(&device, QueueKind.GRAPHICS);
     CommandAllocatorDesc allocator_desc = {
         .max_acceleration_structure_geometries_per_build = 1,
     };
@@ -346,41 +308,6 @@ fn void oversized_ray_query_heap_is_reported_semantically() @test {
     gpu::internal::vk::stub_set_ray_query_heap_limit(uint::max);
 }
 
-fn void single_queue_invalid_policy_faults_before_backend_work() @test {
-    gpu::internal::vk::stub_set_adapter_count(1);
-    gpu::internal::vk::stub_set_device_baseline_support(true);
-    gpu::internal::vk::stub_reset_device_counts();
-    RuntimeDesc runtime_desc = device_support_runtime_desc();
-    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
-    defer gpu::destroy_runtime(&runtime)!!;
-    Adapter adapter = first_support_adapter(&runtime);
-    DeviceDesc empty_required = {
-        .queues = {
-            .single_queue = true,
-        },
-    };
-    DeviceDesc distinct_role = {
-        .queues = {
-            .required = { .graphics, .compute, .transfer },
-            .distinct_roles = { .transfer },
-            .single_queue = true,
-        },
-    };
-
-    assert(@catch(gpu::supports_device_desc(&adapter, &empty_required))
-        == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::create_device(&adapter, &empty_required))
-        == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::supports_device_desc(&adapter, &distinct_role))
-        == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::create_device(&adapter, &distinct_role))
-        == gpu::INVALID_ARGUMENT);
-    assert(gpu::internal::vk::stub_device_support_query_count() == 0,
-        "invalid single-queue policies stop before support queries");
-    assert(gpu::internal::vk::stub_device_temporary_create_count() == 0,
-        "invalid single-queue policies allocate no device state");
-}
-
 fn void unavailable_queue_topology_is_reported_semantically() @test {
     gpu::internal::vk::stub_set_adapter_count(1);
     gpu::internal::vk::stub_set_device_baseline_support(true);
@@ -400,6 +327,28 @@ fn void unavailable_queue_topology_is_reported_semantically() @test {
 
     assert(!support.supported);
     assert(support.unmet_requirement == "queue topology");
+}
+
+fn void support_query_reports_adapter_shortfall_without_panic() @test {
+    gpu::internal::vk::stub_set_adapter_count(1);
+    gpu::internal::vk::stub_set_device_baseline_support(true);
+    gpu::internal::vk::stub_reset_device_counts();
+    RuntimeDesc runtime_desc = device_support_runtime_desc();
+    Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
+    defer gpu::destroy_runtime(&runtime)!!;
+    Adapter adapter = first_support_adapter(&runtime);
+    DeviceDesc desc = {
+        .queues = {
+            .required       = { .graphics, .transfer },
+            .distinct_roles = { .transfer },
+        },
+    };
+
+    DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!!;
+
+    assert(!support.supported, "the adapter has no transfer queue of its own");
+    assert(support.unmet_requirement.len > 0,
+        "the shortfall is reported, not treated as a broken rule");
 }
 
 fn void unavailable_sparse_textures_are_reported_semantically() @test {

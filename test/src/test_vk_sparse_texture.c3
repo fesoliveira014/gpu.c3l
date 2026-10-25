@@ -949,7 +949,7 @@ fn void sparse_texture_real_lifecycle_when_supported() @test {
     for (uint adapter_index = 0;
         adapter_index < adapters.count;
         adapter_index++) {
-        gpu::Adapter adapter = adapters.get(adapter_index)!!;
+        gpu::Adapter adapter = adapters.get(adapter_index);
         if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
@@ -1072,7 +1072,7 @@ fn void sparse_texture_real_lifecycle_when_supported() @test {
                 gpu::Queue queue = gpu::get_queue(
                     &device,
                     queue_kind,
-                )!!;
+                );
                 gpu::CommandAllocator allocator =
                     gpu::create_command_allocator(&device, queue)!!;
                 gpu::CommandList commands =

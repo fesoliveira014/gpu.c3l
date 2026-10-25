@@ -107,7 +107,7 @@ fn QueueRoles queue_selection_roles(
     return selection.identity_roles[queue_selection_id(selection, kind)];
 }
 
-fn void? add_queue_role_identity(
+fn void add_queue_role_identity(
     QueueSelection* selection,
     QueueKind kind,
     ulong native_id,
@@ -121,9 +121,10 @@ fn void? add_queue_role_identity(
         }
     }
     if (identity == selection.identity_count) {
-        if (selection.identity_count == MAX_SELECTED_QUEUE_IDENTITIES) {
-            return gpu::INVALID_ARGUMENT~;
-        }
+        assert(
+            selection.identity_count < MAX_SELECTED_QUEUE_IDENTITIES,
+            "queue identity table must not overflow"
+        );
         identity_keys[identity] = native_id;
         selection.identity_count++;
     }
@@ -131,15 +132,15 @@ fn void? add_queue_role_identity(
     QueueRoles* roles = &selection.identity_roles[identity];
     switch (kind) {
         case QueueKind.GRAPHICS:
-            if (roles.graphics) return gpu::INVALID_ARGUMENT~;
+            assert(!roles.graphics, "graphics role must be added once");
             roles.graphics = true;
             selection.graphics_id = (ushort)identity;
         case QueueKind.COMPUTE:
-            if (roles.compute) return gpu::INVALID_ARGUMENT~;
+            assert(!roles.compute, "compute role must be added once");
             roles.compute = true;
             selection.compute_id = (ushort)identity;
         case QueueKind.TRANSFER:
-            if (roles.transfer) return gpu::INVALID_ARGUMENT~;
+            assert(!roles.transfer, "transfer role must be added once");
             roles.transfer = true;
             selection.transfer_id = (ushort)identity;
     }
@@ -151,9 +152,7 @@ fn QueueSelection? queue_selection_from_native_ids(
     ulong compute,
     ulong transfer,
 ) @private {
-    if (!gpu::internal::queue_request_is_valid(request)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(gpu::internal::queue_request_is_valid(request), "queue request must be valid");
 
     QueueSelection selection = {
         .selected       = request.required,
@@ -167,7 +166,7 @@ fn QueueSelection? queue_selection_from_native_ids(
             kind:          QueueKind.GRAPHICS,
             native_id:     graphics,
             identity_keys: identity_keys[..],
-        )!;
+        );
     }
     if (request.required.compute) {
         add_queue_role_identity(
@@ -175,7 +174,7 @@ fn QueueSelection? queue_selection_from_native_ids(
             kind:          QueueKind.COMPUTE,
             native_id:     compute,
             identity_keys: identity_keys[..],
-        )!;
+        );
     }
     if (request.required.transfer) {
         add_queue_role_identity(
@@ -183,7 +182,7 @@ fn QueueSelection? queue_selection_from_native_ids(
             kind:          QueueKind.TRANSFER,
             native_id:     transfer,
             identity_keys: identity_keys[..],
-        )!;
+        );
     }
 
     for (uint identity = 0; identity < selection.identity_count; identity++) {
@@ -204,9 +203,7 @@ fn QueueSelection? queue_selection_for_request(
     bool transfer_aliases_graphics,
     bool transfer_aliases_compute,
 ) @private {
-    if (!gpu::internal::queue_request_is_valid(request)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(gpu::internal::queue_request_is_valid(request), "queue request must be valid");
 
     ulong next_native_id;
     ulong graphics_native_id;
@@ -372,13 +369,14 @@ fn void? validate_queue_access(
     }
 }
 
-fn void? validate_selected_queue_kind(
+fn void validate_selected_queue_kind(
     gpu::internal::DeviceOperation* operation,
     QueueKind kind,
 ) @private {
-    if (!queue_role_is_selected(selected_queue_role_mask(operation), kind)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        queue_role_is_selected(selected_queue_role_mask(operation), kind),
+        "kind must be a queue role the device exposes"
+    );
 }
 
 fn uint selected_queue_id(

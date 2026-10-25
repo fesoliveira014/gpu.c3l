@@ -68,7 +68,7 @@ fn gpu::CommandList? begin_command_pin(gpu::Device* device) {
     if (data == null) abort("gpu: stale Device");
     gpu::CommandAllocator allocator = {
         .device = *device,
-        .queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!,
+        .queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS),
         .handle = {
             .owner = gpu::internal::resource_owner_tag(
                 data.resource_owner,
@@ -153,7 +153,7 @@ fn void command_allocator_public_lifecycle_is_transactional() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -204,7 +204,7 @@ fn void command_allocator_creation_rejects_before_publication() @test {
     gpu::Queue foreign = gpu::get_queue(
         &second,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocatorDesc oversized = {
         .command_buffer_capacity = gpu::MAX_COMMAND_ALLOCATOR_CAPACITY + 1,
     };
@@ -212,7 +212,7 @@ fn void command_allocator_creation_rejects_before_publication() @test {
     gpu::Queue queue = gpu::get_queue(
         &first,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     assert(@catch(gpu::create_command_allocator(
         &first,
         queue,
@@ -372,7 +372,7 @@ fn void failed_submit_preserves_command_lifetime_pins() @test {
     };
     gpu::SubmitDesc desc = { .command_lists = lists[..] };
 
-    fault submit_fault = @catch(gpu::submit(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!, &desc));
+    fault submit_fault = @catch(gpu::submit(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS), &desc));
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     gpu::internal::DeviceSlotControl after_failure =
         (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
@@ -380,7 +380,7 @@ fn void failed_submit_preserves_command_lifetime_pins() @test {
         slot.live_children.load(AtomicOrdering.ACQUIRE);
 
     fixture.state.submit_busy = false;
-    gpu::submit(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!, &desc)!!;
+    gpu::submit(gpu::get_queue(&device, gpu::QueueKind.GRAPHICS), &desc)!!;
     gpu::internal::DeviceSlotControl after_success =
         (gpu::internal::DeviceSlotControl)slot.control.load(AtomicOrdering.ACQUIRE);
 
@@ -418,7 +418,7 @@ fn void device_loss_after_backend_submit_still_consumes_every_token() @test {
     gpu::SubmitDesc desc = { .command_lists = lists[..] };
 
     gpu::submit(
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!,
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS),
         &desc,
     )!!;
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
@@ -448,7 +448,7 @@ fn void command_record_is_not_reused_before_discard_returns() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandList first = begin_command_pin(&device)!!;
     DiscardCommandWorkerArgs worker_args = { .commands = first };
     Thread worker;

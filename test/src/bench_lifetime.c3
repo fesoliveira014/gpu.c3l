@@ -24,7 +24,7 @@ fn gpu::Device? create_bench_device(
     defer catch (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::Adapter adapter = adapters.get(i);
         gpu::DeviceSupport support =
             gpu::supports_device_desc(&adapter)!;
         if (!support.supported) continue;
@@ -54,11 +54,11 @@ fn gpu::CompletionPoint? submit_bench_queue(
     gpu::QueueKind kind,
     gpu::SubmitDesc* desc,
 ) {
-    return gpu::submit(gpu::get_queue(device, kind)!, desc);
+    return gpu::submit(gpu::get_queue(device, kind), desc);
 }
 
 fn void? wait_bench_queue(gpu::Device* device, gpu::QueueKind queue) {
-    gpu::Queue target = gpu::get_queue(device, queue)!;
+    gpu::Queue target = gpu::get_queue(device, queue);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         device,
         target,

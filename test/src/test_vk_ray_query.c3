@@ -39,7 +39,7 @@ fn gpu::Device? create_ray_query_test_device(
         .enable_ray_queries = true,
     };
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::Adapter adapter = adapters.get(i);
         gpu::DeviceSupport support =
             gpu::supports_device_desc(&adapter, &device_desc)!;
         if (!support.supported) continue;
@@ -214,7 +214,7 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
         destroy_test_device(&device)!!;
         runtime = {};
     }
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
 
     OwnedSpan vertices = allocate_ray_query_span(
         device:       &device,
@@ -623,7 +623,7 @@ fn void lavapipe_aabb_candidates_require_explicit_confirmation() @test {
         destroy_test_device(&device)!!;
         runtime = {};
     }
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     OwnedSpan aabbs = allocate_ray_query_span(
         device:       &device,
         size:         6 * float::size,

@@ -1818,7 +1818,7 @@ fn bool run_real_sparse_bind_dimension(
     foreach (&bind : opaque[:opaque_count]) {
         bind.allocation = allocation;
     }
-    gpu::Queue queue = gpu::get_queue(device, queue_kind)!!;
+    gpu::Queue queue = gpu::get_queue(device, queue_kind);
     gpu::SparseTextureBindDesc bind_desc = {
         .texture = texture,
         .tiles   = tiles[..],
@@ -1956,7 +1956,7 @@ fn void real_sparse_bind_use_and_unbind_when_supported() @test {
     bool ran_2d;
     bool ran_3d;
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::Adapter adapter = adapters.get(i);
         if (!gpu::supports_device_desc(
             &adapter,
             &device_desc,

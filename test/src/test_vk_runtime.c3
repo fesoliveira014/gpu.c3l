@@ -15,8 +15,8 @@ fn void runtimes_enumerate_vulkan_adapters_independently() @test {
     assert(first_adapters.count > 0, "the configured Vulkan ICD exposes an adapter");
     assert(second_adapters.count == first_adapters.count, "each runtime sees the same native adapters");
 
-    gpu::Adapter first_adapter = first_adapters.get(0)!!;
-    gpu::Adapter second_adapter = second_adapters.get(0)!!;
+    gpu::Adapter first_adapter = first_adapters.get(0);
+    gpu::Adapter second_adapter = second_adapters.get(0);
     gpu::AdapterInfo first_info = gpu::get_adapter_info(&first_adapter);
     gpu::AdapterInfo second_info = gpu::get_adapter_info(&second_adapter);
     gpu::AdapterDiagnostics diagnostics = gpu::get_adapter_diagnostics(&first_adapter);

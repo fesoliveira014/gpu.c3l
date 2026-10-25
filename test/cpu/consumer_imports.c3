@@ -4,6 +4,12 @@ import gpu;
 
 fn void public_module_imports() @test {}
 
+fn void check_value_lookups(gpu::Runtime* runtime, gpu::Device* device) {
+    gpu::AdapterList adapters = gpu::enumerate_adapters(runtime);
+    gpu::Adapter adapter = adapters.get(0);
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS);
+}
+
 module gpu_surface_win32_import_only;
 
 import gpu::surface::win32;

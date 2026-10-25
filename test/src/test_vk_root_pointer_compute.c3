@@ -21,7 +21,7 @@ fn void dispatch_root_probe(
     gpu::PipelineHandle pipeline,
     gpu::GpuAddress root,
 ) {
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -107,7 +107,7 @@ fn void root_pointer_compute_readback() @test {
     root.count = COUNT;
     gpu::flush_mapped_span(&device, root_span)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -191,7 +191,7 @@ fn void matrix_and_array_root_round_trips() @test {
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
@@ -361,7 +361,7 @@ fn void inline_root_payload_reaches_shader() @test {
     gpu::PipelineHandle pipeline = gpu::create_compute_pipeline(&device, &pipeline_desc)!!;
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;

@@ -48,7 +48,7 @@ fn void mismatched_previous_use_remains_explicit_at_recording() @test {
     gpu::TextureHandle texture = make_transition_texture(&device);
     defer gpu::destroy_texture(&device, texture)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -88,7 +88,7 @@ fn void explicit_transition_copy_and_sample_submit() @test {
     for (uint i = 0; i < mapping.len; i++) mapping[i] = (char)i;
     gpu::flush_mapped_span(&device, upload.span)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -153,7 +153,7 @@ fn void partial_mip_transition_copy_submits() @test {
         .base_mip  = 1,
         .mip_count = 1,
     };
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -215,7 +215,7 @@ fn void many_explicit_texture_transitions_submit() @test {
         }
     }
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
