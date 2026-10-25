@@ -300,13 +300,14 @@ if (gpu::is_device_lost(&device)) return LOST_DEVICE~;
 gpu::invalidate_mapped_span(&device, output.span)!;
 float* out_data = (float*)output.bytes.ptr;
 for (uint i = 0; i < COUNT; i++) {
-    if (out_data[i] != (float)i * 2.0f) return gpu::INVALID_ARGUMENT~;
+    if (out_data[i] != (float)i * 2.0f) return WRONG_RESULT~;
 }
 ```
 
 If the device was lost, the wait still returned but the output is undefined,
-so the program checks `is_device_lost` before trusting it. `LOST_DEVICE` is
-the program's own fault, declared with `faultdef LOST_DEVICE;`.
+so the program checks `is_device_lost` before trusting it. `LOST_DEVICE` and
+`WRONG_RESULT` are the program's own faults, declared with
+`faultdef LOST_DEVICE, WRONG_RESULT;`.
 
 ### Run
 

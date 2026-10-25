@@ -4,6 +4,8 @@ import gpu;
 
 fn void public_module_imports() @test {}
 
+$assert !$defined(gpu::INVALID_ARGUMENT);
+
 fn void check_value_lookups(gpu::Runtime* runtime, gpu::Device* device) {
     gpu::AdapterList adapters = gpu::enumerate_adapters(runtime);
     gpu::Adapter adapter = adapters.get(0);

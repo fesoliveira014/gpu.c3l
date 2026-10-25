@@ -60,7 +60,7 @@ Fallible operations return `T?` or `void?` and fail with a named fault:
 
 ```c3
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc);
-return INVALID_ARGUMENT~;
+return UNSUPPORTED_FEATURE~;
 ```
 
 Do not use bool out-parameters, null returns, `-1` sentinels, or global
@@ -126,8 +126,8 @@ K&R:
 
 ```c3
 fn void? allocate_texture_storage(Device* device, TextureDesc* desc) {
-    if (desc == null || desc.width == 0) {
-        return INVALID_ARGUMENT~;
+    if (!supports_texture_format(device, desc.format)) {
+        return UNSUPPORTED_FEATURE~;
     }
 }
 ```

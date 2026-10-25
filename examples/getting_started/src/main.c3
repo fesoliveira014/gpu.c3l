@@ -3,7 +3,7 @@ module hello_gpu;
 import gpu;
 import std::io;
 
-faultdef LOST_DEVICE;
+faultdef LOST_DEVICE, WRONG_RESULT;
 
 const char[*] DOUBLER_SPIRV = $embed("../shaders/doubler.comp.spv");
 const uint COUNT = 256;
@@ -91,7 +91,7 @@ fn void? run() {
     gpu::invalidate_mapped_span(&device, output.span)!;
     float* out_data = (float*)output.bytes.ptr;
     for (uint i = 0; i < COUNT; i++) {
-        if (out_data[i] != (float)i * 2.0f) return gpu::INVALID_ARGUMENT~;
+        if (out_data[i] != (float)i * 2.0f) return WRONG_RESULT~;
     }
 }
 

@@ -196,9 +196,6 @@ faultdef
     // Runtime failure: a valid capability, layer, presentation path, feature,
     // or exact semantic capacity is unavailable.
     UNSUPPORTED_FEATURE,
-    // Always checked for required host-safety, safe-lowering, and cold-path
-    // configuration causes.
-    INVALID_ARGUMENT,
     // Always checked lifecycle/safe-snapshot cause, or runtime backend result:
     // a transition is incompatible with authoritative state, command execution
     // lacks a usable pipeline snapshot, or native surface ownership conflicts.
