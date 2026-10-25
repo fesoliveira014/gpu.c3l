@@ -1642,4 +1642,3 @@ fn void discard_consumes_active_render_pass_recording() @test {
     gpu::destroy_command_allocator(&command_allocator)!!;
     destroy_test_device(&device)!!;
 }
-
