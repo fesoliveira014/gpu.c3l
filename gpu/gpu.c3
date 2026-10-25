@@ -3337,7 +3337,8 @@ fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain, 
    Externally synchronize submit, present, and sparse-bind host calls on the
    same native queue, including aliased roles.
    Always checked: image/point identity, ownership, publication, and lifecycle.
-   An image that is not the swapchain's current acquired image, or a point
+   A stale or already-presented image returns INVALID_RESOURCE_STATE. An image
+   whose index or texture does not match the current acquisition, or a point
    other than the one the readiness-consuming submit returned, aborts.
    Runtime failures: host/device out-of-memory and pre-submit WAIT_TIMEOUT
    preserve the image. Success and every other submitted result consume it.

@@ -123,10 +123,10 @@ transitions around the application's lists in that submit. `present` takes
 that submit's completion point and consumes the image on success. `WAIT_TIMEOUT` from `present` leaves the image
 intact.
 
-`image` is not null; a violation panics in safe builds. A completion point
-other than the one that submit returned, or an image that is not the
-swapchain's current acquired image (for example a copy that was already
-presented), terminates instead of returning a fault.
+`image` is not null; a violation panics in safe builds. A stale or
+already-presented image returns `INVALID_RESOURCE_STATE`. An image whose index
+or texture does not match the current acquisition, or a completion point other
+than the one that submit returned, terminates instead of returning a fault.
 
 ## Resize and destroy
 
