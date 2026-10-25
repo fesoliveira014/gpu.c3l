@@ -977,7 +977,7 @@ fn void offscreen_render_to_mip() @test {
     }
 }
 
-fn void graphics_pipeline_depth_format_validation() @test {
+fn void graphics_pipeline_with_depth_format_creates() @test {
     gpu::Device device = make_offscreen_test_device();
     defer destroy_test_device(&device)!!;
 
@@ -997,22 +997,6 @@ fn void graphics_pipeline_depth_format_validation() @test {
     };
     gpu::PipelineHandle depth_pipeline = gpu::create_graphics_pipeline(&device, &with_depth)!!;
     gpu::destroy_pipeline(&device, depth_pipeline)!!;
-
-    gpu::GraphicsPipelineDesc color_as_depth = {
-        .vertex_shader   = vert,
-        .fragment_shader = frag,
-        .color_formats   = pipeline_color_formats[..],
-        .depth_format    = gpu::Format.RGBA8_UNORM,
-    };
-    assert(@catch(gpu::create_graphics_pipeline(&device, &color_as_depth)) == gpu::INVALID_ARGUMENT,
-        "a color format used as depth faults INVALID_ARGUMENT");
-
-    gpu::GraphicsPipelineDesc no_attachments = {
-        .vertex_shader   = vert,
-        .fragment_shader = frag,
-    };
-    assert(@catch(gpu::create_graphics_pipeline(&device, &no_attachments)) == gpu::INVALID_ARGUMENT,
-        "zero color formats with no depth format faults INVALID_ARGUMENT");
 }
 
 fn void render_pass_state_machine() @test {

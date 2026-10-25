@@ -1199,7 +1199,8 @@ const ColorWriteMask COLOR_WRITE_ALL = {
 };
 
 <* Borrowed SPIR-V input for one pipeline stage. A null entry point selects
-   `main`; the enclosing field determines the role. Storage is call-scoped. *>
+   `main`; a name is 1 to `MAX_SHADER_ENTRY_POINT_BYTES` bytes long. The
+   enclosing field determines the role. Storage is call-scoped. *>
 struct ShaderDesc {
     char[]  spirv;
     ZString entry_point;

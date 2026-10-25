@@ -163,16 +163,6 @@ fn bool front_face_valid(gpu::FrontFace face) {
     }
 }
 
-fn bool polygon_mode_valid(gpu::PolygonMode mode) {
-    switch (mode) {
-        case gpu::PolygonMode.FILL:
-        case gpu::PolygonMode.LINE:
-            return true;
-        default:
-            return false;
-    }
-}
-
 fn bool blend_factor_valid(gpu::BlendFactor factor) {
     switch (factor) {
         case gpu::BlendFactor.ZERO:
@@ -234,11 +224,6 @@ fn bool color_format_is_integer(gpu::Format format) @private {
         || format == gpu::Format.R32_UINT;
 }
 
-<* Whether the fraction lies in [0, 1]; NaN and infinities are not. *>
-fn bool min_sample_shading_valid(float fraction) @private {
-    return fraction >= 0.0f && fraction <= 1.0f;
-}
-
 fn void? check_polygon_mode_support(gpu::PolygonMode mode, bool line_supported) {
     if (mode == gpu::PolygonMode.LINE && !line_supported) return gpu::UNSUPPORTED_FEATURE~;
 }
@@ -247,34 +232,12 @@ fn void? validate_graphics_pipeline_desc(
     VkDeviceState* state,
     gpu::GraphicsPipelineDesc* desc,
 ) {
-    if (desc == null
-        || desc.color_formats.len > gpu::MAX_COLOR_ATTACHMENTS
-        || (desc.color_formats.len > 0 && desc.color_formats.ptr == null)
-        || !gpu::internal::sample_count_valid(desc.sample_count)
-        || !min_sample_shading_valid(desc.min_sample_shading)
-        || !polygon_mode_valid(desc.polygon_mode)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-
     if (desc.min_sample_shading > 0.0f && !state.caps.sample_rate_shading) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
 
-    if (desc.depth_format != gpu::Format.UNDEFINED
-        && !gpu::internal::format_is_depth_stencil(desc.depth_format)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (desc.color_formats.len == 0
-        && desc.depth_format == gpu::Format.UNDEFINED) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     gpu::TextureUsage color_usage = { .color_attach };
     foreach (format : desc.color_formats) {
-        if (format == gpu::Format.UNDEFINED
-            || gpu::internal::format_is_depth_stencil(format)
-            || format_to_vk(format) == vk::Format.UNDEFINED) {
-            return gpu::INVALID_ARGUMENT~;
-        }
         if (!format_supports_sample_count(
             state,
             format,
@@ -359,7 +322,7 @@ fn vk::Pipeline? create_raster_pipeline_native(
                 vk::Format vk_format = format_to_vk(
                     key.color_formats[i],
                 );
-                if (vk_format == vk::Format.UNDEFINED) return gpu::INVALID_ARGUMENT~;
+                assert(vk_format != vk::Format.UNDEFINED, "pipeline key color formats must map to Vulkan formats");
                 *format = vk_format;
             }
         }
@@ -519,16 +482,16 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
                 release_prepared_shader_locked(
                     state,
                     prepared_vertex_shader,
-                )!!;
+                );
                 release_prepared_shader_locked(
                     state,
                     prepared_fragment_shader,
-                )!!;
+                );
                 return handle;
             }
             entry.refcount--;
-            release_prepared_shader_locked(state, prepared_vertex_shader)!!;
-            release_prepared_shader_locked(state, prepared_fragment_shader)!!;
+            release_prepared_shader_locked(state, prepared_vertex_shader);
+            release_prepared_shader_locked(state, prepared_fragment_shader);
             return gpu::SLOT_TABLE_FULL~;
         }
     }
@@ -596,11 +559,11 @@ fn gpu::PipelineHandle? create_graphics_pipeline_from_modules(
             release_prepared_shader_locked(
                 state,
                 prepared_vertex_shader,
-            )!!;
+            );
             release_prepared_shader_locked(
                 state,
                 prepared_fragment_shader,
-            )!!;
+            );
             entry_index = raced;
             pipeline = state.pipeline_cache.entries[raced].pipeline;
         } else if (try idx = insert_entry(
@@ -716,7 +679,6 @@ fn void? validate_mesh_pipeline_desc(
     VkDeviceState* state,
     gpu::MeshPipelineDesc* desc,
 ) @private {
-    if (desc == null) return gpu::INVALID_ARGUMENT~;
     if (!state.mesh_shaders_enabled) return gpu::UNSUPPORTED_FEATURE~;
     if (desc.task_shader.spirv.len > 0 && !state.task_shaders_enabled) {
         return gpu::UNSUPPORTED_FEATURE~;
@@ -843,11 +805,11 @@ fn gpu::PipelineHandle? create_mesh_pipeline_from_modules(
                 .layout   = entry.layout,
                 .entry    = hit,
             })) {
-                foreach (&identity : prepared) release_prepared_shader_locked(state, identity)!!;
+                foreach (&identity : prepared) release_prepared_shader_locked(state, identity);
                 return handle;
             }
             entry.refcount--;
-            foreach (&identity : prepared) release_prepared_shader_locked(state, identity)!!;
+            foreach (&identity : prepared) release_prepared_shader_locked(state, identity);
             return gpu::SLOT_TABLE_FULL~;
         }
     }
@@ -905,7 +867,7 @@ fn gpu::PipelineHandle? create_mesh_pipeline_from_modules(
     if (raced != PIPELINE_ENTRY_NONE) {
         vk::destroy_pipeline(state.device, pipeline, null);
         state.pipeline_cache.entries[raced].refcount++;
-        foreach (&identity : prepared) release_prepared_shader_locked(state, identity)!!;
+        foreach (&identity : prepared) release_prepared_shader_locked(state, identity);
         entry_index = raced;
         pipeline = state.pipeline_cache.entries[raced].pipeline;
     } else if (try idx = insert_entry(

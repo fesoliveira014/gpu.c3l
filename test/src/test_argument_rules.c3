@@ -350,3 +350,99 @@ fn void sampler_rule_rejects_each_malformed_clause() @test {
     weak.anisotropy_enable = false;
     assert(gpu::internal::sampler_desc_valid(&weak), "inactive anisotropy is ignored");
 }
+
+fn void shader_entry_point_rule_bounds_the_name() @test {
+    assert(gpu::internal::shader_entry_point_valid(null), "a null name selects main");
+    assert(gpu::internal::shader_entry_point_valid("main"));
+    assert(!gpu::internal::shader_entry_point_valid(""), "an empty name is invalid");
+
+    char[MAX_SHADER_ENTRY_POINT_BYTES + 2] name;
+    name[..] = 'a';
+    name[MAX_SHADER_ENTRY_POINT_BYTES] = 0;
+    assert(gpu::internal::shader_entry_point_valid((ZString)&name[0]), "the longest name is valid");
+    name[MAX_SHADER_ENTRY_POINT_BYTES] = 'a';
+    name[MAX_SHADER_ENTRY_POINT_BYTES + 1] = 0;
+    assert(!gpu::internal::shader_entry_point_valid((ZString)&name[0]), "one byte over the limit is invalid");
+}
+
+fn void graphics_attachment_rules_reject_each_clause() @test {
+    assert(gpu::internal::min_sample_shading_valid(0.0f));
+    assert(gpu::internal::min_sample_shading_valid(1.0f));
+    assert(!gpu::internal::min_sample_shading_valid(1.5f), "a fraction above 1 is invalid");
+    assert(!gpu::internal::min_sample_shading_valid(-0.5f), "a negative fraction is invalid");
+    assert(!gpu::internal::min_sample_shading_valid(float::nan), "NaN is invalid");
+
+    assert(gpu::internal::polygon_mode_valid(PolygonMode.LINE));
+    assert(!gpu::internal::polygon_mode_valid(bitcast(9, PolygonMode)), "polygon mode must be defined");
+
+    Format[2] colors = { Format.RGBA8_UNORM, Format.BGRA8_SRGB };
+    assert(gpu::internal::color_formats_valid(colors[..]));
+    assert(gpu::internal::color_formats_valid({}), "an empty list is valid");
+    Format[2] undefined_color = { Format.RGBA8_UNORM, Format.UNDEFINED };
+    assert(!gpu::internal::color_formats_valid(undefined_color[..]), "UNDEFINED is not a color format");
+    Format[1] depth_color = { Format.D32_FLOAT };
+    assert(!gpu::internal::color_formats_valid(depth_color[..]), "a depth format is not a color format");
+    Format[1] unknown_color = { bitcast(900, Format) };
+    assert(!gpu::internal::color_formats_valid(unknown_color[..]), "an unknown format is not a color format");
+
+    assert(gpu::internal::depth_format_valid(Format.UNDEFINED));
+    assert(gpu::internal::depth_format_valid(Format.D24_UNORM_S8_UINT));
+    assert(!gpu::internal::depth_format_valid(Format.RGBA8_UNORM), "a color format is not a depth format");
+}
+
+fn void ray_tracing_pipeline_rules_reject_each_clause() @test {
+    ShaderDesc[1] raygen = { { .spirv = (char[])"x" } };
+    ShaderDesc[1] miss = { { .spirv = (char[])"x" } };
+    RayTracingPipelineDesc valid = { .ray_generation_shaders = raygen[..] };
+    assert(gpu::internal::ray_tracing_pipeline_desc_valid(&valid));
+
+    RayTracingPipelineDesc empty_raygen = {};
+    assert(!gpu::internal::ray_tracing_pipeline_desc_valid(&empty_raygen), "ray generation must not be empty");
+
+    RayTracingPipelineDesc null_miss = valid;
+    null_miss.miss_shaders = ((ShaderDesc*)null)[:1];
+    assert(!gpu::internal::ray_tracing_pipeline_desc_valid(&null_miss), "a null miss slice needs length 0");
+    RayTracingPipelineDesc null_hit = valid;
+    null_hit.hit_groups = ((RayTracingHitGroupDesc*)null)[:1];
+    assert(!gpu::internal::ray_tracing_pipeline_desc_valid(&null_hit), "a null hit slice needs length 0");
+    RayTracingPipelineDesc null_callable = valid;
+    null_callable.callable_shaders = ((ShaderDesc*)null)[:1];
+    assert(!gpu::internal::ray_tracing_pipeline_desc_valid(&null_callable), "a null callable slice needs length 0");
+
+    RayTracingPipelineDesc huge_miss = valid;
+    huge_miss.miss_shaders = (&miss[0])[:(usz)uint::max + 1];
+    assert(!gpu::internal::ray_tracing_pipeline_desc_valid(&huge_miss), "a slice over uint::max is invalid");
+
+    RayTracingPipelineDesc summed = valid;
+    summed.ray_generation_shaders = (&raygen[0])[:uint::max];
+    summed.miss_shaders = (&miss[0])[:2];
+    assert(!gpu::internal::ray_tracing_pipeline_desc_valid(&summed), "the summed count must fit uint");
+}
+
+fn void ray_tracing_stage_rules_reject_each_clause() @test {
+    ShaderDesc hit = { .spirv = (char[])"x" };
+    RayTracingHitGroupDesc[1] triangles = { { .kind = RayTracingHitGroupKind.TRIANGLES, .closest_hit_shader = &hit } };
+    assert(gpu::internal::ray_tracing_hit_groups_valid(triangles[..]));
+    triangles[0].intersection_shader = &hit;
+    assert(!gpu::internal::ray_tracing_hit_groups_valid(triangles[..]), "TRIANGLES must not have an intersection shader");
+
+    RayTracingHitGroupDesc[1] procedural = { { .kind = RayTracingHitGroupKind.PROCEDURAL } };
+    assert(!gpu::internal::ray_tracing_hit_groups_valid(procedural[..]), "PROCEDURAL needs an intersection shader");
+    procedural[0].intersection_shader = &hit;
+    assert(gpu::internal::ray_tracing_hit_groups_valid(procedural[..]));
+
+    RayTracingHitGroupDesc[1] unknown = { { .kind = bitcast(7, RayTracingHitGroupKind) } };
+    assert(!gpu::internal::ray_tracing_hit_groups_valid(unknown[..]), "the kind must be defined");
+
+    ShaderDesc[1] raygen = { { .spirv = (char[])"x" } };
+    RayTracingPipelineDesc desc = {
+        .ray_generation_shaders = raygen[..],
+        .hit_groups             = procedural[..],
+    };
+    assert(gpu::internal::ray_tracing_entry_points_valid(&desc));
+    raygen[0].entry_point = "";
+    assert(!gpu::internal::ray_tracing_entry_points_valid(&desc), "a ray generation entry must be valid");
+    raygen[0].entry_point = null;
+    hit.entry_point = "";
+    assert(!gpu::internal::ray_tracing_entry_points_valid(&desc), "a hit group entry must be valid");
+}

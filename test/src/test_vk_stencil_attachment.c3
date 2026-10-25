@@ -483,24 +483,6 @@ fn void stencil_validation_faults_under() {
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
     DepthCtx ctx = make_depth_ctx();
-    gpu::Format[1] color_formats = { gpu::Format.RGBA8_UNORM };
-    gpu::GraphicsPipelineDesc color_as_depth = {
-        .vertex_shader   = ctx.vert,
-        .fragment_shader = ctx.frag,
-        .color_formats   = color_formats[..],
-        .depth_format    = gpu::Format.RGBA8_UNORM,
-    };
-    assert(@catch(gpu::create_graphics_pipeline(&device, &color_as_depth)) == gpu::INVALID_ARGUMENT,
-        "a color format is not a depth-stencil format");
-    gpu::Format[1] depth_as_color = { gpu::Format.D24_UNORM_S8_UINT };
-    gpu::GraphicsPipelineDesc stencil_as_color = {
-        .vertex_shader   = ctx.vert,
-        .fragment_shader = ctx.frag,
-        .color_formats   = depth_as_color[..],
-    };
-    assert(@catch(gpu::create_graphics_pipeline(&device, &stencil_as_color)) == gpu::INVALID_ARGUMENT,
-        "a depth-stencil format is not a color target");
-
     gpu::TextureHandle depth = make_depth_texture(&device, true);
     defer gpu::destroy_texture(&device, depth)!!;
     gpu::TextureDesc storage_stencil = stencil_texture_desc(gpu::Format.D24_UNORM_S8_UINT);

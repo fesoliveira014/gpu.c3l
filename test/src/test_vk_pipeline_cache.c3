@@ -531,12 +531,6 @@ fn void formats_split_entries_and_limits_enforced() @test {
     vk::PipelineLayout second_layout = state.pipelines.slots[second.index].value.layout;
     assert(first_layout == second_layout, "graphics pipelines share one layout");
     assert(first_layout == state.graphics_layout, "the shared layout is the device graphics layout");
-
-    gpu::Format[gpu::MAX_COLOR_ATTACHMENTS + 1] too_many;
-    foreach (&format : too_many) *format = gpu::Format.RGBA8_UNORM;
-    gpu::GraphicsPipelineDesc over_limit = base_graphics_desc(&shaders, too_many[..]);
-    assert(@catch(gpu::create_graphics_pipeline(&device, &over_limit)) == gpu::INVALID_ARGUMENT,
-        "more than MAX_COLOR_ATTACHMENTS color targets faults INVALID_ARGUMENT");
 }
 
 fn void compute_pipelines_dedup_and_share_layouts() @test {
@@ -693,7 +687,7 @@ fn void native_shader_module_borrows_aligned_store_words() @test {
     defer {
         if (retained) {
             state.resource_mutex.lock()!!;
-            vk::release_shader_identity_locked(state, shader_id)!!;
+            vk::release_shader_identity_locked(state, shader_id);
             state.resource_mutex.unlock();
         }
     }
@@ -729,7 +723,7 @@ fn void native_shader_module_borrows_aligned_store_words() @test {
     vk::destroy_pipeline_shader_module(state, &shader);
 
     state.resource_mutex.lock()!!;
-    vk::release_shader_identity_locked(state, shader_id)!!;
+    vk::release_shader_identity_locked(state, shader_id);
     retained = false;
     state.resource_mutex.unlock();
     assert(vk::shader_store_live_count(state) == 0
@@ -914,14 +908,14 @@ fn void shader_store_collision_verification_is_exact() @test {
         "collision-separated entries remain bucket-indexed");
 
     state.resource_mutex.lock()!!;
-    vk::release_shader_identity_locked(state, first_alias_id)!!;
+    vk::release_shader_identity_locked(state, first_alias_id);
     assert(state.shader_store.entries[(uint)first_id].refcount == 1,
         "releasing an exact alias preserves the original identity");
-    vk::release_shader_identity_locked(state, first_id)!!;
-    vk::release_shader_identity_locked(state, distinct_id)!!;
-    vk::release_shader_identity_locked(state, alternate_entry_id)!!;
-    vk::release_shader_identity_locked(state, alternate_role_id)!!;
-    vk::release_shader_identity_locked(state, different_length_id)!!;
+    vk::release_shader_identity_locked(state, first_id);
+    vk::release_shader_identity_locked(state, distinct_id);
+    vk::release_shader_identity_locked(state, alternate_entry_id);
+    vk::release_shader_identity_locked(state, alternate_role_id);
+    vk::release_shader_identity_locked(state, different_length_id);
     state.resource_mutex.unlock();
     assert(vk::shader_store_live_count(state) == 0,
         "releasing every collision-separated identity empties the store");
@@ -956,7 +950,7 @@ fn void shader_store_reuses_entries_across_unique_churn() @test {
         vk::ShaderId id = vk::retain_shader_identity_locked(state, &input)!!;
         assert(id == (vk::ShaderId)0,
             "unique churn reuses the first shader-store slot");
-        vk::release_shader_identity_locked(state, id)!!;
+        vk::release_shader_identity_locked(state, id);
         state.resource_mutex.unlock();
         assert(vk::shader_store_live_count(state) == 0,
             "each churn iteration releases its unique shader identity");
@@ -1708,12 +1702,6 @@ fn void sample_shading_respects_optional_feature() @test {
     CacheShaders shaders = make_cache_shaders();
     gpu::Format[1] pipeline_colors = { gpu::Format.RGBA8_UNORM };
     gpu::GraphicsPipelineDesc shaded = base_graphics_desc(&shaders, pipeline_colors[..]);
-    float[4] invalid_fractions = { -0.5f, 1.5f, float::nan, float::inf };
-    foreach (fraction : invalid_fractions) {
-        shaded.min_sample_shading = fraction;
-        assert(@catch(gpu::create_graphics_pipeline(&device, &shaded)) == gpu::INVALID_ARGUMENT,
-            "a fraction outside [0, 1] faults INVALID_ARGUMENT");
-    }
 
     vk::VkDeviceState* state = cache_test_state(&device);
     bool supported = state.caps.sample_rate_shading;
@@ -2134,63 +2122,6 @@ fn void graphics_native_creation_failure_releases_prepared_identities() @test {
         "failed native dynamic creation releases prepared shader identities");
 }
 
-fn void out_of_range_polygon_mode_rejects_before_backend_work() @test {
-    gpu::Device device = make_cache_test_device();
-    defer destroy_test_device(&device)!!;
-    CacheShaders shaders = make_cache_shaders();
-
-    gpu::Format[1] pipeline_colors = {
-        gpu::Format.RGBA8_UNORM,
-    };
-    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, pipeline_colors[..]);
-    int out_of_range = 99;
-    mem::copy(&desc.polygon_mode, &out_of_range, int::size);
-
-    fault rejected = @catch(gpu::create_graphics_pipeline(&device, &desc));
-    assert(rejected == gpu::INVALID_ARGUMENT,
-        "an out-of-range polygon mode faults INVALID_ARGUMENT: %s",
-        rejected);
-    assert(cache_entry_count(&device) == 0,
-        "immutable state rejection publishes no cache entry");
-}
-
-fn void depth_format_in_color_formats_rejects_before_backend_work() @test {
-    gpu::Device device = make_cache_test_device();
-    defer destroy_test_device(&device)!!;
-    CacheShaders shaders = make_cache_shaders();
-
-    gpu::Format[1] depth_colors = {
-        gpu::Format.D32_FLOAT,
-    };
-    gpu::GraphicsPipelineDesc desc = base_graphics_desc(&shaders, depth_colors[..]);
-
-    fault rejected = @catch(gpu::create_graphics_pipeline(&device, &desc));
-    assert(rejected == gpu::INVALID_ARGUMENT,
-        "a depth format in color_formats faults INVALID_ARGUMENT: %s",
-        rejected);
-    assert(cache_entry_count(&device) == 0,
-        "color format rejection publishes no cache entry");
-}
-
-fn void graphics_color_formats_require_host_safe_storage() @test {
-    gpu::Device device = make_cache_test_device();
-    defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = cache_test_state(&device);
-    gpu::Format* missing = null;
-    gpu::Format[] forged = missing[:1];
-    gpu::GraphicsPipelineDesc desc = { .color_formats = forged };
-
-    fault single_fault = @catch(vk::vk_create_graphics_pipeline(
-        state,
-        &desc,
-    ));
-    assert(single_fault == gpu::INVALID_ARGUMENT,
-        "a forged nonempty null color slice faults before iteration: %s",
-        single_fault);
-    assert(cache_entry_count(&device) == 0,
-        "single rejection publishes no cache entry");
-}
-
 fn void repeated_format_only_graphics_calls_alias_one_pipeline_identity() @test {
     gpu::Device device = make_cache_test_device();
     defer destroy_test_device(&device)!!;
@@ -2253,7 +2184,7 @@ fn void repeated_format_only_graphics_calls_alias_one_pipeline_identity() @test 
 
 fn void ray_tracing_group_ranges_follow_category_order() @test {
     gpu::RayTracingPipelineInfo info =
-        vk::ray_tracing_pipeline_info_for_counts(2, 3, 4, 5)!!;
+        vk::ray_tracing_pipeline_info_for_counts(2, 3, 4, 5);
     assert(info.ray_generation.first_group == 0
         && info.ray_generation.group_count == 2);
     assert(info.miss.first_group == 2 && info.miss.group_count == 3);
@@ -2261,12 +2192,6 @@ fn void ray_tracing_group_ranges_follow_category_order() @test {
     assert(info.callable.first_group == 9
         && info.callable.group_count == 5);
     assert(info.total_group_count == 14);
-    assert(@catch(vk::ray_tracing_pipeline_info_for_counts(
-        uint::max,
-        1,
-        0,
-        0,
-    )) == gpu::INVALID_ARGUMENT);
 }
 
 fn void ray_tracing_layout_uses_all_six_stages_and_shared_root() @test {

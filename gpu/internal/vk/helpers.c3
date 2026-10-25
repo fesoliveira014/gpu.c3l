@@ -280,11 +280,6 @@ fn void? check_descriptor_allocate_result(vk::Result result) @private {
     }
 }
 
-fn void? check_pipeline_cache_data_result(vk::Result result) @private {
-    if (result == vk::Result.INCOMPLETE) return gpu::INVALID_ARGUMENT~;
-    return check(result);
-}
-
 fn void? check_enumeration_result(vk::Result result) @private {
     if (result == vk::Result.INCOMPLETE) return gpu::BACKEND_ERROR~;
     return check(result);

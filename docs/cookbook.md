@@ -1147,7 +1147,7 @@ AABBs cannot share a BLAS.
 ```c3
 gpu::RayTracingPipelineCaps rt = caps.ray_tracing_pipelines;
 gpu::RayTracingPipelineInfo info =
-    gpu::get_ray_tracing_pipeline_info(&device, pipeline)!;
+    gpu::get_ray_tracing_pipeline_info(&device, pipeline);
 gpu::get_ray_tracing_shader_group_handles(
     device:      &device,
     pipeline:    pipeline,

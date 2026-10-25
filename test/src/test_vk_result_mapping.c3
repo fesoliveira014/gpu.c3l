@@ -209,7 +209,6 @@ fn void pipeline_and_cache_result_mapping_preserves_fatal_faults() @test {
     fault pipeline_compile = @catch(gpu::internal::vk::check_pipeline_create_result(vk::Result.PIPELINE_COMPILE_REQUIRED));
     fault pipeline_oom = @catch(gpu::internal::vk::check_pipeline_create_result(vk::Result.ERROR_OUT_OF_DEVICE_MEMORY));
     fault pipeline_lost = @catch(gpu::internal::vk::check_pipeline_create_result(vk::Result.ERROR_DEVICE_LOST));
-    fault cache_incomplete = @catch(gpu::internal::vk::check_pipeline_cache_data_result(vk::Result.INCOMPLETE));
     fault enumeration_incomplete = @catch(gpu::internal::vk::check_enumeration_result(vk::Result.INCOMPLETE));
     bool unknown_retryable = gpu::internal::vk::pipeline_cache_blob_retryable(vk::Result.ERROR_UNKNOWN);
     bool validation_retryable = gpu::internal::vk::pipeline_cache_blob_retryable(vk::Result.ERROR_VALIDATION_FAILED_EXT);
@@ -219,7 +218,6 @@ fn void pipeline_and_cache_result_mapping_preserves_fatal_faults() @test {
     assert(pipeline_compile == gpu::PIPELINE_CREATE_FAILED, "compile-required status is creation failure");
     assert(pipeline_oom == gpu::OUT_OF_DEVICE_MEMORY, "pipeline device OOM is not collapsed");
     assert(pipeline_lost == gpu::BACKEND_ERROR, "pipeline device loss is a backend error");
-    assert(cache_incomplete == gpu::INVALID_ARGUMENT, "cache export growth reports undersized output");
     assert(enumeration_incomplete == gpu::BACKEND_ERROR, "partial enumeration is not device loss");
 
     assert(unknown_retryable, "unknown warm blob rejection retries empty");

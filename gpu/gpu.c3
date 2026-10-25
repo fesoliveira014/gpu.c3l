@@ -1490,11 +1490,12 @@ fn ColorState uniform_color_state(ColorTargetState[] targets, ColorTargetState s
    call.
    @param device : "Live device that will own the pipeline handle."
    @param desc : "Borrowed compute pipeline description."
-   @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, or compilation fault." *>
+   @return "An owning pipeline handle, or a recoverable invalid-shader, support, capacity, allocation, or compilation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::shader_entry_point_valid(desc.shader.entry_point) : "desc.shader.entry_point must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long" *>
 fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline =
         gpu::internal::vk::vk_create_compute_pipeline(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
@@ -1508,15 +1509,25 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
    At most MAX_COLOR_ATTACHMENTS color targets. Ownership:
    release with destroy_pipeline, once per create. The descriptor, shaders, and
    color-format slice are borrowed only for the call. `min_sample_shading`
-   outside [0, 1] is invalid. `min_sample_shading` above 0, and a stage that
+   must lie in [0, 1]. `min_sample_shading` above 0, and a stage that
    declares SampleRateShading, need DeviceCaps.sample_rate_shading.
    @param device : "Live device that will own the pipeline handle."
    @param desc : "Borrowed graphics pipeline description."
-   @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, or compilation fault." *>
+   @return "An owning pipeline handle, or a recoverable invalid-shader, support, capacity, allocation, or compilation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::shader_entry_point_valid(desc.vertex_shader.entry_point) : "desc.vertex_shader.entry_point must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long"
+   @require gpu::internal::shader_entry_point_valid(desc.fragment_shader.entry_point) : "desc.fragment_shader.entry_point must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long"
+   @require desc.color_formats.len <= MAX_COLOR_ATTACHMENTS : "desc.color_formats.len must not exceed MAX_COLOR_ATTACHMENTS"
+   @require desc.color_formats.len == 0 || desc.color_formats.ptr != null : "desc.color_formats must not be a null slice with nonzero length"
+   @require gpu::internal::color_formats_valid(desc.color_formats) : "each desc.color_formats entry must be a defined color format"
+   @require gpu::internal::depth_format_valid(desc.depth_format) : "desc.depth_format must be UNDEFINED or a depth-stencil format"
+   @require desc.color_formats.len > 0 || desc.depth_format != Format.UNDEFINED : "desc needs at least one color format or a depth format"
+   @require gpu::internal::sample_count_valid(desc.sample_count) : "desc.sample_count must be a defined SampleCount"
+   @require gpu::internal::min_sample_shading_valid(desc.min_sample_shading) : "desc.min_sample_shading must be in [0, 1]"
+   @require gpu::internal::polygon_mode_valid(desc.polygon_mode) : "desc.polygon_mode must be a defined PolygonMode" *>
 fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline =
         gpu::internal::vk::vk_create_graphics_pipeline(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
@@ -1528,11 +1539,21 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
    in vertex_root_gpu; raster.topology is ignored.
    @param device : "Live device."
    @param desc : "Borrowed mesh pipeline description."
-   @return "Owning pipeline handle, or a recoverable validation, support, or capacity fault." *>
+   @return "Owning pipeline handle, or a recoverable invalid-shader, support, or capacity fault."
+   @require desc != null : "desc must not be null"
+   @require desc.task_shader.spirv.len == 0 || gpu::internal::shader_entry_point_valid(desc.task_shader.entry_point) : "desc.task_shader.entry_point must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long"
+   @require gpu::internal::shader_entry_point_valid(desc.mesh_shader.entry_point) : "desc.mesh_shader.entry_point must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long"
+   @require gpu::internal::shader_entry_point_valid(desc.fragment_shader.entry_point) : "desc.fragment_shader.entry_point must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long"
+   @require desc.color_formats.len <= MAX_COLOR_ATTACHMENTS : "desc.color_formats.len must not exceed MAX_COLOR_ATTACHMENTS"
+   @require desc.color_formats.len == 0 || desc.color_formats.ptr != null : "desc.color_formats must not be a null slice with nonzero length"
+   @require gpu::internal::color_formats_valid(desc.color_formats) : "each desc.color_formats entry must be a defined color format"
+   @require gpu::internal::depth_format_valid(desc.depth_format) : "desc.depth_format must be UNDEFINED or a depth-stencil format"
+   @require desc.color_formats.len > 0 || desc.depth_format != Format.UNDEFINED : "desc needs at least one color format or a depth format"
+   @require gpu::internal::sample_count_valid(desc.sample_count) : "desc.sample_count must be a defined SampleCount"
+   @require gpu::internal::polygon_mode_valid(desc.polygon_mode) : "desc.polygon_mode must be a defined PolygonMode" *>
 fn PipelineHandle? create_mesh_pipeline(Device* device, MeshPipelineDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline =
         gpu::internal::vk::vk_create_mesh_pipeline(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
@@ -1543,15 +1564,20 @@ fn PipelineHandle? create_mesh_pipeline(Device* device, MeshPipelineDesc* desc) 
    generation, miss, hit, then callable. A zero recursion depth selects one.
    Identical immutable descriptors may alias one backend pipeline under
    distinct owning handles. All descriptor slices and shader bytes are borrowed
-   only for the call.
+   only for the call. `desc.max_recursion_depth` must not exceed
+   `DeviceCaps` `ray_tracing_pipelines.max_recursion_depth`; that rule reads
+   device state, so a violation panics in safe builds.
    @param device : "Live device created with enable_ray_tracing_pipelines."
    @param desc : "Borrowed structured ray-tracing pipeline description."
-   @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, or compilation fault." *>
+   @return "An owning pipeline handle, or a recoverable invalid-shader, support, capacity, allocation, or compilation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::ray_tracing_pipeline_desc_valid(desc) : "desc.ray_generation_shaders must be non-empty, no shader slice may be null with a nonzero length, and the shader group and stage counts must fit uint"
+   @require gpu::internal::ray_tracing_hit_groups_valid(desc.hit_groups) : "desc.hit_groups[].kind must be a defined RayTracingHitGroupKind, TRIANGLES groups must not have an intersection shader and PROCEDURAL groups must have one"
+   @require gpu::internal::ray_tracing_entry_points_valid(desc) : "every shader entry_point in desc must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long" *>
 fn PipelineHandle? create_ray_tracing_pipeline(Device* device, RayTracingPipelineDesc* desc) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline =
         gpu::internal::vk::vk_create_ray_tracing_pipeline(
             operation.state,
@@ -1563,10 +1589,12 @@ fn PipelineHandle? create_ray_tracing_pipeline(Device* device, RayTracingPipelin
 
 <* Return deterministic ray-generation, miss, hit, and callable group ranges
    for a live ray-tracing pipeline. The result contains no borrowed storage.
+   The pipeline must be a ray-tracing pipeline; that rule reads pipeline
+   state, so a violation panics in safe builds.
    @param device : "Live device that owns pipeline."
    @param pipeline : "Live ray-tracing pipeline handle."
-   @return "The pipeline group ranges, or a recoverable kind fault." *>
-fn RayTracingPipelineInfo? get_ray_tracing_pipeline_info(Device* device, PipelineHandle pipeline) {
+   @return "The pipeline group ranges." *>
+fn RayTracingPipelineInfo get_ray_tracing_pipeline_info(Device* device, PipelineHandle pipeline) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -1578,13 +1606,16 @@ fn RayTracingPipelineInfo? get_ray_tracing_pipeline_info(Device* device, Pipelin
 
 <* Copy exact native shader-group handles for a contiguous group range.
    `out.len` must equal `group_count * shader_group_handle_size`; zero groups
-   require an empty output and perform no backend call.
+   require an empty output and perform no backend call. The pipeline must be a
+   ray-tracing pipeline and `first_group + group_count` must not exceed its
+   total group count; these rules and the output length read pipeline and
+   device state, so a violation panics in safe builds.
    @param device : "Live device that owns pipeline."
    @param pipeline : "Live ray-tracing pipeline handle."
    @param first_group : "First group in the deterministic pipeline order."
    @param group_count : "Number of contiguous handles to copy."
    @param out : "Caller-owned exact-size output bytes."
-   @return "Success, or a recoverable kind, range, or output-size fault." *>
+   @return "Success, or a recoverable backend fault." *>
 fn void? get_ray_tracing_shader_group_handles(
     Device* device,
     PipelineHandle pipeline,
@@ -1605,12 +1636,16 @@ fn void? get_ray_tracing_shader_group_handles(
 }
 
 <* Return the byte requirement for one present shader role in a live
-   ray-tracing group. The role and group category must match.
+   ray-tracing group. The role and group category must match. The pipeline
+   must be a ray-tracing pipeline, `group` must be below its total group
+   count, and `group_shader` must name a shader present in the selected group;
+   these rules read pipeline state, so a violation panics in safe builds.
    @param device : "Live device that owns pipeline."
    @param pipeline : "Live ray-tracing pipeline handle."
    @param group : "Group index in the deterministic pipeline order."
    @param group_shader : "Shader role present in the selected group."
-   @return "The native byte requirement, or a recoverable kind, enum, range, or role fault." *>
+   @return "The native byte requirement, or a recoverable backend fault."
+   @require group_shader == RayTracingGroupShader.GENERAL || group_shader == RayTracingGroupShader.CLOSEST_HIT || group_shader == RayTracingGroupShader.ANY_HIT || group_shader == RayTracingGroupShader.INTERSECTION : "group_shader must be a defined RayTracingGroupShader" *>
 fn ulong? get_ray_tracing_shader_group_stack_size(
     Device* device,
     PipelineHandle pipeline,
@@ -1656,13 +1691,14 @@ fn usz? get_pipeline_cache_size(Device* device) {
 }
 
 <* Fill `out` with the driver pipeline cache blob and return the bytes
-   written; faults INVALID_ARGUMENT if `out` is smaller than the current
-   blob. Feed the blob to RuntimeDesc.pipeline_cache_data before creating a
+   written. `out.len` must be at least the size returned by
+   `get_pipeline_cache_size`; that rule reads cache state, so a violation
+   panics in safe builds. Feed the blob to RuntimeDesc.pipeline_cache_data before creating a
    later runtime and device. Must not be called concurrently with pipeline
    creation.
    @param device : "Live device whose cache is exported."
    @param out : "Caller-owned output storage sized from a fresh cache-size query."
-   @return "Bytes written, or a recoverable invalid-argument or backend fault." *>
+   @return "Bytes written, or a recoverable backend fault." *>
 fn usz? get_pipeline_cache_data(Device* device, char[] out) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);

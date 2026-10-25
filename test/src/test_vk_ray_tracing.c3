@@ -753,7 +753,7 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         create_trace_indirect_build_pipeline(&device)!!;
     defer gpu::destroy_pipeline(&device, indirect_build_pipeline)!!;
     gpu::RayTracingPipelineInfo pipeline_info =
-        gpu::get_ray_tracing_pipeline_info(&device, pipeline)!!;
+        gpu::get_ray_tracing_pipeline_info(&device, pipeline);
     assert(pipeline_info.ray_generation.group_count == 1
             && pipeline_info.miss.group_count == 2
             && pipeline_info.hit.group_count == 2

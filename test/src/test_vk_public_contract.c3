@@ -10,16 +10,6 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
     defer destroy_test_device(&device)!!;
 
     assert(
-        @catch(gpu::create_compute_pipeline(&device, (gpu::ComputePipelineDesc*)null))
-            == gpu::INVALID_ARGUMENT,
-        "create_compute_pipeline rejects a null descriptor"
-    );
-    assert(
-        @catch(gpu::create_graphics_pipeline(&device, (gpu::GraphicsPipelineDesc*)null))
-            == gpu::INVALID_ARGUMENT,
-        "create_graphics_pipeline rejects a null descriptor"
-    );
-    assert(
         @catch(submit_test_queue(&device, gpu::QueueKind.GRAPHICS, (gpu::SubmitDesc*)null))
             == gpu::INVALID_ARGUMENT,
         "submit rejects a null descriptor"

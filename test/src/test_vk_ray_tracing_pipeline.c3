@@ -311,58 +311,22 @@ fn void ray_tracing_descriptor_normalizes_depth_ranges_and_stage_count() @test {
     assert(shape.info.dynamic_stack_size);
 }
 
-fn void ray_tracing_descriptor_rejects_unsupported_and_invalid_groups() @test {
+fn void ray_tracing_descriptor_rejects_unsupported_device() @test {
     gpu::ShaderDesc ray_generation =
         ray_tracing_test_shader(RT_PIPELINE_RGEN_SPIRV[..]);
-    gpu::ShaderDesc closest_hit =
-        ray_tracing_test_shader(RT_PIPELINE_CLOSEST_HIT_SPIRV[..]);
-    gpu::ShaderDesc intersection =
-        ray_tracing_test_shader(RT_PIPELINE_INTERSECTION_SPIRV[..]);
-    gpu::RayTracingHitGroupDesc group;
     gpu::RayTracingPipelineDesc desc = {
         .ray_generation_shaders = (&ray_generation)[:1],
-        .hit_groups             = (&group)[:1],
-        .max_recursion_depth    = 3,
     };
     vk::VkDeviceState state = {
-        .ray_tracing_pipelines_enabled = true,
+        .ray_tracing_pipelines_enabled = false,
         .caps = {
             .ray_tracing_pipelines = {
-                .enabled             = true,
+                .enabled             = false,
                 .max_recursion_depth = 2,
             },
         },
     };
 
-    assert(@catch(vk::normalize_ray_tracing_pipeline_desc(
-        &state,
-        &desc,
-    )) == gpu::INVALID_ARGUMENT);
-    desc.max_recursion_depth = 1;
-    group = {
-        .kind                = gpu::RayTracingHitGroupKind.TRIANGLES,
-        .intersection_shader = &intersection,
-    };
-    assert(@catch(vk::normalize_ray_tracing_pipeline_desc(
-        &state,
-        &desc,
-    )) == gpu::INVALID_ARGUMENT);
-    group = {
-        .kind               = gpu::RayTracingHitGroupKind.PROCEDURAL,
-        .closest_hit_shader = &closest_hit,
-    };
-    assert(@catch(vk::normalize_ray_tracing_pipeline_desc(
-        &state,
-        &desc,
-    )) == gpu::INVALID_ARGUMENT);
-    desc.ray_generation_shaders = {};
-    assert(@catch(vk::normalize_ray_tracing_pipeline_desc(
-        &state,
-        &desc,
-    )) == gpu::INVALID_ARGUMENT);
-    desc.ray_generation_shaders = (&ray_generation)[:1];
-    state.ray_tracing_pipelines_enabled = false;
-    state.caps.ray_tracing_pipelines.enabled = false;
     assert(@catch(vk::normalize_ray_tracing_pipeline_desc(
         &state,
         &desc,
@@ -456,7 +420,7 @@ fn void ray_tracing_creation_lowers_groups_and_aliases_exact_cache_key() @test {
     assert(capture.matched && capture.key_matched && capture.calls == 2);
     assert(cache_entry_count(&device) == 2);
     gpu::RayTracingPipelineInfo dynamic_info =
-        vk::vk_get_ray_tracing_pipeline_info(state, dynamic)!!;
+        vk::vk_get_ray_tracing_pipeline_info(state, dynamic);
     assert(dynamic_info.dynamic_stack_size
         && dynamic_info.max_recursion_depth == 2);
     desc.dynamic_stack_size = false;
@@ -475,7 +439,7 @@ fn void ray_tracing_creation_lowers_groups_and_aliases_exact_cache_key() @test {
         && cache_entry_count(&device) == 3,
         "hit-only shader differences produce distinct cache identities");
     hit_groups[0].closest_hit_shader = &closest_hit;
-    assert(vk::vk_get_ray_tracing_pipeline_info(state, first)!!.total_group_count
+    assert(vk::vk_get_ray_tracing_pipeline_info(state, first).total_group_count
         == 5);
     RayTracingGroupHandleCapture handles_capture = {
         .expected_pipeline =
@@ -497,24 +461,6 @@ fn void ray_tracing_creation_lowers_groups_and_aliases_exact_cache_key() @test {
     )!!;
     assert(handles_capture.matched && handles_capture.calls == 1);
     assert(handles[0] == 1 && handles[7] == 8);
-    assert(@catch(vk::vk_get_ray_tracing_shader_group_handles_with_ops(
-        state,
-        first,
-        1,
-        2,
-        handles[:7],
-        &handle_ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk::vk_get_ray_tracing_shader_group_handles_with_ops(
-        state,
-        first,
-        4,
-        2,
-        handles[..],
-        &handle_ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(handles_capture.calls == 1,
-        "invalid handle queries perform no backend call");
 
     RayTracingGroupStackSizeCapture stack_capture = {
         .expected_pipeline     =
@@ -598,84 +544,11 @@ fn void ray_tracing_creation_lowers_groups_and_aliases_exact_cache_key() @test {
     }
     assert(stack_capture.matched && stack_capture.calls == 7,
         "concurrent stack-size queries serialize through the resource domain");
-    assert(@catch(vk::vk_get_ray_tracing_shader_group_stack_size_with_ops(
-        state:        state,
-        pipeline:     first,
-        group:        0,
-        group_shader: gpu::RayTracingGroupShader.CLOSEST_HIT,
-        ops:          &stack_ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk::vk_get_ray_tracing_shader_group_stack_size_with_ops(
-        state:        state,
-        pipeline:     first,
-        group:        2,
-        group_shader: gpu::RayTracingGroupShader.GENERAL,
-        ops:          &stack_ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk::vk_get_ray_tracing_shader_group_stack_size_with_ops(
-        state:        state,
-        pipeline:     first,
-        group:        3,
-        group_shader: gpu::RayTracingGroupShader.CLOSEST_HIT,
-        ops:          &stack_ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk::vk_get_ray_tracing_shader_group_stack_size_with_ops(
-        state:        state,
-        pipeline:     first,
-        group:        2,
-        group_shader: gpu::RayTracingGroupShader.INTERSECTION,
-        ops:          &stack_ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk::vk_get_ray_tracing_shader_group_stack_size_with_ops(
-        state:        state,
-        pipeline:     first,
-        group:        5,
-        group_shader: gpu::RayTracingGroupShader.GENERAL,
-        ops:          &stack_ops,
-    )) == gpu::INVALID_ARGUMENT);
-    gpu::RayTracingGroupShader invalid_group_shader;
-    int invalid_group_shader_value = 99;
-    mem::copy(
-        &invalid_group_shader,
-        &invalid_group_shader_value,
-        int::size,
-    );
-    assert(@catch(vk::vk_get_ray_tracing_shader_group_stack_size_with_ops(
-        state:        state,
-        pipeline:     first,
-        group:        0,
-        group_shader: invalid_group_shader,
-        ops:          &stack_ops,
-    )) == gpu::INVALID_ARGUMENT);
     gpu::PipelineHandle foreign = first;
     foreign.owner++;
     gpu::PipelineHandle stale = first;
     stale.generation++;
     assert(stack_capture.calls == 7);
-
-    gpu::ShaderDesc compute_shader =
-        ray_tracing_test_shader(CACHE_COMP_SPIRV[..]);
-    gpu::ComputePipelineDesc compute_desc = { .shader = compute_shader };
-    gpu::PipelineHandle compute =
-        vk::vk_create_compute_pipeline(state, &compute_desc)!!;
-    assert(@catch(vk::vk_get_ray_tracing_pipeline_info(state, compute))
-        == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk::vk_get_ray_tracing_shader_group_stack_size_with_ops(
-        state:        state,
-        pipeline:     compute,
-        group:        0,
-        group_shader: gpu::RayTracingGroupShader.GENERAL,
-        ops:          &stack_ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk::vk_get_ray_tracing_shader_group_handles_with_ops(
-        state,
-        compute,
-        0,
-        0,
-        {},
-        &handle_ops,
-    )) == gpu::INVALID_ARGUMENT);
-    vk::vk_destroy_pipeline(state, compute)!!;
 
     vk::vk_destroy_pipeline(state, first)!!;
     assert(cache_entry_count(&device) == 3);

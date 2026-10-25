@@ -37,6 +37,9 @@ the `ClipDistance` capability, for example by writing `gl_ClipDistance`, needs
 reading `gl_SampleID` or `gl_SamplePosition`, needs `caps.sample_rate_shading`.
 Otherwise pipeline creation returns `UNSUPPORTED_FEATURE`.
 
+`entry_point` is null or between 1 and `MAX_SHADER_ENTRY_POINT_BYTES` bytes
+long. This is a contract: a violation panics in safe builds.
+
 ## Compute pipelines
 
 ```c3
@@ -97,13 +100,20 @@ returns the `ColorState`. `COLOR_WRITE_ALL` is the default mask.
 `MAX_COLOR_ATTACHMENTS` is 8; use `DeviceCaps.max_color_attachments` for
 the selected device.
 
+These descriptor rules are contracts that panic in safe builds when broken:
+`color_formats` has at most `MAX_COLOR_ATTACHMENTS` entries and each is a
+defined color format; `depth_format` is `UNDEFINED` or a depth-stencil
+format; the pipeline has at least one color format or a depth format;
+`sample_count` and `polygon_mode` are defined values. A mesh pipeline follows
+the same rules for the fields it shares.
+
 `min_sample_shading` is the fraction of a pixel's samples that run the
 fragment shader in separate invocations. Zero shades a pixel once and
 broadcasts the result to its covered samples. A value in `(0, 1]` makes the
 rasterizer shade at least that fraction of the samples separately, and `1`
-shades every sample. A value outside `[0, 1]`, or NaN, returns
-`INVALID_ARGUMENT`; a value above zero without `caps.sample_rate_shading`
-returns `UNSUPPORTED_FEATURE`. A fragment shader that reads `gl_SampleID` or
+shades every sample. A value outside `[0, 1]`, or NaN, is a contract
+violation that panics in safe builds; a value above zero without
+`caps.sample_rate_shading` returns `UNSUPPORTED_FEATURE`. A fragment shader that reads `gl_SampleID` or
 `gl_SamplePosition` shades every sample whatever the field says, because
 Vulkan then treats the pipeline as sample-rate shaded at `1`. Negative zero
 is the same pipeline as zero. The field has no effect on a single-sample
@@ -156,14 +166,22 @@ gpu::PipelineHandle pipeline = gpu::create_ray_tracing_pipeline(&device, &desc)!
 
 Hit groups: `TRIANGLES` may have closest-hit and any-hit shaders and no
 intersection shader; `PROCEDURAL` requires an intersection shader. A null
-shader pointer means the role is absent.
+shader pointer means the role is absent. `ray_generation_shaders` is
+non-empty, no slice is null with a nonzero length, and the shader group and
+stage counts fit `uint`. `max_recursion_depth` must not exceed
+`DeviceCaps.ray_tracing_pipelines.max_recursion_depth`. These are contracts
+that panic in safe builds when broken.
 
 `get_ray_tracing_pipeline_info` returns the deterministic group order
 (ray generation, miss, hit, callable ranges) and the normalized recursion
 depth. `get_ray_tracing_shader_group_handles` copies handle bytes for a
 group range into caller memory of `group_count * shader_group_handle_size`
 bytes. `get_ray_tracing_shader_group_stack_size` reports the stack
-requirement of one role in one group; with `dynamic_stack_size = true` the
+requirement of one role in one group. The pipeline must be a ray-tracing
+pipeline, `first_group + group_count` and `group` must lie inside its group
+count, the output length must match, and the role must be present in the
+group; these state rules also panic in safe builds when broken. With
+`dynamic_stack_size = true` the
 application sums them and records
 `cmd_set_ray_tracing_pipeline_stack_size`. See the
 [cookbook](../cookbook.md#pack-an-sbt-and-trace).
@@ -196,6 +214,9 @@ usz written = gpu::get_pipeline_cache_data(&device, blob)!;
 
 The blob is opaque, driver-specific data. Store it with the adapter's
 vendor, device, and driver identifiers. A rejected blob is a cache miss.
+`blob` must be at least the size `get_pipeline_cache_size` returns just before
+the export, and the cache must not grow between the two calls; a shorter
+buffer panics in safe builds.
 
 ## Faults
 
@@ -203,6 +224,5 @@ vendor, device, and driver identifiers. A rejected blob is a cache miss.
 |---|---|
 | bad SPIR-V, missing entry point, ABI mismatch | `SHADER_INVALID` |
 | unsupported format, sample count, polygon mode, clip distance, or ray feature | `UNSUPPORTED_FEATURE` |
-| inconsistent descriptor | `INVALID_ARGUMENT` |
 | driver rejected the pipeline | `PIPELINE_CREATE_FAILED` |
 | pipeline table full | `SLOT_TABLE_FULL` |

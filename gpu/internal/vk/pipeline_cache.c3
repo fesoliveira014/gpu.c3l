@@ -94,7 +94,7 @@ struct PipelineCacheCreateOps @private {
     PipelineCacheCreateFn create;
 }
 
-fn gpu::RayTracingPipelineInfo? ray_tracing_pipeline_info_for_counts(
+fn gpu::RayTracingPipelineInfo ray_tracing_pipeline_info_for_counts(
     uint ray_generation_count,
     uint miss_count,
     uint hit_count,
@@ -104,7 +104,7 @@ fn gpu::RayTracingPipelineInfo? ray_tracing_pipeline_info_for_counts(
     ulong hit_first = miss_first + miss_count;
     ulong callable_first = hit_first + hit_count;
     ulong total = callable_first + callable_count;
-    if (total > uint::max) return gpu::INVALID_ARGUMENT~;
+    assert(total <= uint::max, "total ray-tracing shader group count must fit uint");
     return {
         .ray_generation = {
             .first_group = 0,
@@ -153,36 +153,26 @@ fn OwnedRayTracingPipelineKey? create_ray_tracing_pipeline_key(
     uint normalized_recursion_depth,
     bool dynamic_stack_size,
 ) {
-    if (state == null || state.host_allocator == null || input == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && state.host_allocator != null && input != null,
+        "ray-tracing key input must be present"
+    );
     usz ray_generation_count = input.ray_generation_shaders.len;
     usz miss_count = input.miss_shaders.len;
     usz hit_count = input.hit_groups.len;
     usz callable_count = input.callable_shaders.len;
-    if (ray_generation_count > uint::max
-        || miss_count > uint::max
-        || hit_count > uint::max
-        || callable_count > uint::max) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    usz word_count = RAY_TRACING_KEY_HEADER_WORDS;
-    if (hit_count
-        > (usz::max - word_count) / RAY_TRACING_HIT_KEY_WORDS) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    word_count += hit_count * RAY_TRACING_HIT_KEY_WORDS;
-    if (ray_generation_count > usz::max - word_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    word_count += ray_generation_count;
-    if (miss_count > usz::max - word_count) return gpu::INVALID_ARGUMENT~;
-    word_count += miss_count;
-    if (callable_count > usz::max - word_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    word_count += callable_count;
-    if (word_count > usz::max / uint::size) return gpu::INVALID_ARGUMENT~;
+    assert(
+        ray_generation_count <= uint::max
+            && miss_count <= uint::max
+            && hit_count <= uint::max
+            && callable_count <= uint::max,
+        "ray-tracing key shader counts must fit uint"
+    );
+    usz word_count = RAY_TRACING_KEY_HEADER_WORDS
+        + hit_count * RAY_TRACING_HIT_KEY_WORDS
+        + ray_generation_count
+        + miss_count
+        + callable_count;
 
     char[]? allocated = alloc::new_array_try(
         state.host_allocator,
@@ -304,7 +294,7 @@ fn void? check_pipeline_cache_data_backend_result(
     return report_pipeline_cache_backend_failure(
         state:          state,
         operation:      operation,
-        public_fault:   gpu::INVALID_ARGUMENT,
+        public_fault:   gpu::BACKEND_ERROR,
         backend_text:   "Vulkan returned incomplete pipeline cache data",
         backend_result: (int)result,
     )~;
@@ -523,7 +513,7 @@ fn void release_entry(VkDeviceState* state, uint entry_index) {
     vk::destroy_pipeline(state.device, entry.pipeline, null);
     if (entry.key.kind == (int)PipelineKind.RAY_TRACING) {
         foreach (shader : entry.ray_tracing_shader_ids) {
-            release_shader_identity_locked(state, shader)!!;
+            release_shader_identity_locked(state, shader);
         }
         if (entry.ray_tracing_shader_ids.ptr != null) {
             alloc::free(
@@ -533,16 +523,16 @@ fn void release_entry(VkDeviceState* state, uint entry_index) {
         }
         destroy_ray_tracing_pipeline_key(state, &entry.ray_tracing_key);
     } else {
-        release_shader_identity_locked(state, entry.key.vertex_shader)!!;
+        release_shader_identity_locked(state, entry.key.vertex_shader);
         if (entry.key.fragment_shader != SHADER_ID_INVALID) {
             release_shader_identity_locked(
                 state,
                 entry.key.fragment_shader,
-            )!!;
+            );
         }
         if (entry.key.kind == (int)PipelineKind.MESH
             && entry.key.task_shader != SHADER_ID_INVALID) {
-            release_shader_identity_locked(state, entry.key.task_shader)!!;
+            release_shader_identity_locked(state, entry.key.task_shader);
         }
     }
     unlink_entry(&state.pipeline_cache, entry_index);
@@ -777,22 +767,11 @@ fn usz? vk_get_pipeline_cache_data(
         operation: "get_pipeline_cache_data",
         result:    vk::get_pipeline_cache_data(state.device, state.driver_cache, &required, null),
     )!;
-    if ((usz)required > out.len) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "get_pipeline_cache_data",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.DEVICE,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "out",
-            invariant:           "output buffer must fit the pipeline cache data",
-            backend_text:        null,
-        )~;
-    }
-    sz written = required;
+    assert(
+        (usz)required <= out.len,
+        "out.len must be at least the size returned by get_pipeline_cache_size"
+    );
+    sz written = (sz)out.len;
     check_pipeline_cache_data_backend_result(
         state:     state,
         operation: "get_pipeline_cache_data",

@@ -670,13 +670,13 @@ fn gpu::PipelineHandle? vk_create_ray_tracing_pipeline(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn gpu::RayTracingPipelineInfo? vk_get_ray_tracing_pipeline_info(
+fn gpu::RayTracingPipelineInfo vk_get_ray_tracing_pipeline_info(
     VkDeviceState* state,
     gpu::PipelineHandle pipeline,
 ) {
     (void)state;
     (void)pipeline;
-    return gpu::UNSUPPORTED_FEATURE~;
+    return {};
 }
 
 fn void? vk_get_ray_tracing_shader_group_handles(
