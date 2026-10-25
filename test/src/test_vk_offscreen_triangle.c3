@@ -378,7 +378,7 @@ fn void render_textured_triangle(char[] frag_spirv, char[] inline_root, char[3] 
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = RT_SIZE, .height = RT_SIZE };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(RT_SIZE, RT_SIZE)!!;
+        gpu::render_geometry_state(RT_SIZE, RT_SIZE);
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
@@ -590,7 +590,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
             .height = RT_SIZE,
         };
         gpu::GraphicsState graphics_state =
-            gpu::render_geometry_state(RT_SIZE, RT_SIZE)!!;
+            gpu::render_geometry_state(RT_SIZE, RT_SIZE);
         gpu::ColorTargetState[1] color_targets = {{
             .write_mask = gpu::COLOR_WRITE_ALL,
         }};
@@ -815,7 +815,7 @@ fn void complete_color_state_output_matches_expected() @test {
             .height = RT_SIZE,
         };
         gpu::GraphicsState graphics =
-            gpu::render_geometry_state(RT_SIZE, RT_SIZE)!!;
+            gpu::render_geometry_state(RT_SIZE, RT_SIZE);
         gpu::ColorTargetState[1] color_targets = {
             packets[i],
         };

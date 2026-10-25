@@ -153,7 +153,7 @@ fn vk::ResolveModeFlagBits? depth_resolve_mode_to_vk(
 
             return vk::ResolveModeFlagBits.MAX_BIT;
         default:
-            return gpu::INVALID_ARGUMENT~;
+            unreachable("desc.depth.resolve_mode must be a defined DepthResolveMode");
     }
 }
 
@@ -294,12 +294,6 @@ fn PreparedRenderPass? lower_render_pass(
     CommandRecord* commands,
     gpu::RenderPassDesc* desc,
 ) {
-    if (desc == null
-        || desc.colors.len > gpu::MAX_COLOR_ATTACHMENTS
-        || (desc.colors.len > 0 && desc.colors.ptr == null)
-        || (desc.width == 0) != (desc.height == 0)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     CommandRecord* record = commands;
     if (record.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
@@ -379,7 +373,10 @@ fn PreparedRenderPass? lower_render_pass(
         }
 
         if (desc.depth.resolve_view.is_valid()) {
-            if (pass.has_stencil_aspect) return gpu::INVALID_ARGUMENT~;
+            assert(
+                !pass.has_stencil_aspect,
+                "depth resolve requires a depth-only attachment format"
+            );
 
             AttachmentViewSlot* resolve = state.attachment_views.get(
                 desc.depth.resolve_view,
@@ -398,7 +395,7 @@ fn PreparedRenderPass? lower_render_pass(
         AttachmentViewSlot* first = pass.color_count > 0
             ? pass.color_slots[0]
             : pass.depth_view;
-        if (first == null) return gpu::INVALID_ARGUMENT~;
+        assert(first != null, "a zero-extent render pass needs at least one attachment");
         pass.width = first.width;
         pass.height = first.height;
     }
@@ -481,17 +478,16 @@ fn vk::Rect2D lower_scissor(gpu::ScissorRect* scissor) {
     };
 }
 
-fn LoweredGraphicsState? lower_graphics_state(
+fn LoweredGraphicsState lower_graphics_state(
     gpu::GraphicsState* state,
 ) {
-    if (state == null) return gpu::INVALID_ARGUMENT~;
     return {
         .viewport = lower_viewport(&state.viewport),
         .scissor  = lower_scissor(&state.scissor),
         .raster   = state.raster,
         .depth    = state.depth,
         .stencil  = state.stencil,
-        .color    = lower_color_state(&state.color)!,
+        .color    = lower_color_state(&state.color),
     };
 }
 
@@ -515,14 +511,9 @@ fn void emit_graphics_state(
     emit_color_state(commands, &state.color);
 }
 
-fn LoweredColorState? lower_color_state(
+fn LoweredColorState lower_color_state(
     gpu::ColorState* state,
 ) {
-    if (state == null
-        || state.targets.len > gpu::MAX_COLOR_ATTACHMENTS
-        || (state.targets.len > 0 && state.targets.ptr == null)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     LoweredColorState lowered = {
         .count = (uint)state.targets.len,
     };
@@ -594,12 +585,11 @@ fn void? vk_cmd_set_graphics_state(
     CommandRecord* commands,
     gpu::GraphicsState* state,
 ) {
-    if (state == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = commands;
     if (!graphics_state_settable(record.state)) {
         return gpu::COMMAND_RECORDING_ERROR~;
     }
-    LoweredGraphicsState graphics = lower_graphics_state(state)!;
+    LoweredGraphicsState graphics = lower_graphics_state(state);
     emit_graphics_state(commands, &graphics);
     record.graphics_state_initialized = true;
 }
@@ -708,7 +698,7 @@ fn PreparedIndexedDraw? lower_indexed_draw(
     usz required = gpu::internal::indirect_argument_bytes(
         index_element_bytes(index_type),
         index_count,
-    )!;
+    );
     return {
         .pipeline      = borrow_bound_pipeline(record)!,
         .index         = resolve_span_slot(

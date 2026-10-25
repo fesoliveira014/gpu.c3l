@@ -258,7 +258,7 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         .compare      = gpu::CompareOp.LESS,
     };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = depth_state;
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
@@ -569,7 +569,7 @@ fn void multisample_texture_reads_each_sample() @test {
         .width  = DP_RT,
         .height = DP_RT,
     };
-    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT);
     gpu::ColorTargetState[1] color_targets = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
     graphics_state.color = { .targets = color_targets[..] };
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
@@ -829,7 +829,7 @@ fn void check_depth_resolve(
     record_depth_resolve_attach(&commands, targets.source);
     record_depth_resolve_attach(&commands, targets.target);
 
-    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = {
         .test_enable  = true,
         .write_enable = true,
@@ -962,40 +962,6 @@ fn void depth_resolve_writes_the_selected_sample() @test {
         "an unreported MAX resolve faults UNSUPPORTED_FEATURE");
     state.caps.depth_resolve_modes = supported;
 
-    gpu::Format stencil_format = gpu::get_device_caps(&device).depth_stencil_format;
-    if (stencil_format == gpu::Format.UNDEFINED) {
-        io::eprintfn("no combined depth-stencil format on this adapter; skipping the stencil resolve fault");
-    } else {
-        gpu::TextureHandle stencil_source = make_multisample_target(
-            device:       &device,
-            format:       stencil_format,
-            usage:        { .depth_attach },
-            sample_count: gpu::SampleCount.ONE,
-            debug_name:   "depth_resolve_stencil_source",
-        );
-        defer gpu::destroy_texture(&device, stencil_source)!!;
-        gpu::AttachmentViewHandle stencil_source_view = create_test_attachment_view(&device, stencil_source)!!;
-        defer destroy_test_attachment_view(&device, &stencil_source_view)!!;
-        gpu::TextureHandle stencil_target = make_multisample_target(
-            device:       &device,
-            format:       stencil_format,
-            usage:        { .depth_attach },
-            sample_count: gpu::SampleCount.ONE,
-            debug_name:   "depth_resolve_stencil_target",
-        );
-        defer gpu::destroy_texture(&device, stencil_target)!!;
-        gpu::AttachmentViewHandle stencil_target_view = create_test_attachment_view(&device, stencil_target)!!;
-        defer destroy_test_attachment_view(&device, &stencil_target_view)!!;
-
-        assert(begin_depth_resolve_fault(
-                &device,
-                stencil_source_view,
-                stencil_target_view,
-                gpu::DepthResolveMode.SAMPLE_ZERO,
-            ) == gpu::INVALID_ARGUMENT,
-            "a depth resolve view on a format with a stencil aspect faults INVALID_ARGUMENT");
-    }
-
     assert(validation.errors == 0, "resolving multisample depth is validation-clean");
 }
 
@@ -1072,7 +1038,7 @@ fn void check_sample_coverage(
         .width  = DP_RT,
         .height = DP_RT,
     };
-    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT);
     gpu::ColorTargetState[1] color_targets = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
     graphics_state.color = { .targets = color_targets[..] };
     gpu::cmd_begin_render_pass(&commands, &pass)!!;

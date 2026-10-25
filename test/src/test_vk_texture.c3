@@ -471,15 +471,6 @@ fn void three_dimensional_texture_barriers_use_one_array_layer() @test {
         && capture.native.subresource_range.base_array_layer == 0
         && capture.native.subresource_range.layer_count == 1,
         "three-dimensional barriers cover full mip depth through one array layer");
-
-    barrier.view = { .base_layer = 1 };
-    assert(@catch(vk::vk_cmd_texture_barrier_with_ops(
-        vk::resolve_command(&commands),
-        &barrier,
-        &ops,
-    )) == gpu::INVALID_ARGUMENT
-        && capture.calls == 1,
-        "three-dimensional barrier slice selection faults before emission");
 }
 
 fn void default_texture_views_follow_usage_eligibility() @test {

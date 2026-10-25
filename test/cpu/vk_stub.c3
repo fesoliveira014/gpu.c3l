@@ -21,10 +21,7 @@ struct CommandRecord @public {
     char[]                           inline_root;
 }
 
-fn void? set_inline_root(CommandRecord* record, char[] inline_root) {
-    if (inline_root.len % 4 != 0 || inline_root.len > gpu::INLINE_ROOT_CAPACITY) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+fn void set_inline_root(CommandRecord* record, char[] inline_root) {
     record.inline_root = inline_root;
 }
 

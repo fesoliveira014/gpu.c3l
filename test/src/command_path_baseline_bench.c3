@@ -229,7 +229,7 @@ fn OperationSamples measure_copy(
         device,
         copy.src,
         copy.dst,
-    )!!;
+    );
     for (uint repetition = 0;
         repetition < COMMAND_PATH_REPETITIONS;
         repetition++
@@ -508,7 +508,7 @@ fn EquivalenceResult execute_copy_equivalence(
         device,
         source.span,
         direct_output.span,
-    )!!;
+    );
     vk::command_path_direct_copy_buffer(&native, &direct_copy);
     gpu::BufferCopyDesc public_copy = {
         .src = source.span,

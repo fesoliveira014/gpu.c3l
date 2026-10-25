@@ -1182,7 +1182,7 @@ fn void semantic_texture_barrier_maps_partial_ranges_and_aspects() @test {
     vk::ImageSubresourceRange color = gpu::internal::vk::resolve_texture_barrier_range(
         color_barrier.view,
         &color_slot,
-    )!!;
+    );
     assert(color.aspect_mask == vk::ImageAspectFlagBits.COLOR_BIT);
     assert(color.base_mip_level == 2);
     assert(color.level_count == 4);
@@ -1205,36 +1205,9 @@ fn void semantic_texture_barrier_maps_partial_ranges_and_aspects() @test {
     vk::ImageSubresourceRange depth = gpu::internal::vk::resolve_texture_barrier_range(
         depth_barrier.view,
         &depth_slot,
-    )!!;
+    );
     ulong expected_aspects = (ulong)vk::ImageAspectFlagBits.DEPTH_BIT;
     assert((ulong)depth.aspect_mask == expected_aspects);
-}
-
-fn void texture_barrier_range_rejects_invalid_ranges() @test {
-    gpu::internal::vk::TextureSlot slot = {
-        .format       = gpu::Format.RGBA8_UNORM,
-        .mip_levels   = 4,
-        .array_layers = 2,
-    };
-    gpu::TextureBarrier barrier = {
-        .before = { .layout = gpu::TextureLayout.UNDEFINED },
-        .after = {
-            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
-            .stages = { .transfer },
-            .access = { .write },
-        },
-    };
-
-    barrier.view.base_mip = 4;
-    assert(@catch(gpu::internal::vk::resolve_texture_barrier_range(barrier.view, &slot))
-            == gpu::INVALID_ARGUMENT,
-        "a mip base at the texture limit is invalid");
-
-    barrier.view = { .base_layer = 1, .layer_count = 2 };
-    assert(@catch(gpu::internal::vk::resolve_texture_barrier_range(barrier.view, &slot))
-            == gpu::INVALID_ARGUMENT,
-        "a layer range extending past the texture is invalid");
-
 }
 
 fn void semantic_barrier_stage_masks_map_exactly() @test {

@@ -70,7 +70,7 @@ fn void record_aspect_readback(
 }
 
 fn gpu::GraphicsState stencil_graphics_state(gpu::StencilFaceState face, bool color_on) {
-    gpu::GraphicsState state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::GraphicsState state = gpu::render_geometry_state(DP_RT, DP_RT);
     state.stencil = { .test_enable = true, .front = face, .back = face };
     return state;
 }
@@ -347,15 +347,6 @@ fn void stencil_aspect_samples_through_the_heap() @test {
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     record_depth_to_attach(&cmd, ds);
-    gpu::TextureViewDesc aspect_view = { .aspect = gpu::TextureAspect.DEPTH };
-    gpu::TextureBarrier bad_barrier = gpu::texture_view_transition(
-        texture: ds,
-        view:    aspect_view,
-        before:  { .layout = gpu::TextureLayout.DEPTH_ATTACHMENT, .stages = { .depth_output }, .access = { .read, .write } },
-        after:   gpu::sampled_at({ .compute }),
-    );
-    assert(@catch(gpu::cmd_texture_barrier(&cmd, &bad_barrier)) == gpu::INVALID_ARGUMENT,
-        "a barrier view must not select an aspect");
     gpu::DepthTargetDesc ds_target = {
         .view = ds_view,
         .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
@@ -630,7 +621,7 @@ fn void stencil_aspect_fetches_in_fragment_stage() @test {
     gpu::RenderPassDesc fetch_pass = { .colors = colors[..], .width = DP_RT, .height = DP_RT };
     gpu::cmd_begin_render_pass(&cmd, &fetch_pass)!!;
     gpu::cmd_bind_pipeline(&cmd, fetch)!!;
-    gpu::GraphicsState fetch_state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::GraphicsState fetch_state = gpu::render_geometry_state(DP_RT, DP_RT);
     gpu::ColorTargetState[1] color_on = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
     fetch_state.color = { .targets = color_on[..] };
     gpu::cmd_set_graphics_state(&cmd, &fetch_state)!!;

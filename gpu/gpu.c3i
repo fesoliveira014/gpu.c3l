@@ -1588,8 +1588,8 @@ struct GeneratedWorkReservationDesc {
     uint              concurrent_lists;
 }
 
-<* Byte-range copy for cmd_copy_buffer; src and dst must have equal size and
-   must not overlap. *>
+<* Byte-range copy for cmd_copy_buffer; src must not be larger than dst and
+   the ranges must not overlap. *>
 struct BufferCopyDesc {
     GpuSpan src;
     GpuSpan dst;

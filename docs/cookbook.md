@@ -339,7 +339,7 @@ gpu::ColorTargetDesc[1] colors = {{
     .clear    = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
 }};
 gpu::RenderPassDesc pass = { .colors = colors[..] };
-gpu::GraphicsState state = gpu::render_geometry_state(WIDTH, HEIGHT)!;
+gpu::GraphicsState state = gpu::render_geometry_state(WIDTH, HEIGHT);
 gpu::ColorTargetState[1] color_targets = { gpu::color_blend_disabled() };
 state.color.targets = color_targets[..];
 
@@ -407,7 +407,7 @@ gpu::RenderPassDesc pass = {
     .width  = WIDTH,
     .height = HEIGHT,
 };
-gpu::GraphicsState state = gpu::render_geometry_state(WIDTH, HEIGHT)!;
+gpu::GraphicsState state = gpu::render_geometry_state(WIDTH, HEIGHT);
 state.raster.cull_mode = gpu::CullMode.BACK;
 state.depth = {
     .test_enable  = true,
@@ -450,7 +450,7 @@ gpu::DepthTargetDesc ds_target = {
     .stencil_store_op = gpu::StoreOp.STORE,
     .clear            = { .depth = 1.0f, .stencil = 0 },
 };
-gpu::GraphicsState write_id = gpu::render_geometry_state(WIDTH, HEIGHT)!;
+gpu::GraphicsState write_id = gpu::render_geometry_state(WIDTH, HEIGHT);
 write_id.stencil = {
     .test_enable = true,
     .front = gpu::stencil_face(gpu::CompareOp.ALWAYS, gpu::StencilOp.REPLACE, 1),

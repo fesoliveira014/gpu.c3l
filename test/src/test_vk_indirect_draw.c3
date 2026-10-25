@@ -550,7 +550,7 @@ fn void compute_generated_indexed_indirect_draw() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
     gpu::GraphicsState graphics =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
@@ -1002,7 +1002,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         .height = IND_RT,
     };
     gpu::GraphicsState null_graphics =
-        gpu::render_geometry_state(null_pass.width, null_pass.height)!!;
+        gpu::render_geometry_state(null_pass.width, null_pass.height);
     gpu::ColorTargetState[1] null_color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
@@ -1063,7 +1063,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         .height = IND_RT,
     };
     gpu::GraphicsState plain_graphics =
-        gpu::render_geometry_state(plain_pass.width, plain_pass.height)!!;
+        gpu::render_geometry_state(plain_pass.width, plain_pass.height);
     gpu::ColorTargetState[1] plain_color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
@@ -1109,7 +1109,7 @@ fn void generated_work_executes_gpu_written_draws_and_dispatches() @test {
         .height = IND_RT,
     };
     gpu::GraphicsState indexed_graphics =
-        gpu::render_geometry_state(indexed_pass.width, indexed_pass.height)!!;
+        gpu::render_geometry_state(indexed_pass.width, indexed_pass.height);
     gpu::ColorTargetState[1] indexed_color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
@@ -1281,7 +1281,7 @@ fn void plain_indirect_draw_from_caller_owned_span() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
     gpu::GraphicsState graphics =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
@@ -1570,7 +1570,7 @@ fn void count_buffer_limits_draws() @test {
         }};
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
         gpu::GraphicsState graphics =
-            gpu::render_geometry_state(pass.width, pass.height)!!;
+            gpu::render_geometry_state(pass.width, pass.height);
         gpu::ColorTargetState[1] color_targets = {{
             .write_mask = gpu::COLOR_WRITE_ALL,
         }};

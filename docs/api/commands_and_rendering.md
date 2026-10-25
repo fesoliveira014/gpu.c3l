@@ -31,6 +31,12 @@ An allocator is bound to one queue and owns `command_buffer_capacity`
 reusable units. Each `begin_commands` takes a unit; the unit returns when
 its submission's completion point retires. A `null` descriptor selects the
 defaults. `MAX_COMMAND_ALLOCATOR_CAPACITY` limits an allocator to 4,096 units.
+`command_buffer_capacity` must not exceed it, and its product with
+`max_acceleration_structure_geometries_per_build` must fit `uint`. A nonzero
+`max_acceleration_structure_geometries_per_build` must not exceed
+`DeviceCaps.acceleration_structures.max_geometry_count`. These are contracts: a
+violation panics in safe builds. Asking for geometry capacity on a device
+without acceleration structures returns `UNSUPPORTED_FEATURE`.
 
 One allocator has one recording thread while any recording is live.
 Different allocators record in parallel. `destroy_command_allocator` never
@@ -108,6 +114,15 @@ Applications supply valid usage, alignment, bounds, and queue access. Copies
 resolve library handles and protect argument lowering. They do not transition
 textures or make results host-visible; record a barrier for each.
 
+The rules for these calls are contracts: a violation panics in safe builds.
+A `BufferCopyDesc.src` span must not be larger than its `dst` span. For the
+buffer-texture copies, `aspect` is a defined aspect the format has, `mip`
+is below the texture's mip count, the region lies within the mip extent and
+the texture's array layers, and the buffer span holds the whole region. A 3D
+texture uses layer zero and selects depth with `z` and `depth`; a 2D texture
+uses `z` zero and depth at most one. `row_length_texels` is zero or at least the
+copy width.
+
 Regions are in texels. The buffer side holds tightly packed rows unless
 `row_length_texels` sets a longer pitch, then slices (3D depth or array
 layers) back to back. For block-compressed formats the same rules apply in
@@ -143,6 +158,10 @@ pushed after the root header; see
 [shader ABI](../shader_abi.md#inline-payload). Group counts must fit
 `DeviceCaps.max_compute_work_group_count`. Indirect argument memory is a
 caller-owned span made visible with a barrier to `.indirect`.
+
+`inline_root` has a length that is a multiple of four and at most
+`INLINE_ROOT_CAPACITY`, and it must fit `ROOT_PUSH_CAPACITY` after the bound
+pipeline's header. These are contracts: a violation panics in safe builds.
 
 ## Render passes
 
@@ -180,6 +199,10 @@ the depth attachment's when there is no color target. Explicit values must
 fit every attachment. `render_geometry_state` still takes explicit
 dimensions.
 
+`desc.colors` holds at most `MAX_COLOR_ATTACHMENTS` entries. `width` and
+`height` are both zero or both nonzero, and a zero extent needs at least one
+attachment. These are contracts: a violation panics in safe builds.
+
 The required order inside a pass: bind a compatible pipeline, set a
 complete `GraphicsState`, draw. Pass begin does not bind, set, or
 transition anything. Attachments must already be in `COLOR_ATTACHMENT` or
@@ -206,10 +229,11 @@ gpu::DepthTargetDesc depth = {
 
 `SAMPLE_ZERO` is available on every device; `MIN` and `MAX` need the matching
 bit of `DeviceCaps.depth_resolve_modes`, otherwise `cmd_begin_render_pass`
-returns `UNSUPPORTED_FEATURE`. A depth resolve view on a format with a
-stencil aspect returns `INVALID_ARGUMENT`: stencil is not resolved. The
-resolve view must be single-sample, of the attachment's format and at least
-as large as the render area.
+returns `UNSUPPORTED_FEATURE`. `resolve_mode` is a defined
+`DepthResolveMode`. A depth resolve view must not be used with a format that
+has a stencil aspect, because stencil is not resolved; a violation panics in
+safe builds. The resolve view must be single-sample, of the attachment's
+format and at least as large as the render area.
 
 The resolve runs at the end of the pass in the colour-attachment-output
 stage, reading the multisample source with colour-attachment read access and
@@ -244,7 +268,7 @@ views after their last submitted use retires.
 ## Graphics state
 
 ```c3
-gpu::GraphicsState state = gpu::render_geometry_state(width, height)!;
+gpu::GraphicsState state = gpu::render_geometry_state(width, height);
 state.color.targets = targets[..];
 state.stencil = {
     .test_enable = true,
@@ -267,6 +291,11 @@ a compatible stencil attachment. The application must ensure that a stencil
 The library does not track stencil content history.
 Binding a pipeline or beginning a pass does not reset state. Fields are
 described in [shaders and pipelines](shaders_and_pipelines.md#graphics-pipelines).
+
+`render_geometry_state` takes `width` and `height` in `[1, int::max]` and
+returns the state directly. `state.color.targets` holds at most
+`MAX_COLOR_ATTACHMENTS` entries. These are contracts: a violation panics in
+safe builds.
 
 ## Draws
 
@@ -378,6 +407,12 @@ gpu::cmd_draw_indexed_generated(
 gpu::release_generated_work(&allocator, pipeline, gpu::GeneratedWorkKind.DRAW_INDEXED)!;
 ```
 
+`reserve_generated_work` needs a defined `kind`, nonzero `max_commands_per_list`
+and `concurrent_lists`, a pipeline of the matching kind (graphics for draws,
+compute for dispatches), and a `max_commands_per_list` within
+`DeviceCaps.max_generated_work_count`. `release_generated_work` needs a defined
+`kind`. These are contracts: a violation panics in safe builds.
+
 The backend derives and owns the private storage. Each generated call in
 flight holds one unit of `concurrent_lists` until its command unit
 retires, so two calls in one list use two units. Reserving the same key
@@ -463,7 +498,7 @@ command list; label text is borrowed only for the begin call.
 |---|---|
 | wrong token phase or unbalanced pass | `COMMAND_RECORDING_ERROR` |
 | unusable pipeline snapshot or incompatible implementation state | `INVALID_RESOURCE_STATE` |
-| bad range, count, or descriptor | `INVALID_ARGUMENT` |
+| bad acceleration-structure build descriptor | `INVALID_ARGUMENT` |
 | unavailable capability or native procedure | `UNSUPPORTED_FEATURE` |
 | every unit held by unsubmitted lists, or geometry capacity exceeded | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` |
 | generated reservation exceeded | `GENERATED_SCRATCH_EXHAUSTED` |

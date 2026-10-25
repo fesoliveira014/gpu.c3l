@@ -247,7 +247,7 @@ fn void exercise_command_family_render(
 
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     gpu::GraphicsState graphics =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};

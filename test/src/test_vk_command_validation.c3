@@ -589,7 +589,7 @@ fn void explicit_pipeline_binding_state_is_transactional() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -831,7 +831,7 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -951,7 +951,7 @@ fn void indirect_draw_count_limits_follow_command_contract() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1061,7 +1061,7 @@ fn void generated_work_commands_require_capability() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1139,7 +1139,7 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1285,48 +1285,6 @@ fn void barrier_hazard_matrix_submits() @test {
     gpu::wait_completion(completion)!!;
 }
 
-fn void zero_extent_pass_without_attachments_faults() @test {
-    gpu::RuntimeDesc desc = {
-        .enable_vulkan_validation = true,
-        .application_name  = "gpu_render_area_test",
-    };
-    gpu::Device device = create_test_device(&desc)!!;
-    defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-    gpu::RenderPassDesc empty = {};
-    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &empty)) == gpu::INVALID_ARGUMENT,
-        "a zero extent with no attachment faults before native recording");
-    gpu::RenderPassDesc half_zero = { .width = 16 };
-    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &half_zero)) == gpu::INVALID_ARGUMENT,
-        "a mixed extent faults before native recording");
-}
-
-fn void render_pass_color_count_limits_validate_before_lookup() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-
-    gpu::ColorTargetDesc[gpu::MAX_COLOR_ATTACHMENTS + 1] too_many;
-    gpu::RenderPassDesc library_limit = { .colors = too_many[..], .width = 1, .height = 1 };
-    assert(@catch(gpu::cmd_begin_render_pass(&cmd, &library_limit))
-        == gpu::INVALID_ARGUMENT,
-        "color count above MAX_COLOR_ATTACHMENTS faults before invalid handle lookup");
-    assert(@catch(gpu::cmd_end_render_pass(&cmd)) == gpu::COMMAND_RECORDING_ERROR, "library-limit rejection records no pass");
-
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
-    defer discard_test_executable(&cmd_executable)!!;
-}
-
 fn void many_precreated_views_record_across_allocator_reuse() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
@@ -1375,7 +1333,7 @@ fn void many_precreated_views_record_across_allocator_reuse() @test {
     }
 }
 
-fn void inline_root_length_is_validated() @test {
+fn void inline_root_at_capacity_records() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
     ValComputeCtx ctx = make_val_compute_ctx(&device);
@@ -1386,26 +1344,12 @@ fn void inline_root_length_is_validated() @test {
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&cmd)!!;
     bind_test_compute_pipeline(&cmd, ctx.pipeline);
-    char[gpu::INLINE_ROOT_CAPACITY + 4] bytes;
-    fault unaligned = @catch(gpu::cmd_dispatch(
-        commands:    &cmd,
-        root:        (gpu::GpuAddress)0,
-        groups:      { 1, 1, 1 },
-        inline_root: bytes[:3],
-    ));
-    assert(unaligned == gpu::INVALID_ARGUMENT, "a payload length not a multiple of four faults INVALID_ARGUMENT");
-    fault oversized = @catch(gpu::cmd_dispatch(
-        commands:    &cmd,
-        root:        (gpu::GpuAddress)0,
-        groups:      { 1, 1, 1 },
-        inline_root: bytes[..],
-    ));
-    assert(oversized == gpu::INVALID_ARGUMENT, "a payload past INLINE_ROOT_CAPACITY faults INVALID_ARGUMENT");
+    char[gpu::INLINE_ROOT_CAPACITY] bytes;
     gpu::cmd_dispatch(
         commands:    &cmd,
         root:        (gpu::GpuAddress)0,
         groups:      { 1, 1, 1 },
-        inline_root: bytes[:gpu::INLINE_ROOT_CAPACITY],
+        inline_root: bytes[..],
     )!!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&executable)!!;

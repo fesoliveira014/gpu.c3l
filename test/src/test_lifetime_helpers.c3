@@ -9,11 +9,11 @@ struct OwnedSpan {
     gpu::GpuSpan       span;
 }
 
+<* @require desc != null : "desc must not be null" *>
 fn gpu::Device? create_test_device(
     gpu::RuntimeDesc* desc,
     gpu::DeviceDesc* device_desc = null,
 ) {
-    if (desc == null) return gpu::INVALID_ARGUMENT~;
     gpu::DeviceDesc effective = device_desc == null ? (gpu::DeviceDesc){} : *device_desc;
     $if $feature(UNIFIED_LAYOUTS):
         effective.unified_layouts = true;

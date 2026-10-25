@@ -4,7 +4,7 @@ import gpu::internal @public;
 import gpu @public;
 
 fn void render_geometry_state_is_explicit_and_representable() @test {
-    gpu::GraphicsState state = gpu::render_geometry_state(320, 240)!!;
+    gpu::GraphicsState state = gpu::render_geometry_state(320, 240);
     assert(state.viewport.x == 0.0f && state.viewport.y == 0.0f);
     assert(state.viewport.width == 320.0f
         && state.viewport.height == 240.0f);
@@ -22,19 +22,6 @@ fn void render_geometry_state_is_explicit_and_representable() @test {
     assert(!state.depth.test_enable && !state.depth.write_enable);
     assert(state.depth.compare == gpu::CompareOp.NEVER);
     assert(state.color.targets.len == 0);
-
-    assert(@catch(gpu::render_geometry_state(0, 1))
-        == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::render_geometry_state(1, 0))
-        == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::render_geometry_state(
-        (uint)int::max + 1,
-        1,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::render_geometry_state(
-        1,
-        (uint)int::max + 1,
-    )) == gpu::INVALID_ARGUMENT);
 }
 
 fn void common_color_states_are_exact_and_caller_owned() @test {

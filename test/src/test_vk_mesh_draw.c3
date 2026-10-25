@@ -177,7 +177,7 @@ fn void mesh_pipeline_draws_meshlet_triangle() @test {
         .clear    = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = DP_RT, .height = DP_RT };
-    gpu::GraphicsState state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::GraphicsState state = gpu::render_geometry_state(DP_RT, DP_RT);
     gpu::ColorTargetState[1] color_on = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
     state.color = { .targets = color_on[..] };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
@@ -291,7 +291,7 @@ fn void mesh_indirect_draws_execute_gpu_written_arguments() @test {
         .clear    = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = DP_RT, .height = DP_RT };
-    gpu::GraphicsState state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::GraphicsState state = gpu::render_geometry_state(DP_RT, DP_RT);
     gpu::ColorTargetState[1] color_on = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
     state.color = { .targets = color_on[..] };
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
@@ -358,7 +358,7 @@ fn void mesh_and_vertex_pipelines_alternate_in_one_pass() @test {
     record_color_to_attach(&cmd, target);
     gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR }};
     gpu::RenderPassDesc pass = mesh_pass(colors[..]);
-    gpu::GraphicsState state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::GraphicsState state = gpu::render_geometry_state(DP_RT, DP_RT);
     gpu::ColorTargetState[1] color_on = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
     state.color = { .targets = color_on[..] };
     gpu::GpuAddress tri_root = test_span_address(&device, tri.span);
@@ -389,14 +389,6 @@ fn void mesh_and_vertex_pipelines_alternate_in_one_pass() @test {
     assert(record.descriptor_heap_binding.graphics_layout == device_state.mesh_layout,
         "binding a mesh pipeline rebinds the heap with the mesh layout");
     gpu::cmd_set_graphics_state(&cmd, &state)!!;
-    char[116] oversized;
-    assert(@catch(gpu::cmd_draw_mesh_tasks(
-        commands:      &cmd,
-        mesh_root:     tri_root,
-        fragment_root: color_root,
-        groups:        { 1, 1, 1 },
-        inline_root:   oversized[..],
-    )) == gpu::INVALID_ARGUMENT, "a mesh payload past the 128-byte block faults");
     gpu::cmd_draw_mesh_tasks(
         commands:      &cmd,
         mesh_root:     tri_root,

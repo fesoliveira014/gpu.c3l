@@ -558,7 +558,7 @@ fn void? render_passes(
         .clear    = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..] };
-    gpu::GraphicsState state = gpu::render_geometry_state(width, height)!;
+    gpu::GraphicsState state = gpu::render_geometry_state(width, height);
     gpu::ColorTargetState[1] color_state = { gpu::color_blend_disabled() };
     state.color.targets = color_state[..];
 

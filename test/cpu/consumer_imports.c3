@@ -14,6 +14,10 @@ fn gpu::RayTracingPipelineInfo ray_tracing_pipeline_info(gpu::Device* device, gp
     return gpu::get_ray_tracing_pipeline_info(device, pipeline);
 }
 
+fn gpu::GraphicsState geometry_state() {
+    return gpu::render_geometry_state(320, 240);
+}
+
 module gpu_surface_win32_import_only;
 
 import gpu::surface::win32;

@@ -2,11 +2,25 @@ module gpu::internal @private;
 
 import gpu;
 
-fn usz? indirect_argument_bytes(usz argument_size, uint count) @private {
+fn usz indirect_argument_bytes(usz argument_size, uint count) @private {
     if (count == 0) return 0;
     usz size_count = (usz)count;
-    if (argument_size > usz::max / size_count) return gpu::INVALID_ARGUMENT~;
+    assert(
+        argument_size <= usz::max / size_count,
+        "indirect argument byte size must fit in usz"
+    );
     return argument_size * size_count;
+}
+
+<* True when the allocator description's command-buffer capacity, after the
+   zero default, times its geometry capacity fits uint. *>
+fn bool command_allocator_geometry_capacity_fits(gpu::CommandAllocatorDesc* desc) @private {
+    uint geometries = desc.max_acceleration_structure_geometries_per_build;
+    if (geometries == 0) return true;
+    uint capacity = desc.command_buffer_capacity == 0
+        ? gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY
+        : desc.command_buffer_capacity;
+    return capacity <= uint::max / geometries;
 }
 
 <* True when the span is nonempty and holds at least `bytes` bytes. *>

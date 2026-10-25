@@ -446,3 +446,63 @@ fn void ray_tracing_stage_rules_reject_each_clause() @test {
     hit.entry_point = "";
     assert(!gpu::internal::ray_tracing_entry_points_valid(&desc), "a hit group entry must be valid");
 }
+
+fn void render_pass_rules_reject_each_clause() @test {
+    ColorTargetDesc[MAX_COLOR_ATTACHMENTS + 1] colors;
+    RenderPassDesc desc = { .colors = colors[:MAX_COLOR_ATTACHMENTS], .width = 4, .height = 4 };
+    assert(gpu::internal::render_pass_desc_valid(&desc));
+
+    desc.colors = colors[:MAX_COLOR_ATTACHMENTS + 1];
+    assert(!gpu::internal::render_pass_desc_valid(&desc), "more colors than the fixed array holds");
+
+    desc.colors = ((ColorTargetDesc*)null)[:1];
+    assert(!gpu::internal::render_pass_desc_valid(&desc), "a null color slice needs length 0");
+
+    desc.colors = colors[:1];
+    desc.height = 0;
+    assert(!gpu::internal::render_pass_desc_valid(&desc), "exactly one zero dimension");
+
+    desc.width = 0;
+    assert(gpu::internal::render_pass_desc_valid(&desc), "a zero extent with a color attachment");
+    desc.colors = {};
+    assert(!gpu::internal::render_pass_desc_valid(&desc), "a zero extent needs an attachment");
+
+    DepthTargetDesc depth = { .resolve_view = { .owner = 1, .generation = 1 }, .resolve_mode = bitcast(9, DepthResolveMode) };
+    desc.depth = &depth;
+    assert(!gpu::internal::render_pass_desc_valid(&desc), "a depth resolve needs a defined mode");
+    depth.resolve_mode = DepthResolveMode.MIN;
+    assert(gpu::internal::render_pass_desc_valid(&desc));
+}
+
+fn void color_state_rules_reject_each_clause() @test {
+    ColorTargetState[MAX_COLOR_ATTACHMENTS + 1] targets;
+    ColorState state = { .targets = targets[:MAX_COLOR_ATTACHMENTS] };
+    assert(gpu::internal::color_state_valid(&state));
+    state.targets = targets[:MAX_COLOR_ATTACHMENTS + 1];
+    assert(!gpu::internal::color_state_valid(&state), "more targets than the fixed array holds");
+    state.targets = ((ColorTargetState*)null)[:1];
+    assert(!gpu::internal::color_state_valid(&state), "a null target slice needs length 0");
+}
+
+fn void inline_root_rules_reject_each_clause() @test {
+    char[INLINE_ROOT_CAPACITY + 4] bytes;
+    assert(gpu::internal::inline_root_valid({}));
+    assert(gpu::internal::inline_root_valid(bytes[:INLINE_ROOT_CAPACITY]));
+    assert(!gpu::internal::inline_root_valid(bytes[:INLINE_ROOT_CAPACITY + 4]), "one word over capacity");
+    assert(!gpu::internal::inline_root_valid(bytes[:INLINE_ROOT_CAPACITY - 2]), "not a multiple of four");
+    assert(!gpu::internal::inline_root_valid(bytes[:3]), "not a multiple of four");
+}
+
+fn void command_allocator_rules_reject_each_clause() @test {
+    CommandAllocatorDesc desc = { .max_acceleration_structure_geometries_per_build = 4 };
+    assert(gpu::internal::command_allocator_geometry_capacity_fits(&desc), "the default capacity fits");
+    desc.command_buffer_capacity = uint::max / 4;
+    assert(gpu::internal::command_allocator_geometry_capacity_fits(&desc));
+    desc.command_buffer_capacity = uint::max / 4 + 1;
+    assert(!gpu::internal::command_allocator_geometry_capacity_fits(&desc), "the product overflows uint");
+    desc.max_acceleration_structure_geometries_per_build = 0;
+    assert(gpu::internal::command_allocator_geometry_capacity_fits(&desc), "no geometry capacity needs no product");
+    desc.max_acceleration_structure_geometries_per_build = uint::max;
+    desc.command_buffer_capacity = 0;
+    assert(!gpu::internal::command_allocator_geometry_capacity_fits(&desc), "the defaulted capacity counts");
+}

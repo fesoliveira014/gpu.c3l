@@ -846,7 +846,7 @@ fn void storage_write_then_fragment_sample() @test {
         .height = STORAGE_GRAPHICS_TARGET_SIZE,
     };
     gpu::GraphicsState graphics =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
@@ -1523,7 +1523,7 @@ fn void row_addressed_render_samples_shader_computed_index() @test {
             .height = STORAGE_GRAPHICS_TARGET_SIZE,
         };
         gpu::GraphicsState graphics_state =
-            gpu::render_geometry_state(pass.width, pass.height)!!;
+            gpu::render_geometry_state(pass.width, pass.height);
         gpu::ColorTargetState[1] color_targets = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
         graphics_state.color = { .targets = color_targets[..] };
         gpu::cmd_begin_render_pass(&cmd, &pass)!!;

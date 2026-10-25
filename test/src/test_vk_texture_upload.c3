@@ -643,15 +643,6 @@ fn void compressed_upload_mip_chain_sample_and_readback() @test {
     );
     gpu::cmd_texture_barrier(&cmd, &edge_to_dst)!!;
 
-    gpu::BufferTextureCopyDesc short_tail = {
-        .src     = staging.span.subspan(bc_mip_offset(3), 4),
-        .texture = chain,
-        .mip     = 3,
-    };
-    assert(@catch(gpu::cmd_copy_buffer_to_texture(&cmd, &short_tail))
-            == gpu::INVALID_ARGUMENT,
-        "a 1x1 tail mip still needs one whole block of source bytes");
-
     for (uint mip = 0; mip < BC_MIPS; mip++) {
         usz mip_bytes = mip == 0 ? BC1_BLOCK_BYTES * 4 : BC1_BLOCK_BYTES;
         gpu::BufferTextureCopyDesc upload = {
@@ -865,73 +856,6 @@ fn void storage_write_direct_readback() @test {
             assert(texel[3] == (char)255, "storage-written alpha reads back");
         }
     }
-}
-
-fn void copy_validation_faults() @test {
-    gpu::Device device = make_upload_test_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc tex_desc = {
-        .access    = { .graphics, .compute, .transfer },
-        .width     = UP_SIZE,
-        .height    = UP_SIZE,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .sampled, .transfer_dst },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-
-    OwnedSpan staging = allocate_owned_span(
-        device:       &device,
-        size:         MIP0_BYTES,
-        memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "copy_validation_staging",
-    )!!;
-    defer free_owned_span(&device, &staging)!!;
-    gpu::GpuSpan span = staging.span;
-    gpu::Queue command_queue = gpu::get_queue(
-        &device,
-        gpu::QueueKind.COMPUTE,
-    );
-    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
-        &device,
-        command_queue,
-    )!!;
-    defer gpu::destroy_command_allocator(&command_allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-
-    gpu::TextureBarrier to_dst = {
-        .texture = texture,
-        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
-        .after   = {
-            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
-            .stages = { .transfer },
-            .access = { .write },
-        },
-    };
-    gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
-
-    gpu::BufferTextureCopyDesc past_extent = { .src = span, .texture = texture, .width = UP_SIZE + 1 };
-    fault extent_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &past_extent));
-    assert(extent_fault == gpu::INVALID_ARGUMENT, "region past the mip extent faults INVALID_ARGUMENT");
-
-    gpu::BufferTextureCopyDesc past_span = { .src = span.subspan(0, MIP0_BYTES - 4), .texture = texture };
-    fault span_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &past_span));
-    assert(span_fault == gpu::INVALID_ARGUMENT, "copy bytes past the span fault INVALID_ARGUMENT");
-
-    gpu::BufferTextureCopyDesc misaligned = { .src = span.subspan(2, MIP0_BYTES - 2), .texture = texture };
-    fault align_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &misaligned));
-    assert(align_fault == gpu::INVALID_ARGUMENT, "misaligned span offset faults INVALID_ARGUMENT");
-
-    gpu::BufferTextureCopyDesc bad_mip = { .src = span, .texture = texture, .mip = 1 };
-    fault mip_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &bad_mip));
-    assert(mip_fault == gpu::INVALID_ARGUMENT, "copy to a missing mip faults INVALID_ARGUMENT");
-
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
-    defer discard_test_executable(&cmd_executable)!!;
 }
 
 fn void mip_subset_view_sampled() @test {

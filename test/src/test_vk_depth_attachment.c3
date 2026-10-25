@@ -280,7 +280,7 @@ fn void depth_test_occludes_both_orders() @test {
         };
         gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
         gpu::GraphicsState graphics_state =
-            gpu::render_geometry_state(DP_RT, DP_RT)!!;
+            gpu::render_geometry_state(DP_RT, DP_RT);
         graphics_state.depth = tested;
         gpu::ColorTargetState[1] color_targets = {{
             .write_mask = gpu::COLOR_WRITE_ALL,
@@ -390,7 +390,7 @@ fn void depth_write_toggle_honored() @test {
     };
     gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = no_write;
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
@@ -488,7 +488,7 @@ fn void depth_state_variants_share_entry() @test {
     };
     gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = tested;
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
@@ -564,7 +564,7 @@ fn void depth_only_pass_renders_footprint() @test {
     };
     gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = tested;
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
@@ -666,7 +666,7 @@ fn void sampled_depth_matches_readback() @test {
     };
     gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = tested;
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
@@ -867,7 +867,7 @@ fn void depth_nonzero_mip_layer_isolated() @test {
         .height = MIP_SIZE,
     };
     gpu::GraphicsState selected_graphics_state =
-        gpu::render_geometry_state(MIP_SIZE, MIP_SIZE)!!;
+        gpu::render_geometry_state(MIP_SIZE, MIP_SIZE);
     selected_graphics_state.depth = {
         .test_enable  = true,
         .write_enable = true,
@@ -1038,7 +1038,7 @@ fn void compare_sampler_exact_results() @test {
     };
     gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = tested;
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
@@ -1140,7 +1140,7 @@ fn void depth_bias_shifts_stored_depth() @test {
         };
         gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
         gpu::GraphicsState graphics_state =
-            gpu::render_geometry_state(DP_RT, DP_RT)!!;
+            gpu::render_geometry_state(DP_RT, DP_RT);
         graphics_state.depth = tested;
         if (i == 1) {
             graphics_state.raster = {

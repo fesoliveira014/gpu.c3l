@@ -205,25 +205,10 @@ fn void command_allocator_creation_rejects_before_publication() @test {
         &second,
         gpu::QueueKind.GRAPHICS,
     );
-    gpu::CommandAllocatorDesc oversized = {
-        .command_buffer_capacity = gpu::MAX_COMMAND_ALLOCATOR_CAPACITY + 1,
-    };
-
     gpu::Queue queue = gpu::get_queue(
         &first,
         gpu::QueueKind.GRAPHICS,
     );
-    assert(@catch(gpu::create_command_allocator(
-        &first,
-        queue,
-        &oversized,
-    )) == gpu::INVALID_ARGUMENT,
-        "an oversized descriptor is rejected before backend creation");
-    assert(first_fixture.state.allocator_creates == 0
-        && gpu::internal::device_slots[first.index].live_children.load(
-            AtomicOrdering.ACQUIRE,
-        ) == 0,
-        "validation failures publish no backend allocator or child");
 
     first_fixture.state.reject_allocator_create = true;
     assert(@catch(gpu::create_command_allocator(&first, queue))

@@ -102,6 +102,8 @@ gpu::TextureBarrier one_mip = gpu::texture_view_transition(texture, mip0, attach
 
 `before` must be the state established by the last ordered use. The
 library keeps no history and does not repair a wrong `before`. A
+`TextureBarrier.view` selects no aspect, so `aspect` stays `AUTO`, and its mip
+and layer range lies inside the texture; a violation panics in safe builds. A
 `TextureBarrier` value can be built inline as well. The helper functions
 return the barrier directly and require both layouts to be defined and
 `after.layout` not to be `UNDEFINED`; a violation panics in safe builds.

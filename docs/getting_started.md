@@ -509,7 +509,7 @@ gpu::ColorTargetDesc[1] colors = {{
 }};
 gpu::RenderPassDesc pass = { .colors = colors[..] };
 gpu::GraphicsState state =
-    gpu::render_geometry_state(swapchain_info.width, swapchain_info.height)!;
+    gpu::render_geometry_state(swapchain_info.width, swapchain_info.height);
 gpu::ColorTargetState[1] color_state = { gpu::color_blend_disabled() };
 state.color.targets = color_state[..];
 

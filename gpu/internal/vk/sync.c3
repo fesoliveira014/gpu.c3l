@@ -224,15 +224,14 @@ fn TextureStateScope texture_state_to_vk(
     }
 }
 
-fn vk::ImageSubresourceRange? resolve_texture_barrier_range(
+fn vk::ImageSubresourceRange resolve_texture_barrier_range(
     gpu::TextureViewDesc view,
     TextureSlot* slot,
 ) @private {
-    if (view.aspect != gpu::TextureAspect.AUTO
-        || view.base_mip >= slot.mip_levels
-        || view.base_layer >= slot.array_layers) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        view.base_mip < slot.mip_levels && view.base_layer < slot.array_layers,
+        "barrier.view base mip and base layer must lie inside the texture"
+    );
 
     uint mip_count = view.mip_count == 0
         ? slot.mip_levels - view.base_mip
@@ -240,10 +239,11 @@ fn vk::ImageSubresourceRange? resolve_texture_barrier_range(
     uint layer_count = view.layer_count == 0
         ? slot.array_layers - view.base_layer
         : view.layer_count;
-    if (mip_count > slot.mip_levels - view.base_mip
-        || layer_count > slot.array_layers - view.base_layer) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        mip_count <= slot.mip_levels - view.base_mip
+            && layer_count <= slot.array_layers - view.base_layer,
+        "barrier.view range must lie inside the texture"
+    );
 
     return {
         .aspect_mask      = format_aspect(slot.format),
@@ -290,7 +290,6 @@ fn LoweredTextureBarrier? lower_texture_barrier(
     CommandRecord* commands,
     gpu::TextureBarrier* barrier,
 ) {
-    if (barrier == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = commands;
     if (record.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
@@ -300,7 +299,7 @@ fn LoweredTextureBarrier? lower_texture_barrier(
     vk::ImageSubresourceRange range = resolve_texture_barrier_range(
         barrier.view,
         slot,
-    )!;
+    );
     TextureStateScope before = texture_state_to_vk(
         state:         barrier.before,
         format:        slot.format,
@@ -550,9 +549,6 @@ fn void? vk_cmd_barrier_with_ops(
     gpu::Barrier* barrier,
     BarrierEmitOps* ops,
 ) {
-    if (barrier == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     CommandRecord* record = commands;
     if (record.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;

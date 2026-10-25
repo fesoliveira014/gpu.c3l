@@ -1711,12 +1711,19 @@ fn usz? get_pipeline_cache_data(Device* device, char[] out) {
    Zero command-buffer capacity defaults to 32; acceleration-structure geometry
    capacity stays disabled at zero. Storage scales with their product.
    Generated-work storage is sized by reserve_generated_work.
-   Creation may fault for invalid limits, host/device allocation failure, or a
-   full allocator table.
+   `command_buffer_capacity` must not exceed MAX_COMMAND_ALLOCATOR_CAPACITY and
+   its product with `max_acceleration_structure_geometries_per_build` must fit
+   `uint`. A nonzero `max_acceleration_structure_geometries_per_build` must not
+   exceed `DeviceCaps` `acceleration_structures.max_geometry_count`; that rule
+   reads device state, so a violation panics in safe builds. Creation may fault
+   for unsupported acceleration-structure recording, host/device allocation
+   failure, or a full allocator table.
    @param device : "Live device that will own the allocator."
    @param queue : "Exact selected queue the allocator records for."
    @param desc : "Borrowed capacity description; null or zero fields select defaults."
-   @return "An owning allocator, or a recoverable validation, unsupported-feature, capacity, or allocation fault." *>
+   @return "An owning allocator, or a recoverable unsupported-feature, capacity, or allocation fault."
+   @require desc == null || desc.command_buffer_capacity <= MAX_COMMAND_ALLOCATOR_CAPACITY : "desc.command_buffer_capacity must not exceed MAX_COMMAND_ALLOCATOR_CAPACITY"
+   @require desc == null || gpu::internal::command_allocator_geometry_capacity_fits(desc) : "desc.command_buffer_capacity times desc.max_acceleration_structure_geometries_per_build must fit in uint" *>
 fn CommandAllocator? create_command_allocator(Device* device, Queue queue, CommandAllocatorDesc* desc = null) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -1725,24 +1732,15 @@ fn CommandAllocator? create_command_allocator(Device* device, Queue queue, Comma
     if (normalized.command_buffer_capacity == 0) {
         normalized.command_buffer_capacity = DEFAULT_COMMAND_ALLOCATOR_CAPACITY;
     }
-    if (normalized.command_buffer_capacity > MAX_COMMAND_ALLOCATOR_CAPACITY) {
-        return INVALID_ARGUMENT~;
-    }
     if (normalized.max_acceleration_structure_geometries_per_build > 0) {
         if (!operation.data.caps.acceleration_structures.enabled) {
             return UNSUPPORTED_FEATURE~;
         }
-        if (normalized.max_acceleration_structure_geometries_per_build
-            > operation.data.caps.acceleration_structures.max_geometry_count) {
-            return INVALID_ARGUMENT~;
-        }
-    }
-    if (normalized.max_acceleration_structure_geometries_per_build > 0
-        && normalized.command_buffer_capacity
-            > uint::max
-                / normalized
-                    .max_acceleration_structure_geometries_per_build) {
-        return INVALID_ARGUMENT~;
+        assert(
+            normalized.max_acceleration_structure_geometries_per_build
+                <= operation.data.caps.acceleration_structures.max_geometry_count,
+            "desc.max_acceleration_structure_geometries_per_build must not exceed DeviceCaps.acceleration_structures.max_geometry_count"
+        );
     }
     CommandAllocator allocator = {
         .device = *device,
@@ -1795,28 +1793,34 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
    requested command count and concurrency imply; the allocator's fixed
    reservation table bounds replacement. Reservation is transactional: on
    failure the previous matching reservation stays published and usable.
-   The caller externally synchronizes the allocator.
+   The caller externally synchronizes the allocator. `desc.kind` must be a
+   defined `GeneratedWorkKind`, `desc.max_commands_per_list` and
+   `desc.concurrent_lists` must be greater than 0, and the pipeline must match
+   the kind: graphics for DRAW and DRAW_INDEXED, compute for DISPATCH.
+   `desc.max_commands_per_list` must not exceed `DeviceCaps`
+   `max_generated_work_count`. The pipeline and limit rules read pipeline and
+   device state, so a violation panics in safe builds.
    @param allocator : "Live quiescent allocator that owns the reservation."
    @param desc : "Borrowed pipeline, work-kind, command-count, and concurrency description."
-   @return "Success, or a recoverable validation, capacity, or allocation fault." *>
+   @return "Success, or a recoverable unsupported-feature, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::generated_work_kind_valid(desc.kind) : "desc.kind must be a defined GeneratedWorkKind"
+   @require desc.max_commands_per_list > 0 : "desc.max_commands_per_list must be greater than 0"
+   @require desc.concurrent_lists > 0 : "desc.concurrent_lists must be greater than 0" *>
 fn void? reserve_generated_work(CommandAllocator* allocator, GeneratedWorkReservationDesc* desc) {
     if (allocator == null) abort("gpu: null CommandAllocator");
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_command_allocator(&operation, allocator);
-    if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_resource_owner(
         &operation,
         desc.pipeline.owner,
         gpu::internal::ResourceOwnerKind.PIPELINE,
     );
-    if (!gpu::internal::generated_work_kind_valid(desc.kind)
-        || desc.max_commands_per_list == 0
-        || desc.concurrent_lists == 0
-        || desc.max_commands_per_list
-            > operation.data.caps.max_generated_work_count) {
-        return INVALID_ARGUMENT~;
-    }
+    assert(
+        desc.max_commands_per_list <= operation.data.caps.max_generated_work_count,
+        "desc.max_commands_per_list must not exceed DeviceCaps.max_generated_work_count"
+    );
     return gpu::internal::vk::vk_reserve_generated_work(
         operation.state,
         allocator,
@@ -1830,7 +1834,8 @@ fn void? reserve_generated_work(CommandAllocator* allocator, GeneratedWorkReserv
    @param allocator : "Live quiescent allocator that owns the reservation."
    @param pipeline : "Exact pipeline named by the reservation."
    @param kind : "Generated-work record kind named by the reservation."
-   @return "Success, or a recoverable validation fault." *>
+   @return "Success, or a recoverable unsupported-feature, in-use, or resource-state fault."
+   @require gpu::internal::generated_work_kind_valid(kind) : "kind must be a defined GeneratedWorkKind" *>
 fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipeline, GeneratedWorkKind kind) {
     if (allocator == null) abort("gpu: null CommandAllocator");
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device);
@@ -1841,7 +1846,6 @@ fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipe
         pipeline.owner,
         gpu::internal::ResourceOwnerKind.PIPELINE,
     );
-    if (!gpu::internal::generated_work_kind_valid(kind)) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_release_generated_work(
         state:     operation.state,
         allocator: allocator,
@@ -1968,13 +1972,15 @@ fn void cmd_end_label(CommandList* commands) {
 
 <* Record a buffer-to-buffer copy; surrounding barriers are caller-owned.
    Preconditions: usage and queue access are valid.
-   Always checked: token phase, required pointer, identity, bounds, and safe lowering.
+   Always checked: token phase, identity, bounds, and safe lowering.
+   `desc.src.size` must not exceed `desc.dst.size`.
    @param commands : "Live recording token."
    @param desc : "Borrowed exact source and destination ranges."
-   @return "Success, or a recoverable command or validation fault."
+   @return "Success, or a recoverable command fault."
    @require desc != null : "desc must not be null"
    @require desc.src.size > 0 : "desc.src.size must be greater than 0"
-   @require desc.dst.size > 0 : "desc.dst.size must be greater than 0" *>
+   @require desc.dst.size > 0 : "desc.dst.size must be greater than 0"
+   @require desc.src.size <= desc.dst.size : "desc.src.size must not exceed desc.dst.size" *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_copy_buffer(record, desc);
@@ -1998,15 +2004,21 @@ fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
 <* Record a dimension-aware buffer-to-texture copy; the effective layout is
    TRANSFER_DST and surrounding barriers remain caller-owned.
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
-   Always checked: token phase, required pointer, identities, format support,
-   dimension/subresource/extent bounds, byte-size overflow, and safe lowering.
+   Always checked: token phase, identities, and safe lowering.
    `desc.aspect` must be a defined aspect the texture format has, and `AUTO` must
-   not select a combined depth-stencil format; a violation panics in safe builds.
+   not select a combined depth-stencil format. `desc.mip` must be below the
+   texture's mip count and the region must lie within the mip extent and the
+   texture's array layers: a 3D texture uses layer 0 and selects depth through
+   `z` and `depth`, a 2D texture uses `z` 0 and depth at most 1, and a zero
+   extent selects the remainder from the origin. `desc.row_length_texels` must
+   be zero or at least the copy width, and the buffer span must hold the whole
+   copy. These rules read texture state, so a violation panics in safe builds.
    @param commands : "Live recording token."
    @param desc : "Borrowed source-span and destination-texture region."
-   @return "Success, or a recoverable command, validation, bounds, alignment, or support fault."
+   @return "Success, or a recoverable command fault."
    @require desc != null : "desc must not be null"
-   @require desc.src.size > 0 : "desc.src.size must be greater than 0" *>
+   @require desc.src.size > 0 : "desc.src.size must be greater than 0"
+   @require gpu::internal::texture_aspect_valid(desc.aspect) : "desc.aspect must be a defined TextureAspect" *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_copy_buffer_to_texture(record, desc);
@@ -2015,15 +2027,21 @@ fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc
 <* Record a dimension-aware texture-to-buffer copy; the effective layout is
    TRANSFER_SRC and surrounding barriers remain caller-owned.
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
-   Always checked: token phase, required pointer, identities, format support,
-   dimension/subresource/extent bounds, byte-size overflow, and safe lowering.
+   Always checked: token phase, identities, and safe lowering.
    `desc.aspect` must be a defined aspect the texture format has, and `AUTO` must
-   not select a combined depth-stencil format; a violation panics in safe builds.
+   not select a combined depth-stencil format. `desc.mip` must be below the
+   texture's mip count and the region must lie within the mip extent and the
+   texture's array layers: a 3D texture uses layer 0 and selects depth through
+   `z` and `depth`, a 2D texture uses `z` 0 and depth at most 1, and a zero
+   extent selects the remainder from the origin. `desc.row_length_texels` must
+   be zero or at least the copy width, and the buffer span must hold the whole
+   copy. These rules read texture state, so a violation panics in safe builds.
    @param commands : "Live recording token."
    @param desc : "Borrowed source-texture and destination-span region."
-   @return "Success, or a recoverable command, validation, bounds, alignment, or support fault."
+   @return "Success, or a recoverable command fault."
    @require desc != null : "desc must not be null"
-   @require desc.dst.size > 0 : "desc.dst.size must be greater than 0" *>
+   @require desc.dst.size > 0 : "desc.dst.size must be greater than 0"
+   @require gpu::internal::texture_aspect_valid(desc.aspect) : "desc.aspect must be a defined TextureAspect" *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_copy_texture_to_buffer(record, desc);
@@ -2198,11 +2216,12 @@ macro char[] @inline_root(value) => ((char*)value)[:@sizeof(*value)];
    @param commands : "Live recording token."
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param groups : "Workgroup counts in X, Y, and Z."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, pipeline, or limit fault." *>
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
+   @return "Success, or a recoverable command, pipeline, or limit fault."
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_dispatch(record, root, groups);
 }
 
@@ -2214,12 +2233,13 @@ fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups, char
    @param commands : "Live recording token."
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param args : "Non-owning span containing one GPU-written dispatch record."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
    @return "Success, or a recoverable command or pipeline fault."
-   @require gpu::internal::span_holds_bytes(args, DispatchIndirectCommand::size) : "args must be nonempty and hold one DispatchIndirectCommand" *>
+   @require gpu::internal::span_holds_bytes(args, DispatchIndirectCommand::size) : "args must be nonempty and hold one DispatchIndirectCommand"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_dispatch_indirect(record, root, args);
 }
 
@@ -2256,8 +2276,10 @@ fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan 
    @param root : "Root GPU address passed unchanged to all ray-tracing stages."
    @param shader_binding_table : "Borrowed caller-owned SBT regions."
    @param dimensions : "Nonzero direct trace width, height, and depth within the selected device limits."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, pipeline, SBT, range, or limit fault." *>
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
+   @return "Success, or a recoverable command, pipeline, SBT, range, or limit fault."
+   @require shader_binding_table != null : "shader_binding_table must not be null"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_trace_rays(
     CommandList* commands,
     GpuAddress root,
@@ -2267,8 +2289,7 @@ fn void? cmd_trace_rays(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
-    if (shader_binding_table == null) return INVALID_ARGUMENT~;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_trace_rays(
         record,
         root,
@@ -2286,9 +2307,11 @@ fn void? cmd_trace_rays(
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param shader_binding_table : "Borrowed caller-owned direct shader binding table regions."
    @param args : "Caller-owned span beginning with one GPU-written TraceRaysIndirectCommand, valid through completion."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
    @return "Success, or a recoverable command, pipeline, or support fault."
-   @require gpu::internal::span_holds_bytes(args, TraceRaysIndirectCommand::size) : "args must be nonempty and hold one TraceRaysIndirectCommand" *>
+   @require shader_binding_table != null : "shader_binding_table must not be null"
+   @require gpu::internal::span_holds_bytes(args, TraceRaysIndirectCommand::size) : "args must be nonempty and hold one TraceRaysIndirectCommand"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_trace_rays_indirect(
     CommandList* commands,
     GpuAddress root,
@@ -2298,8 +2321,7 @@ fn void? cmd_trace_rays_indirect(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
-    if (shader_binding_table == null) return INVALID_ARGUMENT~;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_trace_rays_indirect(
         record,
         root,
@@ -2315,13 +2337,14 @@ fn void? cmd_trace_rays_indirect(
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param args : "Caller-owned span beginning with one GPU-written TraceRaysIndirectCommand2; the packet and every shader binding table allocation it addresses must remain valid through completion."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
    @return "Success, or a recoverable command, pipeline, or support fault."
-   @require gpu::internal::span_holds_bytes(args, TraceRaysIndirectCommand2::size) : "args must be nonempty and hold one TraceRaysIndirectCommand2" *>
+   @require gpu::internal::span_holds_bytes(args, TraceRaysIndirectCommand2::size) : "args must be nonempty and hold one TraceRaysIndirectCommand2"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_trace_rays_indirect2(record, root, args);
 }
 
@@ -2407,12 +2430,10 @@ fn StencilFaceState stencil_face(CompareOp compare, StencilOp pass, uint referen
    color pipeline. Dimensions must be in [1, int::max].
    @param width : "Positive render width representable as int."
    @param height : "Positive render height representable as int."
-   @return "A caller-owned graphics state, or a recoverable invalid-argument fault." *>
-fn GraphicsState? render_geometry_state(uint width, uint height) {
-    if (width == 0 || height == 0
-        || width > (uint)int::max || height > (uint)int::max) {
-        return INVALID_ARGUMENT~;
-    }
+   @return "A caller-owned graphics state."
+   @require width > 0 && width <= (uint)int::max : "width must be in [1, int::max]"
+   @require height > 0 && height <= (uint)int::max : "height must be in [1, int::max]" *>
+fn GraphicsState render_geometry_state(uint width, uint height) {
     return {
         .viewport = {
             .width     = (float)width,
@@ -2430,27 +2451,36 @@ fn GraphicsState? render_geometry_state(uint width, uint height) {
 
 <* Begin a render pass without changing command-buffer graphics state.
    Preconditions: attachments, layouts, queue access, dimensions, and pass phase are valid.
-   Always checked: token phase, host-safe descriptor shape, a render area zero in
-   exactly one dimension, identities, and safe lowering.
+   Always checked: token phase, identities, and safe lowering.
+   `desc.colors` must hold at most MAX_COLOR_ATTACHMENTS entries and not be a
+   null slice with nonzero length. `desc.width` and `desc.height` must be both
+   zero or both nonzero, and a zero extent needs at least one attachment.
+   `desc.depth.resolve_mode` must be a defined `DepthResolveMode` when a depth
+   resolve view is set. A depth resolve needs a depth-only attachment format;
+   that rule reads view state, so a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed attachment and render-area description copied into the command stream; a zero extent selects the first attachment's extent."
-   @return "Success, or a recoverable command, validation, or compatibility fault." *>
+   @return "Success, or a recoverable command, resource-state, or compatibility fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::render_pass_desc_valid(desc) : "desc.colors must hold at most MAX_COLOR_ATTACHMENTS entries and not be a null slice with nonzero length, desc.width and desc.height must be both zero or both nonzero, a zero extent needs an attachment, and desc.depth.resolve_mode must be a defined DepthResolveMode when a depth resolve view is set" *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    if (!gpu::internal::render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_begin_render_pass(record, desc);
 }
 
 <* Replace complete graphics state before or during a pass.
    Preconditions: a compatible graphics pipeline is bound, the queue is
    graphics-capable, and all state values are valid.
-   Always checked: token phase, required host-safe input, and safe lowering.
+   Always checked: token phase and safe lowering.
+   `state.color.targets` must hold at most MAX_COLOR_ATTACHMENTS entries and
+   not be a null slice with nonzero length.
    @param commands : "Live recording token."
    @param state : "Borrowed complete graphics state copied into the command stream."
-   @return "Success, or a recoverable command, validation, pipeline, or support fault." *>
+   @return "Success, or a recoverable command, pipeline, or support fault."
+   @require state != null : "state must not be null"
+   @require gpu::internal::color_state_valid(&state.color) : "state.color.targets must hold at most MAX_COLOR_ATTACHMENTS entries and not be a null slice with nonzero length" *>
 fn void? cmd_set_graphics_state(CommandList* commands, GraphicsState* state) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    if (!gpu::internal::graphics_state_host_safe(state)) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_set_graphics_state(record, state);
 }
 
@@ -2492,11 +2522,12 @@ fn void cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
    @param vertex_count : "Vertices drawn per instance."
    @param instance_count : "Instances to draw."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, pipeline, state, or limit fault." *>
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
+   @return "Success, or a recoverable command, pipeline, state, or limit fault."
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw(
         commands:        record,
         vertex_root:    vertex_root,
@@ -2518,12 +2549,13 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    @param index_count : "Indices drawn per instance."
    @param instance_count : "Instances to draw."
    @param index_type : "Index element width; defaults to U32."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
    @return "Success, or a recoverable command, pipeline, or state fault."
-   @require gpu::internal::index_span_holds_indices(index_span, index_type, index_count) : "index_span must be nonempty and hold index_count indices of index_type" *>
+   @require gpu::internal::index_span_holds_indices(index_span, index_type, index_count) : "index_span must be nonempty and hold index_count indices of index_type"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_indexed(
         commands:        record,
         vertex_root:    vertex_root,
@@ -2543,10 +2575,11 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    @param fragment_root : "Fragment root address."
    @param groups : "Task work groups with a task shader, else mesh work groups."
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
-   @return "Success, or a recoverable command, pipeline, support, or limit fault." *>
+   @return "Success, or a recoverable command, pipeline, support, or limit fault."
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, Vec3u groups, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_mesh_tasks(
         commands:        record,
         mesh_root:     mesh_root,
@@ -2565,10 +2598,11 @@ fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAdd
    @param draw_count : "Number of records to execute."
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
    @return "Success, or a recoverable command, support, or pipeline fault."
-   @require gpu::internal::span_holds_records(args, DrawMeshTasksIndirectCommand::size, draw_count) : "args must be nonempty and hold draw_count DrawMeshTasksIndirectCommand values" *>
+   @require gpu::internal::span_holds_records(args, DrawMeshTasksIndirectCommand::size, draw_count) : "args must be nonempty and hold draw_count DrawMeshTasksIndirectCommand values"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_mesh_tasks_indirect(
         commands:        record,
         mesh_root:     mesh_root,
@@ -2589,10 +2623,11 @@ fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_roo
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
    @return "Success, or a recoverable command, support, or pipeline fault."
    @require gpu::internal::span_holds_records(args, DrawMeshTasksIndirectCommand::size, max_draw_count) : "args must be nonempty and hold max_draw_count DrawMeshTasksIndirectCommand values"
-   @require gpu::internal::span_holds_bytes(count_span, uint::size) : "count_span must be nonempty and hold one uint" *>
+   @require gpu::internal::span_holds_bytes(count_span, uint::size) : "count_span must be nonempty and hold one uint"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_mesh_tasks_indirect_count(
         commands:         record,
         mesh_root:      mesh_root,
@@ -2613,12 +2648,13 @@ fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress me
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
    @param args : "Non-owning array of indirect draw records kept alive by the caller through completion."
    @param draw_count : "Number of indirect records to execute."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
    @return "Success, or a recoverable command, pipeline, or state fault."
-   @require gpu::internal::span_holds_records(args, DrawIndirectCommand::size, draw_count) : "args must be nonempty and hold draw_count DrawIndirectCommand values" *>
+   @require gpu::internal::span_holds_records(args, DrawIndirectCommand::size, draw_count) : "args must be nonempty and hold draw_count DrawIndirectCommand values"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_indirect(
         commands:       record,
         vertex_root:   vertex_root,
@@ -2640,13 +2676,14 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    @param draw_count : "Number of indirect records to execute."
    @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
    @return "Success, or a recoverable command, pipeline, or state fault."
    @require gpu::internal::span_holds_records(args, DrawIndexedIndirectCommand::size, draw_count) : "args must be nonempty and hold draw_count DrawIndexedIndirectCommand values"
-   @require index_span.size > 0 : "index_span.size must be greater than 0" *>
+   @require index_span.size > 0 : "index_span.size must be greater than 0"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_indexed_indirect(
         commands:       record,
         vertex_root:   vertex_root,
@@ -2672,14 +2709,15 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    @param max_draw_count : "Maximum records the GPU count may select."
    @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
    @return "Success, or a recoverable command, support, pipeline, or state fault."
    @require gpu::internal::span_holds_records(args, DrawIndexedIndirectCommand::size, max_draw_count) : "args must be nonempty and hold max_draw_count DrawIndexedIndirectCommand values"
    @require gpu::internal::span_holds_bytes(count_span, uint::size) : "count_span must be nonempty and hold one uint"
-   @require index_span.size > 0 : "index_span.size must be greater than 0" *>
+   @require index_span.size > 0 : "index_span.size must be greater than 0"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_indexed_indirect_count(
         commands:        record,
         vertex_root:    vertex_root,
@@ -2826,26 +2864,30 @@ fn TextureBarrier texture_transition(TextureHandle texture, TextureState before,
 
 <* Record a global semantic execution and memory barrier.
    Preconditions: stages are known, consistent, and queue-supported.
-   Always checked: token identity, authoritative phase, required pointer, and
+   Always checked: token identity, authoritative phase, and
    `index_input` on the source side.
    @param commands : "Live recording token."
    @param barrier : "Borrowed source and destination execution scopes."
-   @return "Success, or a recoverable command, validation, or queue-support fault." *>
+   @return "Success, or a recoverable command, validation, or queue-support fault."
+   @require barrier != null : "barrier must not be null" *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    if (barrier == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_barrier(record, barrier);
 }
 
 <* Record an explicit semantic texture transition.
    Preconditions: the texture, range, states, usage, and queue access are valid.
-   Always checked: token phase, required pointer, texture identity, range, and safe lowering.
+   Always checked: token phase, texture identity, and safe lowering.
+   `barrier.view.aspect` must be `AUTO`. The view's base mip and layer and its
+   mip and layer counts must lie inside the texture; that rule reads texture
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token."
    @param barrier : "Borrowed texture, subresource range, and semantic states."
-   @return "Success, or a recoverable command, validation, range, or support fault." *>
+   @return "Success, or a recoverable command, validation, or support fault."
+   @require barrier != null : "barrier must not be null"
+   @require barrier.view.aspect == TextureAspect.AUTO : "barrier.view.aspect must be AUTO" *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    if (barrier == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_texture_barrier(record, barrier);
 }
 

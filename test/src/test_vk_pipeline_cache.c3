@@ -428,7 +428,7 @@ fn void two_color_targets_lower_independent_blend_and_write_masks() @test {
         .height = CACHE_RT_SIZE,
     };
     gpu::GraphicsState graphics =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     graphics.color.targets = color_targets[..];
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
     bind_test_graphics_pipeline(&commands, pipeline);
@@ -1334,7 +1334,7 @@ fn void dynamic_raster_state_renders_with_one_pipeline() @test {
         }};
         gpu::RenderPassDesc pass = { .colors = colors[..], .width = CACHE_RT_SIZE, .height = CACHE_RT_SIZE };
         gpu::GraphicsState graphics =
-            gpu::render_geometry_state(pass.width, pass.height)!!;
+            gpu::render_geometry_state(pass.width, pass.height);
         gpu::ColorTargetState[1] color_targets = {
             gpu::color_blend_disabled(),
         };
@@ -1506,7 +1506,7 @@ fn void alias_survives_peer_destroy() @test {
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = CACHE_RT_SIZE, .height = CACHE_RT_SIZE };
     gpu::GraphicsState graphics =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -2168,7 +2168,7 @@ fn void repeated_format_only_graphics_calls_alias_one_pipeline_identity() @test 
         gpu::color_blend_disabled(red_green),
     };
     gpu::GraphicsState graphics =
-        gpu::render_geometry_state(16, 16)!!;
+        gpu::render_geometry_state(16, 16);
     foreach (i, pipeline : pipelines) {
         gpu::cmd_bind_pipeline(&commands, pipeline)!!;
         gpu::ColorTargetState[1] targets = { packets[i] };

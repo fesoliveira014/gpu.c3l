@@ -104,12 +104,6 @@ fn void span_ranges_preserve_native_bounds() @test {
         .dst = mapped.span.subspan(128, 64),
     };
     gpu::cmd_copy_buffer(&commands, &disjoint)!!;
-    gpu::BufferCopyDesc unequal = {
-        .src = mapped.span.subspan(0, 64),
-        .dst = mapped.span.subspan(128, 32),
-    };
-    assert(@catch(gpu::cmd_copy_buffer(&commands, &unequal)) == gpu::INVALID_ARGUMENT,
-        "a copy cannot exceed the destination span");
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;

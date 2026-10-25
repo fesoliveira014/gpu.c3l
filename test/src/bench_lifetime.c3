@@ -11,11 +11,11 @@ fn bool bench_validation_enabled() {
     return false;
 }
 
+<* @require desc != null : "desc must not be null" *>
 fn gpu::Device? create_bench_device(
     gpu::RuntimeDesc* desc,
     bool explicit_policy = false,
 ) {
-    if (desc == null) return gpu::INVALID_ARGUMENT~;
     gpu::RuntimeDesc runtime_desc = *desc;
     if (bench_validation_enabled() && !explicit_policy) {
         runtime_desc.enable_vulkan_validation = true;

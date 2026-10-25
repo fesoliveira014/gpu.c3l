@@ -82,7 +82,7 @@ scissor with triangles, no culling, no depth, and an empty color packet.
 Fill `color.targets` before drawing:
 
 ```c3
-gpu::GraphicsState state = gpu::render_geometry_state(width, height)!;
+gpu::GraphicsState state = gpu::render_geometry_state(width, height);
 gpu::ColorTargetState[2] targets = {
     gpu::color_blend_disabled(),
     gpu::alpha_blend(),
