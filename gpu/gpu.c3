@@ -780,31 +780,29 @@ fn uint texture_mip_dimension(uint size, uint mip) {
    whole blocks per row, block rows per slice, 3D slices back to back.
    @param desc : "Borrowed texture description."
    @param mip : "Zero-based mip level below the description's mip count."
-   @return "The byte footprint, or INVALID_ARGUMENT for a null or undefined-format description or a missing mip." *>
-fn usz? texture_mip_bytes(TextureDesc* desc, uint mip) {
+   @return "The byte footprint."
+   @require desc != null : "desc must not be null"
+   @require mip < gpu::internal::texture_mip_levels(desc) : "mip must be below the description's mip count"
+   @require gpu::internal::format_aspect_block(desc.format, TextureAspect.AUTO).bytes != 0 : "desc.format must be defined and must not be a combined depth-stencil format" *>
+fn usz texture_mip_bytes(TextureDesc* desc, uint mip) {
     return texture_mip_aspect_bytes(desc, mip, TextureAspect.AUTO);
 }
 
 <* Tightly packed bytes of one aspect of one array layer of a mip. The depth
    aspect of a combined format is 4 bytes per texel and stencil is 1; `AUTO`
-   faults for a combined format.
+   must not be used with a combined format.
    @param desc : "Borrowed texture description."
    @param mip : "Zero-based mip level below the description's mip count."
    @param aspect : "Aspect to size; AUTO for single-aspect formats."
-   @return "The byte footprint, or INVALID_ARGUMENT for a null description, a missing mip, or an aspect the format cannot select." *>
-fn usz? texture_mip_aspect_bytes(TextureDesc* desc, uint mip, TextureAspect aspect) {
-    if (desc == null || mip >= gpu::internal::texture_mip_levels(desc)) {
-        return INVALID_ARGUMENT~;
-    }
-    if (!gpu::internal::texture_aspect_valid(aspect)) return INVALID_ARGUMENT~;
-    if (aspect == TextureAspect.DEPTH && !gpu::internal::format_has_depth(desc.format)) {
-        return INVALID_ARGUMENT~;
-    }
-    if (aspect == TextureAspect.STENCIL && !gpu::internal::format_has_stencil(desc.format)) {
-        return INVALID_ARGUMENT~;
-    }
+   @return "The byte footprint."
+   @require desc != null : "desc must not be null"
+   @require mip < gpu::internal::texture_mip_levels(desc) : "mip must be below the description's mip count"
+   @require gpu::internal::texture_aspect_valid(aspect) : "aspect must be a defined TextureAspect"
+   @require aspect != TextureAspect.DEPTH || gpu::internal::format_has_depth(desc.format) : "aspect DEPTH needs desc.format with depth"
+   @require aspect != TextureAspect.STENCIL || gpu::internal::format_has_stencil(desc.format) : "aspect STENCIL needs desc.format with stencil"
+   @require gpu::internal::format_aspect_block(desc.format, aspect).bytes != 0 : "desc.format must be defined and AUTO must not be used for a combined depth-stencil format" *>
+fn usz texture_mip_aspect_bytes(TextureDesc* desc, uint mip, TextureAspect aspect) {
     gpu::internal::FormatBlock block = gpu::internal::format_aspect_block(desc.format, aspect);
-    if (block.bytes == 0) return INVALID_ARGUMENT~;
     usz row_blocks = ((usz)texture_mip_dimension(desc.width, mip) + block.width - 1)
         / block.width;
     usz block_rows = ((usz)texture_mip_dimension(desc.height, mip) + block.height - 1)
@@ -833,11 +831,11 @@ fn TextureFormatSupport? get_texture_format_support(Device* device, Format forma
    This checks capabilities only; allocation can still fail for lack of memory.
    @param device : "Live device to query."
    @param desc : "Borrowed exact texture description."
-   @return "Whether the descriptor is supported, or a recoverable invalid-argument fault." *>
+   @return "Whether the descriptor is supported, or a recoverable backend query fault."
+   @require desc != null : "desc must not be null" *>
 fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     if (!gpu::internal::queue_access_is_valid(&operation, desc.access)) return false;
     return gpu::internal::vk::vk_supports_texture_desc(operation.state, desc);
 }
@@ -845,9 +843,10 @@ fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
 <* Return exact storage requirements for a texture descriptor.
    @param device : "Live device to query."
    @param desc : "Borrowed texture description."
-   @return "Placement requirements, or a recoverable validation or unsupported-feature fault."
+   @return "Placement requirements, or a recoverable unsupported-feature or backend fault."
    @require desc != null : "desc must not be null"
-   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles" *>
+   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles"
+   @require gpu::internal::texture_desc_valid(desc) : "desc must have nonzero width and height, a mip chain no longer than the full chain, a supported format, at least one usage, a defined sample count, and valid multisample, 3D, cube, depth and block-compressed combinations" *>
 fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -861,9 +860,10 @@ fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* de
    `destroy_texture`.
    @param device : "Live device that will own the texture."
    @param desc : "Borrowed texture description."
-   @return "An owning texture handle, or a recoverable validation, support, capacity, or allocation fault."
+   @return "An owning texture handle, or a recoverable support, capacity, or allocation fault."
    @require desc != null : "desc must not be null"
-   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles" *>
+   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles"
+   @require gpu::internal::texture_desc_valid(desc) : "desc must have nonzero width and height, a mip chain no longer than the full chain, a supported format, at least one usage, a defined sample count, and valid multisample, 3D, cube, depth and block-compressed combinations" *>
 fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -880,9 +880,10 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
    @param desc : "Borrowed texture description."
    @param allocation : "Caller-owned compatible texture-memory allocation."
    @param offset : "Aligned byte offset within the allocation."
-   @return "An owning texture handle, or a recoverable validation, compatibility, overlap, or capacity fault."
+   @return "An owning texture handle, or a recoverable support, capacity, or allocation fault."
    @require desc != null : "desc must not be null"
-   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles" *>
+   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles"
+   @require gpu::internal::texture_desc_valid(desc) : "desc must have nonzero width and height, a mip chain no longer than the full chain, a supported format, at least one usage, a defined sample count, and valid multisample, 3D, cube, depth and block-compressed combinations" *>
 fn TextureHandle? create_placed_texture(
     Device* device,
     TextureDesc* desc,
@@ -913,28 +914,23 @@ fn TextureHandle? create_placed_texture(
    @param device : "Live device that will own both resources."
    @param desc : "Borrowed texture description."
    @param allocation_desc : "Borrowed compatible dedicated-allocation description."
-   @return "The owning texture and allocation pair, or a recoverable validation, support, capacity, or allocation fault."
+   @return "The owning texture and allocation pair, or a recoverable support, capacity, or allocation fault."
    @require desc != null : "desc must not be null"
    @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles"
+   @require gpu::internal::texture_desc_valid(desc) : "desc must have nonzero width and height, a mip chain no longer than the full chain, a supported format, at least one usage, a defined sample count, and valid multisample, 3D, cube, depth and block-compressed combinations"
    @require allocation_desc != null : "allocation_desc must not be null"
+   @require allocation_desc.memory_class == MemoryClass.TEXTURE : "allocation_desc.memory_class must be TEXTURE"
    @require allocation_desc.size > 0 : "allocation_desc.size must be greater than 0"
    @require gpu::internal::allocation_alignment_valid(allocation_desc.alignment) : "allocation_desc.alignment must be zero or a power of two"
    @require gpu::internal::queue_access_shape_valid(allocation_desc.access) : "allocation_desc.access must be nonzero and name only known queue roles"
    @require gpu::internal::texture_requirements_valid(allocation_desc) : "allocation_desc.texture_requirements must be nonempty with nonzero sizes, power-of-two alignments and complete compatibility values"
-   @require gpu::internal::allocation_covers_texture_requirements(allocation_desc) : "allocation_desc.size must cover every texture requirement" *>
+   @require gpu::internal::allocation_covers_texture_requirements(allocation_desc) : "allocation_desc.size must cover every texture requirement"
+   @require gpu::internal::queue_roles_are_subset(desc.access, allocation_desc.access) : "desc.access must be a subset of allocation_desc.access" *>
 fn DedicatedTexture? create_dedicated_texture(Device* device, TextureDesc* desc, AllocationDesc* allocation_desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null || allocation_desc == null
-        || allocation_desc.size == 0
-        || allocation_desc.memory_class != MemoryClass.TEXTURE) {
-        return INVALID_ARGUMENT~;
-    }
     gpu::internal::validate_queue_access(&operation, desc.access);
     gpu::internal::validate_queue_access(&operation, allocation_desc.access);
-    if (!gpu::internal::queue_roles_are_subset(desc.access, allocation_desc.access)) {
-        return INVALID_ARGUMENT~;
-    }
     AllocationDesc normalized = *allocation_desc;
     normalized.alignment = gpu::internal::normalized_allocation_alignment(
         allocation_desc.alignment,
@@ -957,9 +953,11 @@ fn DedicatedTexture? create_dedicated_texture(Device* device, TextureDesc* desc,
 <* Destroy a texture after its descriptors and command use complete.
    Always checked: live identity, ownership, and detected dependents.
    Runtime failures: faults preserve the handle; placed storage stays caller-owned.
+   A swapchain-owned texture must not be destroyed; a violation panics in safe
+   builds.
    @param device : "Live device that owns the texture."
    @param texture : "Owning texture handle to destroy. The zero handle is a no-op."
-   @return "Success, or a recoverable in-use, invalid-argument (swapchain-owned texture), or backend fault." *>
+   @return "Success, or a recoverable in-use or backend fault." *>
 fn void? destroy_texture(Device* device, TextureHandle texture) {
     if (texture == (TextureHandle){}) return;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
@@ -969,13 +967,18 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
     gpu::internal::release_device_children(&operation);
 }
 
-<* Publish one texture view in the shader-visible heap. The texture must carry
-   sampled or storage usage. The returned
+<* Publish one texture view in the shader-visible heap. The returned
    owner-bearing view contains the raw generation-free index stored in shader data.
+   The texture must carry sampled or storage usage, the view range must lie
+   inside the texture, a cube view needs a cube-compatible sampled texture and
+   exactly six layers, and a combined depth-stencil texture needs a description
+   that selects one aspect. These rules read texture state, so a violation
+   panics in safe builds.
    @param device : "Live device that owns the texture."
    @param texture : "Texture whose subresources are exposed."
    @param desc : "Borrowed view description; null selects the full default view."
-   @return "An owning view token, or a recoverable validation, capacity, or allocation fault." *>
+   @return "An owning view token, or a recoverable capacity or allocation fault."
+   @require gpu::internal::texture_view_desc_valid(desc) : "desc.aspect must be a defined TextureAspect and the end of desc's mip and layer ranges must not overflow" *>
 fn TextureView? create_texture_view(Device* device, TextureHandle texture, TextureViewDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -989,23 +992,18 @@ fn TextureView? create_texture_view(Device* device, TextureHandle texture, Textu
 <* Batch-publish texture views.
    `out_views.len` must equal `descs.len`; an empty batch succeeds. A fault leaves
    heap allocation, generations, cached native views, and outputs unchanged.
+   Every texture must carry sampled or storage usage, and each view must satisfy
+   the rules of `create_texture_view`; those rules read texture state, so a
+   violation panics in safe builds.
    @param device : "Live device that owns every input texture."
    @param descs : "Borrowed batch of texture and view descriptions."
    @param out_views : "Caller-owned output slice with exactly the input length."
-   @return "Success, or a recoverable validation, capacity, or allocation fault." *>
+   @return "Success, or a recoverable capacity or allocation fault."
+   @require out_views.len == descs.len : "out_views.len must equal descs.len"
+   @require gpu::internal::texture_view_create_descs_valid(descs) : "descs[].view.aspect must be a defined TextureAspect and the end of each mip and layer range must not overflow" *>
 fn void? create_texture_views(Device* device, TextureViewCreateDesc[] descs, TextureView[] out_views) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (out_views.len != descs.len) {
-        return gpu::internal::report_device_contract_failure(
-            operation:      &operation,
-            operation_name: "create_texture_views",
-            public_fault:   INVALID_ARGUMENT,
-            resource_kind:  DebugResourceKind.TEXTURE_DESCRIPTOR,
-            rejected_field: "out_views",
-            invariant:      "output count must match descriptor count",
-        )~;
-    }
     if (descs.len == 0) return;
     foreach (&desc : descs) {
         gpu::internal::validate_resource_owner(
@@ -1045,22 +1043,25 @@ fn void destroy_texture_view(Device* device, TextureView view) {
    top of the heap; the general region ends where reservations begin.
    @param device : "Live device that owns the heap."
    @param count : "Nonzero number of slots."
-   @return "The reserved range, or a recoverable invalid-argument or capacity fault." *>
+   @return "The reserved range, or a recoverable capacity fault."
+   @require count > 0 : "count must be greater than 0" *>
 fn TextureIndexRange? reserve_texture_indices(Device* device, uint count) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (count == 0) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_reserve_texture_indices(operation.state, count);
 }
 
-<* Release a whole reservation. Every slot must be empty. Releasing the lowest
+<* Release a whole reservation. Every slot must be empty. The range must lie
+   inside the reserved region and every slot in it must be reserved; those rules
+   read heap state, so a violation panics in safe builds. Releasing the lowest
    reservation returns it and any released reservations above it to the
    general region; releasing a higher one leaves a hole until those below go.
    A slot whose generation is exhausted stays reserved and out of both
    regions.
    @param device : "Live device that owns the heap."
    @param range : "A range returned by `reserve_texture_indices`. The zero handle is a no-op."
-   @return "Success, or a recoverable invalid-argument or in-use fault." *>
+   @return "Success, or a recoverable in-use fault."
+   @require (range.count == 0) == !range.base.is_valid() : "range must be the zero value or have a valid base and a nonzero count" *>
 fn void? release_texture_indices(Device* device, TextureIndexRange range) {
     if (range.count == 0 && !range.base.is_valid()) return;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
@@ -1068,13 +1069,17 @@ fn void? release_texture_indices(Device* device, TextureIndexRange range) {
     return gpu::internal::vk::vk_release_texture_indices(operation.state, range);
 }
 
-<* Publish a view into one reserved slot. Same validation and hazard rule as
-   `create_texture_view`; the returned index equals `slot`.
+<* Publish a view into one reserved slot. Same rules and hazard rule as
+   `create_texture_view`; the returned index equals `slot`. The slot must lie
+   inside a live reservation; that rule reads heap state, so a violation panics
+   in safe builds.
    @param device : "Live device that owns the texture."
    @param slot : "A slot inside a live reservation."
    @param texture : "Texture whose subresources are exposed."
    @param desc : "Borrowed view description; null selects the full default view."
-   @return "An owning view token, or a recoverable invalid-argument, in-use, or allocation fault." *>
+   @return "An owning view token, or a recoverable in-use or allocation fault."
+   @require slot.is_valid() : "slot must be a valid TextureIndex"
+   @require gpu::internal::texture_view_desc_valid(desc) : "desc.aspect must be a defined TextureAspect and the end of desc's mip and layer ranges must not overflow" *>
 fn TextureView? create_texture_view_at(Device* device, TextureIndex slot, TextureHandle texture, TextureViewDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -1096,7 +1101,8 @@ fn TextureView? create_texture_view_at(Device* device, TextureIndex slot, Textur
    @param view : "Live view token, rewritten on success."
    @param texture : "Texture the slot will expose."
    @param desc : "Borrowed view description; null selects the full default view."
-   @return "Success, or a recoverable capacity or allocation fault." *>
+   @return "Success, or a recoverable capacity or allocation fault."
+   @require gpu::internal::texture_view_desc_valid(desc) : "desc.aspect must be a defined TextureAspect and the end of desc's mip and layer ranges must not overflow" *>
 fn void? update_texture_view(Device* device, TextureView* view, TextureHandle texture, TextureViewDesc* desc) {
     if (view == null) abort("gpu: null TextureView");
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
@@ -1173,14 +1179,17 @@ fn CompletionPoint? bind_sparse_texture_memory(Queue queue, SparseTextureBindDes
 <* Intern and publish an immutable device-lifetime sampler index. Identical
    semantic descriptions return the same value; debug_name is not semantic.
    Active anisotropy must be within the exact range reported by DeviceCaps;
-   values above the maximum are rejected rather than clamped.
+   values above the maximum are not clamped. `desc.mip_lod_bias` magnitude and
+   `desc.max_anisotropy` must not exceed the device caps; those rules read the
+   device, so a violation panics in safe builds.
    @param device : "Live device whose sampler heap owns the index."
    @param desc : "Borrowed semantic sampler description."
-   @return "A stable device-lifetime sampler index, or a recoverable validation, support, capacity, or allocation fault." *>
+   @return "A stable device-lifetime sampler index, or a recoverable support, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::sampler_desc_valid(desc) : "desc filters, address modes and compare op must be defined values, desc.mip_lod_bias, desc.min_lod and desc.max_lod must be finite, desc.min_lod must not exceed desc.max_lod, and desc.max_anisotropy must be finite and at least 1.0 when anisotropy is enabled" *>
 fn SamplerIndex? intern_sampler(Device* device, SamplerDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_sampler_desc(&operation, desc)!;
     return gpu::internal::vk::vk_intern_sampler(operation.state, desc);
 }
@@ -1347,7 +1356,8 @@ fn AccelerationStructureInstance? make_acceleration_structure_instance(
     );
 }
 
-<* Publish a live TLAS in the shader-visible acceleration-structure heap.
+<* Publish a live TLAS in the shader-visible acceleration-structure heap. The
+   structure must be top-level; a violation panics in safe builds.
    @param device : "Live ray-query-enabled device that owns the TLAS."
    @param acceleration_structure : "Live top-level structure to publish."
    @return "An owning view containing its raw shader index, or a recoverable validation, capacity, or allocation fault." *>
@@ -1970,16 +1980,18 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
 <* Record a texture-to-texture copy; the effective layouts are TRANSFER_SRC
    for the source and TRANSFER_DST for the destination, and surrounding
    barriers remain caller-owned.
-   Always checked: token phase, required pointer, identities, equal formats
-   and sample counts, transfer usages, dimension/subresource/extent bounds
-   on both sides, block alignment, overlap within one texture, and safe
-   lowering.
+   Always checked: token phase and identities. The textures must have equal
+   formats and sample counts and the transfer usages, the regions must fit both
+   textures and be block aligned, and regions inside one texture must not
+   overlap. Those rules read texture state, so a violation panics in safe
+   builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed source and destination region."
-   @return "Success, or a recoverable command, validation, bounds, alignment, or support fault." *>
+   @return "Success, or a recoverable command or support fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::texture_aspect_valid(desc.aspect) : "desc.aspect must be a defined TextureAspect" *>
 fn void? cmd_copy_texture(CommandList* commands, TextureCopyDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_copy_texture(record, desc);
 }
 
@@ -2274,14 +2286,17 @@ fn void? cmd_set_ray_tracing_pipeline_stack_size(CommandList* commands, ulong pi
 }
 
 <* Create immutable attachment metadata and any required subresource view
-   before recording. The returned handle retains its texture.
+   before recording. The returned handle retains its texture. The texture must
+   be two-dimensional with color or depth attachment usage, and `desc.mip_level`
+   and `desc.array_layer` must lie inside it; those rules read texture state, so
+   a violation panics in safe builds.
    @param device : "Live device that owns the texture."
    @param desc : "Borrowed texture subresource description."
-   @return "An owning attachment-view handle, or a recoverable validation, capacity, or allocation fault." *>
+   @return "An owning attachment-view handle, or a recoverable capacity or allocation fault."
+   @require desc != null : "desc must not be null" *>
 fn AttachmentViewHandle? create_attachment_view(Device* device, AttachmentViewDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_resource_owner(
         &operation,
         desc.texture.owner,
@@ -2719,18 +2734,16 @@ fn TextureState storage_at(StageMask stages, TextureAccess access) {
    @param view : "Selected subresource range; the zero value selects the full default view."
    @param before : "Prior semantic state."
    @param after : "Next semantic state."
-   @return "A caller-owned transition, or a recoverable invalid-layout fault." *>
-fn TextureBarrier? texture_view_transition(
+   @return "A caller-owned transition."
+   @require gpu::internal::texture_layout_valid(before.layout) : "before.layout must be a defined layout"
+   @require gpu::internal::texture_layout_valid(after.layout) : "after.layout must be a defined layout"
+   @require after.layout != TextureLayout.UNDEFINED : "after.layout must not be UNDEFINED" *>
+fn TextureBarrier texture_view_transition(
     TextureHandle texture,
     TextureViewDesc view,
     TextureState before,
     TextureState after,
 ) {
-    if (!gpu::internal::texture_layout_valid(before.layout)
-        || !gpu::internal::texture_layout_valid(after.layout)
-        || after.layout == TextureLayout.UNDEFINED) {
-        return INVALID_ARGUMENT~;
-    }
     return {
         .texture = texture,
         .view    = view,
@@ -2744,8 +2757,11 @@ fn TextureBarrier? texture_view_transition(
    @param texture : "Texture handle named by the transition."
    @param before : "Prior semantic state."
    @param after : "Next semantic state."
-   @return "A caller-owned full-range transition, or a recoverable invalid-layout fault." *>
-fn TextureBarrier? texture_transition(TextureHandle texture, TextureState before, TextureState after) {
+   @return "A caller-owned full-range transition."
+   @require gpu::internal::texture_layout_valid(before.layout) : "before.layout must be a defined layout"
+   @require gpu::internal::texture_layout_valid(after.layout) : "after.layout must be a defined layout"
+   @require after.layout != TextureLayout.UNDEFINED : "after.layout must not be UNDEFINED" *>
+fn TextureBarrier texture_transition(TextureHandle texture, TextureState before, TextureState after) {
     return texture_view_transition(
         texture: texture,
         view:    {},

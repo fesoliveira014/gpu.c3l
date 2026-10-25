@@ -498,7 +498,7 @@ gpu::TextureBarrier to_attachment = gpu::texture_transition(
         .stages = { .color_output },
         .access = { .read, .write },
     },
-)!;
+);
 gpu::cmd_texture_barrier(&commands, &to_attachment)!;
 
 gpu::ColorTargetDesc[1] colors = {{
@@ -529,7 +529,7 @@ gpu::TextureBarrier to_present = gpu::texture_transition(
     texture: acquired.texture,
     before:  to_attachment.after,
     after:   { .layout = gpu::TextureLayout.PRESENT },
-)!;
+);
 gpu::cmd_texture_barrier(&commands, &to_present)!;
 ```
 

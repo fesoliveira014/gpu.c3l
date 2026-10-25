@@ -469,7 +469,7 @@ fn void? texture_state(gpu::CommandList* commands, gpu::TextureHandle texture) {
             .stages = { .fragment_shader },
             .access = { .read },
         },
-    )!;
+    );
     gpu::cmd_texture_barrier(commands, &upload_to_sampled)!;
 }
 ```
@@ -618,13 +618,13 @@ fn gpu::CompletionPoint? presentation(
             .stages = { .color_output },
             .access = { .read, .write },
         },
-    )!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_attachment)!;
     gpu::TextureBarrier to_present = gpu::texture_transition(
         texture: acquired.texture,
         before:  to_attachment.after,
         after:   { .layout = gpu::TextureLayout.PRESENT },
-    )!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_present)!;
 
     gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)! };

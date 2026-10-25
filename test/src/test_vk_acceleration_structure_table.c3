@@ -1748,15 +1748,10 @@ fn void acceleration_structure_views_are_transactional_and_generation_checked() 
         top_level,
         &ops,
     )) == gpu::DESCRIPTOR_HEAP_FULL);
-    assert(@catch(create_acceleration_structure_descriptor_view_with_ops(
-        &state,
-        bottom_level,
-        &ops,
-    )) == gpu::INVALID_ARGUMENT);
     assert(capture.calls == 1
             && state.acceleration_structures.get(top_level)
                 .live_view_count == 1,
-        "heap exhaustion and BLAS rejection publish nothing");
+        "heap exhaustion publishes nothing");
 
     destroy_acceleration_structure_descriptor_view(&state, first)!!;
     gpu::AccelerationStructureView second =

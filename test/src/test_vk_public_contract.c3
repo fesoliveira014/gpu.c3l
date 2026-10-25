@@ -10,16 +10,6 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
     defer destroy_test_device(&device)!!;
 
     assert(
-        @catch(gpu::supports_texture_desc(&device, (gpu::TextureDesc*)null))
-            == gpu::INVALID_ARGUMENT,
-        "supports_texture_desc rejects a null descriptor"
-    );
-    assert(
-        @catch(gpu::intern_sampler(&device, (gpu::SamplerDesc*)null))
-            == gpu::INVALID_ARGUMENT,
-        "intern_sampler rejects a null descriptor"
-    );
-    assert(
         @catch(gpu::create_compute_pipeline(&device, (gpu::ComputePipelineDesc*)null))
             == gpu::INVALID_ARGUMENT,
         "create_compute_pipeline rejects a null descriptor"

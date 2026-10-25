@@ -71,7 +71,7 @@ fn void texture_transition_preserves_compositional_states() @test {
         texture: texture,
         before:  before,
         after:   after,
-    )!!;
+    );
 
     assert(barrier.texture == texture, "transition preserves the texture handle");
     assert(barrier.view.base_mip == 0
@@ -98,7 +98,7 @@ fn void texture_view_transition_preserves_subresource_range() @test {
         view:    view,
         before:  before,
         after:   after,
-    )!!;
+    );
 
     assert(barrier.texture == texture, "view transition preserves the texture handle");
     assert(barrier.view.base_mip == view.base_mip
@@ -129,59 +129,10 @@ fn void texture_transition_accepts_every_source_layout() @test {
             texture: transition_texture(),
             before:  before,
             after:   after,
-        )!!;
+        );
         assert(barrier.before.layout == layout,
             "every public layout is accepted as a structural source");
     }
-}
-
-fn void texture_transition_rejects_invalid_layouts() @test {
-    gpu::TextureLayout invalid_layout = bitcast(999, gpu::TextureLayout);
-    fault invalid_before = @catch(gpu::texture_transition(
-        texture: transition_texture(),
-        before:  { .layout = invalid_layout },
-        after:   transfer_destination_state(),
-    ));
-    assert(invalid_before == gpu::INVALID_ARGUMENT,
-        "invalid source layout faults INVALID_ARGUMENT");
-
-    fault invalid_after = @catch(gpu::texture_transition(
-        texture: transition_texture(),
-        before:  transfer_source_state(),
-        after:   { .layout = invalid_layout },
-    ));
-    assert(invalid_after == gpu::INVALID_ARGUMENT,
-        "invalid destination layout faults INVALID_ARGUMENT");
-}
-
-fn void texture_transition_rejects_undefined_destination() @test {
-    fault invalid = @catch(gpu::texture_transition(
-        texture: transition_texture(),
-        before:  transfer_source_state(),
-        after:   { .layout = gpu::TextureLayout.UNDEFINED },
-    ));
-    assert(invalid == gpu::INVALID_ARGUMENT, "UNDEFINED is source-only");
-}
-
-fn void texture_view_transition_rejects_invalid_layouts() @test {
-    gpu::TextureLayout invalid_layout = bitcast(999, gpu::TextureLayout);
-    fault invalid_before = @catch(gpu::texture_view_transition(
-        texture: transition_texture(),
-        view:    {},
-        before:  { .layout = invalid_layout },
-        after:   transfer_destination_state(),
-    ));
-    assert(invalid_before == gpu::INVALID_ARGUMENT,
-        "invalid view source layout faults INVALID_ARGUMENT");
-
-    fault invalid_after = @catch(gpu::texture_view_transition(
-        texture: transition_texture(),
-        view:    {},
-        before:  transfer_source_state(),
-        after:   { .layout = invalid_layout },
-    ));
-    assert(invalid_after == gpu::INVALID_ARGUMENT,
-        "invalid view destination layout faults INVALID_ARGUMENT");
 }
 
 fn void acquired_image_exposes_prior_state() @test {

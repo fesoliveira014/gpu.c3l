@@ -67,19 +67,9 @@ fn void sampler_interning_pins_public_contract() @test {
     ulong children_before =
         gpu::internal::device_slots[device.index].live_children.load(AtomicOrdering.ACQUIRE);
 
-    assert(@catch(gpu::intern_sampler(&device, null)) == gpu::INVALID_ARGUMENT);
-    assert(gpu::internal::vk::stub_sampler_intern_attempt_count(&device) == 0,
-        "null descriptions stop before backend mutation");
-
     DeviceCaps caps = gpu::get_device_caps(&device);
     assert(caps.max_sampler_lod_bias == 16.0f,
         "caps expose the backend-neutral sampler LOD bias limit");
-    SamplerDesc invalid_bias = sampler_test_desc();
-    invalid_bias.mip_lod_bias = caps.max_sampler_lod_bias + 1.0f;
-    assert(@catch(gpu::intern_sampler(&device, &invalid_bias))
-        == gpu::INVALID_ARGUMENT);
-    assert(gpu::internal::vk::stub_sampler_intern_attempt_count(&device) == 0,
-        "over-limit LOD bias stops before sampler table mutation");
 
     SamplerDesc first_desc = sampler_test_desc();
     first_desc.debug_name = "first_debug_name";
@@ -159,39 +149,8 @@ fn void sampler_anisotropy_contract_is_exact_and_transactional() @test {
     assert(gpu::intern_sampler(&device, &inactive_alias)!! == inactive_index,
         "inactive anisotropy and comparison values are ignored by the public operation");
 
-    uint attempts_before_invalid =
-        gpu::internal::vk::stub_sampler_intern_attempt_count(&device);
-    uint creates_before_invalid =
-        gpu::internal::vk::stub_sampler_native_create_count(&device);
-
-    float[3] below_minimum = { 0.0f, -1.0f, 0.5f };
-    foreach (value : below_minimum) {
-        SamplerDesc invalid = exact;
-        invalid.max_anisotropy = value;
-        assert(@catch(gpu::intern_sampler(&device, &invalid))
-                == gpu::INVALID_ARGUMENT,
-            "active anisotropy below one faults INVALID_ARGUMENT");
-    }
-    float[3] non_finite = { float::nan, float::inf, -float::inf };
-    foreach (value : non_finite) {
-        SamplerDesc invalid = exact;
-        invalid.max_anisotropy = value;
-        assert(@catch(gpu::intern_sampler(&device, &invalid))
-                == gpu::INVALID_ARGUMENT,
-            "active non-finite anisotropy faults INVALID_ARGUMENT");
-    }
-    SamplerDesc over_limit = exact;
-    over_limit.max_anisotropy = caps.max_sampler_anisotropy + 1.0f;
-    assert(@catch(gpu::intern_sampler(&device, &over_limit))
-            == gpu::INVALID_ARGUMENT,
-        "active anisotropy above the device maximum is rejected");
-    assert(gpu::internal::vk::stub_sampler_intern_attempt_count(&device)
-            == attempts_before_invalid
-        && gpu::internal::vk::stub_sampler_native_create_count(&device)
-            == creates_before_invalid,
-        "invalid anisotropy stops before backend lookup or native creation");
     assert(gpu::intern_sampler(&device, &exact)!! == exact_index,
-        "an existing exact identity remains retrievable after rejection");
+        "an existing exact identity remains retrievable");
     assert(attempts_after_exact == 1,
         "the first accepted anisotropy request reaches the backend once");
 

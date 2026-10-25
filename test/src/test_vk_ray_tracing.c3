@@ -905,7 +905,7 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         texture: texture,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   gpu::storage_at({ .ray_tracing }, { .read, .write }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&trace_commands, &texture_to_storage)!!;
     if (caps.ray_tracing_pipelines.indirect_dispatch
         || caps.ray_tracing_pipelines.indirect2_dispatch
@@ -1011,7 +1011,7 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         texture: texture,
         before:  texture_to_storage.after,
         after:   gpu::sampled_at({ .ray_tracing }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&trace_commands, &texture_to_sampled)!!;
     gpu::Barrier trace_to_host = {
         .before = { .ray_tracing },

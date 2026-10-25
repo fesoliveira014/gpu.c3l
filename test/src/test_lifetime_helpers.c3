@@ -229,7 +229,7 @@ fn void? upload_test_texture_data(
             .stages = { .transfer },
             .access = { .write },
         },
-    )!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_transfer)!;
     gpu::BufferTextureCopyDesc copy = {
         .src     = upload.span,
@@ -246,7 +246,7 @@ fn void? upload_test_texture_data(
             .access = { .write },
         },
         after:   next_use,
-    )!;
+    );
     gpu::cmd_texture_barrier(&commands, &transition)!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
     defer (void)discard_test_executable(&executable);
@@ -293,7 +293,7 @@ fn void? readback_test_texture_data(
             .stages = { .transfer },
             .access = { .read },
         },
-    )!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_transfer)!;
     gpu::TextureBufferCopyDesc copy = {
         .texture = src,
@@ -315,7 +315,7 @@ fn void? readback_test_texture_data(
             .access = { .read },
         },
         after:   from_use,
-    )!;
+    );
     gpu::cmd_texture_barrier(&commands, &restore)!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
     defer (void)discard_test_executable(&executable);

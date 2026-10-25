@@ -38,7 +38,7 @@ fn void record_transition(
         view:    view,
         before:  before,
         after:   after,
-    )!!;
+    );
     gpu::cmd_texture_barrier(commands, &barrier)!!;
 }
 

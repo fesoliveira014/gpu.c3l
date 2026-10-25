@@ -201,9 +201,24 @@ For placement, `get_texture_requirements` returns size, alignment, a
 `texture_requirements` list must include every texture placed in it. See
 [the cookbook](../cookbook.md#place-several-textures-in-one-allocation).
 
+`get_texture_requirements`, `create_texture`, `create_placed_texture` and
+`create_dedicated_texture` require a `TextureDesc` with nonzero `width` and
+`height`, a mip chain no longer than the full chain, a supported format, at
+least one usage, and a defined sample count, and the combinations below.
+`create_placed_texture` also requires an `offset` that is a multiple of the
+texture's required alignment, and an allocation that is non-dedicated texture
+memory with enough alignment and access, compatible with the requirements,
+holds the range, and shares it with no other placed texture.
+`create_dedicated_texture` requires a `TEXTURE` `AllocationDesc` whose `size`
+equals the texture's requirements and whose `access` covers `desc.access`.
+These are contracts: a violation panics in safe builds.
+`supports_texture_desc` answers `false` for a descriptor that breaks the
+creation rules.
+
 `destroy_texture` releases the image only, never a separate or placed
 allocation. It fails with `RESOURCE_IN_USE` while a view or attachment view
-is live.
+is live. A texture owned by a swapchain must not be destroyed; that is a
+contract.
 
 Limits: 2D and 3D only; multisample textures are single-mip attachments
 that may add `sampled` (see below); depth-stencil formats are 2D,
@@ -216,7 +231,7 @@ descriptor and size buffers with `texture_mip_aspect_bytes`.
 
 A multisample texture (`sample_count` above `ONE`) has one mip and a
 `color_attach` or `depth_attach` usage. `sampled` may be added; `storage`,
-`transfer_src` and `transfer_dst` are rejected with `INVALID_ARGUMENT`. Its
+`transfer_src` and `transfer_dst` break the creation contract. Its
 default view is a 2D view published at binding 0 like any sampled view, and
 shaders read it per sample with the aliases of
 [`multisample_heap.glsl`](../shader_abi.md#multisample-textures). The
@@ -251,7 +266,10 @@ sampled, single-sampled 2D textures. Support is per adapter: check
 block multiples. The caller supplies already compressed blocks for every
 mip. `texture_mip_dimension(size, mip)` gives a mip axis and
 `texture_mip_bytes(&desc, mip)` the packed byte footprint of one layer of a
-mip, in whole blocks; see [copies](commands_and_rendering.md#transfers) for
+mip, in whole blocks. `mip` must lie inside the description's mip chain and
+the format must be defined, and `AUTO` must not size a combined depth-stencil
+format; `texture_mip_aspect_bytes` also requires that `DEPTH` and `STENCIL`
+name an aspect the format has. These are contracts. See [copies](commands_and_rendering.md#transfers) for
 the region rules and [the cookbook](../cookbook.md#upload-a-compressed-texture).
 
 ## Texture views and indices
@@ -284,6 +302,17 @@ contiguous indices. Both are non-owning shader values. The texture must have
 `sampled` or `storage` usage. `DESCRIPTOR_HEAP_FULL`
 means the runtime's `texture_heap_capacity` is exhausted.
 
+A `TextureViewDesc` must name a defined `aspect`, and `base_mip` and
+`base_layer` must leave room for their counts. Against the texture, the view
+must lie inside it: `base_mip` below the mip count, `base_layer` below the
+layer count, and the counts within what remains. A combined depth-stencil
+texture takes a view that selects `DEPTH` or `STENCIL`, never `AUTO` and never
+the null default. `create_texture_views` requires `out_views.len` to equal
+`descs.len`. These are contracts: a violation panics in safe builds. A texture
+without `sampled` or `storage` usage must not be viewed, and
+`create_attachment_view` requires a 2D texture with `color_attach` or
+`depth_attach` usage and a `mip_level` and `array_layer` inside it.
+
 A reservation is `count` contiguous ascending slots that `create_texture_view`
 never hands out. Publish into a reserved slot with `create_texture_view_at`,
 and rewrite any live view's descriptor in place with `update_texture_view`:
@@ -312,6 +341,10 @@ before the call are stale. Releasing the lowest reservation returns it and any r
 reservations above it to the general region. A slot whose generation is
 exhausted stays reserved and out of both regions. The hazard rule is the same
 as for creation and destruction: no executing command may read the slot.
+`reserve_texture_indices` requires a nonzero `count`. `create_texture_view_at`
+requires a valid `slot` inside a live reservation, and
+`release_texture_indices` takes the zero range or a range inside the reserved
+region whose every slot is reserved; each is a contract.
 
 Keeping a reservation does not keep a destroyed view usable. A copied index
 does not retain its view or guarantee a fallback value after destruction.
@@ -320,7 +353,8 @@ updates, destruction, and reuse against all GPU accesses in the application.
 
 A view with `cube` set publishes six consecutive layers from `base_layer`
 as one sampled cube. The texture must be `cube_compatible` with `sampled`
-usage, and `layer_count` must be 0 or 6. Cube views are sampled only; they
+usage, and `layer_count` must be 0 or 6; a violation panics in safe builds.
+Cube views are sampled only; they
 never receive a storage descriptor. Storage or per-face access uses a
 separate 2D view of the same texture.
 
@@ -350,8 +384,13 @@ gpu::SamplerIndex sampler = gpu::intern_sampler(&device, &desc)!;
 
 Equal descriptions return the same index. There is no destroy; indices
 live until the device does. `compare_enable` plus `compare` makes a shadow
-sampler. Anisotropy above `caps.max_sampler_anisotropy` and LOD bias above
-`caps.max_sampler_lod_bias` return `INVALID_ARGUMENT`, never clamp.
+sampler. A `SamplerDesc` must name defined filters, address modes and, when
+`compare_enable` is set, a compare op; its LOD values must be finite with
+`min_lod` not above `max_lod`; and an enabled `max_anisotropy` must be finite
+and at least 1. Anisotropy above `caps.max_sampler_anisotropy` and LOD bias
+above `caps.max_sampler_lod_bias` are never clamped. All of these are
+contracts: a violation panics in safe builds. Enabling anisotropy on a device
+with `caps.max_sampler_anisotropy` of zero returns `UNSUPPORTED_FEATURE`.
 
 ## Sparse textures
 

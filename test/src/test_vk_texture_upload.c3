@@ -143,7 +143,7 @@ fn void volume_texture_upload_and_readback_regions() @test {
         texture: texture,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   transfer_destination,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_destination)!!;
 
     gpu::BufferTextureCopyDesc whole_upload_copy = {
@@ -155,7 +155,7 @@ fn void volume_texture_upload_and_readback_regions() @test {
         texture: texture,
         before:  transfer_destination,
         after:   transfer_destination,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &order_partial)!!;
     gpu::BufferTextureCopyDesc partial_upload_copy = {
         .src               = partial_upload,
@@ -185,7 +185,7 @@ fn void volume_texture_upload_and_readback_regions() @test {
         texture: texture,
         before:  transfer_destination,
         after:   transfer_source,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_source)!!;
     gpu::TextureBufferCopyDesc whole_readback_copy = {
         .texture = texture,
@@ -396,7 +396,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
             .stages = { .transfer },
             .access = { .write },
         },
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
 
     gpu::BufferTextureCopyDesc mip0_copy = {
@@ -420,7 +420,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
             .access = { .write },
         },
         after:   gpu::sampled_at({ .compute }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &to_read)!!;
 
     const uint GROUPS = (UP_SIZE + 7) / 8;
@@ -634,13 +634,13 @@ fn void compressed_upload_mip_chain_sample_and_readback() @test {
         texture: chain,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   transfer_write,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &chain_to_dst)!!;
     gpu::TextureBarrier edge_to_dst = gpu::texture_transition(
         texture: edge,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   transfer_write,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &edge_to_dst)!!;
 
     gpu::BufferTextureCopyDesc short_tail = {
@@ -673,7 +673,7 @@ fn void compressed_upload_mip_chain_sample_and_readback() @test {
         texture: chain,
         before:  transfer_write,
         after:   gpu::sampled_at({ .compute }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &chain_to_sample)!!;
     bind_test_compute_pipeline(&cmd, sample_pipe);
     gpu::cmd_dispatch(
@@ -691,13 +691,13 @@ fn void compressed_upload_mip_chain_sample_and_readback() @test {
         texture: chain,
         before:  gpu::sampled_at({ .compute }),
         after:   transfer_read,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &chain_to_src)!!;
     gpu::TextureBarrier edge_to_src = gpu::texture_transition(
         texture: edge,
         before:  transfer_write,
         after:   transfer_read,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &edge_to_src)!!;
     for (uint mip = 0; mip < BC_MIPS; mip++) {
         usz mip_bytes = mip == 0 ? BC1_BLOCK_BYTES * 4 : BC1_BLOCK_BYTES;
@@ -954,10 +954,6 @@ fn void mip_subset_view_sampled() @test {
     gpu::TextureView tex_index_view = gpu::create_texture_view(&device, texture, &mip1_view)!!;
     gpu::TextureIndex tex_index = tex_index_view.index;
     defer gpu::destroy_texture_view(&device, tex_index_view);
-
-    gpu::TextureViewDesc out_of_range = { .base_mip = 2, .mip_count = 1 };
-    fault range_fault = @catch(gpu::create_texture_view(&device, texture, &out_of_range));
-    assert(range_fault == gpu::INVALID_ARGUMENT, "view past the mip chain faults INVALID_ARGUMENT");
 
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,

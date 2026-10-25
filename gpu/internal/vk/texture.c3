@@ -505,25 +505,29 @@ fn vk::ImageAspectFlags format_aspect(gpu::Format format) @private {
     return (vk::ImageAspectFlags)mask;
 }
 
-<* One aspect selected by a sampled view or a copy. *>
-fn vk::ImageAspectFlags? resolve_aspect(
+<* One aspect selected by a sampled view or a copy. AUTO must not select a
+   combined depth-stencil format, and DEPTH and STENCIL need a format that has
+   them; these rules read texture state, so a violation panics in safe builds. *>
+fn vk::ImageAspectFlags resolve_aspect(
     gpu::Format format,
     gpu::TextureAspect aspect,
 ) @private {
     bool depth = gpu::internal::format_has_depth(format);
     bool stencil = gpu::internal::format_has_stencil(format);
+    assert(gpu::internal::texture_aspect_valid(aspect), "aspect must be a valid TextureAspect");
     switch (aspect) {
-        case gpu::TextureAspect.AUTO:
-            if (depth && stencil) return gpu::INVALID_ARGUMENT~;
-            return format_aspect(format);
         case gpu::TextureAspect.DEPTH:
-            if (!depth) return gpu::INVALID_ARGUMENT~;
+            assert(depth, "DEPTH aspect requires a format with depth");
             return (vk::ImageAspectFlags)vk::ImageAspectFlagBits.DEPTH_BIT;
         case gpu::TextureAspect.STENCIL:
-            if (!stencil) return gpu::INVALID_ARGUMENT~;
+            assert(stencil, "STENCIL aspect requires a format with stencil");
             return (vk::ImageAspectFlags)vk::ImageAspectFlagBits.STENCIL_BIT;
         default:
-            return gpu::INVALID_ARGUMENT~;
+            assert(
+                !(depth && stencil),
+                "AUTO aspect must not be used with a combined depth-stencil format"
+            );
+            return format_aspect(format);
     }
 }
 
@@ -673,22 +677,29 @@ fn vk::ImageView? resolve_texture_view_tracked(
     *creation = {};
     bool combined = gpu::internal::format_is_combined_depth_stencil(slot.format);
     if (view == null) {
-        if (combined) return gpu::INVALID_ARGUMENT~;
+        assert(
+            !combined,
+            "combined depth-stencil textures require a view desc selecting one aspect"
+        );
         return slot.default_view;
     }
-    vk::ImageAspectFlags aspect = resolve_aspect(slot.format, view.aspect)!;
-    if (view.base_mip >= slot.mip_levels || view.base_layer >= slot.array_layers) return gpu::INVALID_ARGUMENT~;
+    vk::ImageAspectFlags aspect = resolve_aspect(slot.format, view.aspect);
+    assert(
+        view.base_mip < slot.mip_levels && view.base_layer < slot.array_layers,
+        "view base_mip and base_layer must lie within the texture"
+    );
 
     uint mip_count   = view.mip_count == 0 ? slot.mip_levels - view.base_mip : view.mip_count;
     uint layer_count = view.layer_count == 0 ? slot.array_layers - view.base_layer : view.layer_count;
-    if (mip_count > slot.mip_levels - view.base_mip)       return gpu::INVALID_ARGUMENT~;
-    if (layer_count > slot.array_layers - view.base_layer) return gpu::INVALID_ARGUMENT~;
-    if (view.cube
-        && (!slot.cube_compatible
-            || !slot.usage.sampled
-            || layer_count != gpu::internal::CUBE_FACE_COUNT)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(mip_count <= slot.mip_levels - view.base_mip, "view mip range must fit the texture");
+    assert(layer_count <= slot.array_layers - view.base_layer, "view layer range must fit the texture");
+    assert(
+        !view.cube
+            || (slot.cube_compatible
+                && slot.usage.sampled
+                && layer_count == gpu::internal::CUBE_FACE_COUNT),
+        "cube views require a cube-compatible sampled texture and exactly 6 layers"
+    );
 
     vk::ImageViewType view_type = view.cube
         ? vk::ImageViewType.CUBE
@@ -877,7 +888,6 @@ fn gpu::TextureRequirements? texture_requirements_for_state(
     VkDeviceState* state,
     gpu::TextureDesc* desc,
 ) {
-    if (!gpu::internal::texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
     vk::ImageCreateFlags alias_flag =
         (vk::ImageCreateFlags)vk::ImageCreateFlagBits.ALIAS_BIT;
     if (!texture_desc_supported(state, desc, alias_flag)!) {
@@ -939,21 +949,6 @@ fn gpu::TextureHandle? vk_create_texture(
     VkDeviceState* state,
     gpu::TextureDesc* desc,
 ) {
-    if (!gpu::internal::texture_desc_valid(desc)) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "create_texture",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.TEXTURE,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          desc.debug_name,
-            rejected_field:      "TextureDesc",
-            invariant:           "descriptor must satisfy the texture creation contract",
-            backend_text:        "texture descriptor validation failed",
-        )~;
-    }
     if (!texture_desc_supported(state, desc)!) {
         return report_contract_failure(
             state:               state,
@@ -1220,16 +1215,19 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
     gpu::TextureRequirements requirements,
     TexturePlacementNativeOps* ops,
 ) {
-    if (requirements.size == 0
-        || requirements.alignment == 0
-        || (requirements.alignment & (requirements.alignment - 1)) != 0
-        || !requirements.compatibility.is_valid()
-        || texture_compatibility_owner(requirements.compatibility)
-            != state.allocations.owner) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        requirements.size != 0
+            && requirements.alignment != 0
+            && (requirements.alignment & (requirements.alignment - 1)) == 0
+            && requirements.compatibility.is_valid()
+            && texture_compatibility_owner(requirements.compatibility) == state.allocations.owner,
+        "computed texture requirements must be valid"
+    );
     if (requirements.dedicated_only) return gpu::UNSUPPORTED_FEATURE~;
-    if (offset % requirements.alignment != 0) return gpu::INVALID_ARGUMENT~;
+    assert(
+        offset % requirements.alignment == 0,
+        "offset must be a multiple of the texture's required alignment"
+    );
 
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
@@ -1237,25 +1235,26 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
     if (allocation.live_placements == uint::max) {
         return gpu::INVALID_RESOURCE_STATE~;
     }
-    if (!allocation.texture_memory
-        || requirements.alignment > allocation.alignment
-        || allocation.dedicated_texture
-        || !gpu::internal::queue_roles_are_subset(desc.access, allocation.access)
-        || allocation.raw_info.memory_type >= 32) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        allocation.texture_memory
+            && requirements.alignment <= allocation.alignment
+            && !allocation.dedicated_texture
+            && gpu::internal::queue_roles_are_subset(desc.access, allocation.access)
+            && allocation.raw_info.memory_type < 32,
+        "placement allocation must be non-dedicated texture memory with sufficient alignment and access"
+    );
     uint selected_memory_type = 1 << allocation.raw_info.memory_type;
-    if ((selected_memory_type
-            & texture_compatibility_value(requirements.compatibility)) == 0
-        || !gpu::internal::range_fits(allocation.size, offset, requirements.size)
-        || placed_texture_overlaps(
-            state,
-            placement,
-            offset,
-            requirements.size,
-        )) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        (selected_memory_type & texture_compatibility_value(requirements.compatibility)) != 0
+            && gpu::internal::range_fits(allocation.size, offset, requirements.size)
+            && !placed_texture_overlaps(
+                state,
+                placement,
+                offset,
+                requirements.size,
+            ),
+        "placement must be memory-compatible, fit the allocation, and not overlap another placed texture"
+    );
 
     uint[MAX_QUEUE_FAMILIES] families;
     uint family_count = resource_queue_families(
@@ -1361,35 +1360,37 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
     gpu::TextureRequirements requirements,
     DedicatedTextureNativeOps* ops,
 ) {
-    if (desc == null || allocation_desc == null
-        || allocation_desc.memory_class != gpu::MemoryClass.TEXTURE
-        || allocation_desc.texture_requirements.len == 0
-        || allocation_desc.size != requirements.size
-        || allocation_desc.alignment < requirements.alignment
-        || !gpu::internal::queue_roles_are_subset(desc.access, allocation_desc.access)
-        || requirements.size == 0
-        || requirements.alignment == 0
-        || (requirements.alignment & (requirements.alignment - 1)) != 0
-        || texture_compatibility_owner(requirements.compatibility)
-            != state.allocations.owner) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        requirements.size != 0
+            && requirements.alignment != 0
+            && (requirements.alignment & (requirements.alignment - 1)) == 0
+            && texture_compatibility_owner(requirements.compatibility) == state.allocations.owner,
+        "computed texture requirements must be valid"
+    );
+    assert(
+        allocation_desc.size == requirements.size
+            && allocation_desc.alignment >= requirements.alignment,
+        "allocation_desc.size must equal and alignment cover the texture's requirements"
+    );
 
     uint memory_type_bits = texture_compatibility_value(
         requirements.compatibility,
     );
     foreach (&candidate : allocation_desc.texture_requirements) {
-        if (candidate.size == 0
-            || candidate.alignment == 0
-            || texture_compatibility_owner(candidate.compatibility)
-                != state.allocations.owner) {
-            return gpu::INVALID_ARGUMENT~;
-        }
+        assert(
+            candidate.size != 0
+                && candidate.alignment != 0
+                && texture_compatibility_owner(candidate.compatibility) == state.allocations.owner,
+            "allocation_desc.texture_requirements entries must be valid"
+        );
         memory_type_bits &= texture_compatibility_value(
             candidate.compatibility,
         );
     }
-    if (memory_type_bits == 0) return gpu::INVALID_ARGUMENT~;
+    assert(
+        memory_type_bits != 0,
+        "texture memory types must intersect allocation_desc.texture_requirements"
+    );
 
     uint[MAX_QUEUE_FAMILIES] families;
     uint family_count = resource_queue_families(
@@ -1613,7 +1614,7 @@ fn void? vk_destroy_texture(
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     TextureSlot* slot = state.textures.get(handle);
-    if (slot.swapchain_owned) return gpu::INVALID_ARGUMENT~;
+    assert(!slot.swapchain_owned, "texture must not be swapchain-owned");
     if (texture_has_live_descriptor_views(slot)) {
         return gpu::RESOURCE_IN_USE~;
     }

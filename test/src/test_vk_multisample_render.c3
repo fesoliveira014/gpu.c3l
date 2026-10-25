@@ -433,7 +433,7 @@ fn void record_to_sampled(
             .access = { .read, .write },
         },
         after:   gpu::sampled_at({ .compute }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(commands, &to_sampled)!!;
 }
 
@@ -709,7 +709,7 @@ fn void record_depth_resolve_attach(
         texture: texture,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   depth_resolve_state(),
-    )!!;
+    );
     gpu::cmd_texture_barrier(commands, &to_attach)!!;
 }
 
@@ -721,7 +721,7 @@ fn void record_depth_resolve_order(
         texture: texture,
         before:  depth_resolve_state(),
         after:   depth_resolve_state(),
-    )!!;
+    );
     gpu::cmd_texture_barrier(commands, &order)!!;
 }
 
@@ -733,7 +733,7 @@ fn void record_depth_resolve_to_sampled(
         texture: texture,
         before:  depth_resolve_state(),
         after:   gpu::sampled_at({ .compute }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(commands, &to_sampled)!!;
 }
 

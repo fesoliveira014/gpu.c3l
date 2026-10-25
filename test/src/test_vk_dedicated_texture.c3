@@ -260,65 +260,6 @@ fn void run_dedicated_failure_case(uint stage) {
     assert(fixture.probe.free_calls == (stage <= 1 ? 0 : 1));
 }
 
-fn void dedicated_texture_validation_precedes_native_mutation() @test {
-    DedicatedTextureFixture fixture;
-    init_dedicated_fixture(&fixture);
-    defer (void)fixture.state.resource_mutex.destroy();
-    gpu::TextureDesc texture_desc = dedicated_test_texture_desc();
-    gpu::TextureRequirements requirements =
-        dedicated_test_requirements(&fixture);
-    gpu::TextureRequirements[1] queried = { requirements };
-    gpu::AllocationDesc allocation_desc = {
-        .size                 = requirements.size + 64,
-        .alignment            = requirements.alignment,
-        .memory_class         = gpu::MemoryClass.TEXTURE,
-        .access               = texture_desc.access,
-        .texture_requirements = queried[..],
-    };
-    vk::DedicatedTextureNativeOps ops =
-        dedicated_probe_ops(&fixture.probe);
-
-    assert(@catch(vk::create_dedicated_texture_for_state_with_ops(
-        state:           &fixture.state,
-        desc:            &texture_desc,
-        allocation_desc: &allocation_desc,
-        requirements:    requirements,
-        ops:             &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(fixture.probe.create_calls == 0,
-        "invalid dedicated requests stop before native mutation");
-
-    allocation_desc.size = requirements.size;
-    gpu::TextureRequirements foreign_requirements = requirements;
-    foreign_requirements.compatibility = vk::texture_compatibility(
-        gpu::internal::resource_owner_tag(
-            132,
-            gpu::internal::ResourceOwnerKind.ALLOCATION,
-        ),
-        0b0010,
-    );
-    assert(@catch(vk::create_dedicated_texture_for_state_with_ops(
-        state:           &fixture.state,
-        desc:            &texture_desc,
-        allocation_desc: &allocation_desc,
-        requirements:    foreign_requirements,
-        ops:             &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(fixture.probe.create_calls == 0,
-        "foreign direct requirements stop before native mutation");
-
-    queried[0] = foreign_requirements;
-    assert(@catch(vk::create_dedicated_texture_for_state_with_ops(
-        state:           &fixture.state,
-        desc:            &texture_desc,
-        allocation_desc: &allocation_desc,
-        requirements:    requirements,
-        ops:             &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(fixture.probe.create_calls == 0,
-        "foreign candidate requirements stop before native mutation");
-}
-
 fn void dedicated_texture_transaction_rolls_back_every_step() @test {
     for (uint stage = 0; stage < 6; stage++) {
         run_dedicated_failure_case(stage);

@@ -402,7 +402,7 @@ fn void record_val_texture_transition(
         texture: texture,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   after,
-    )!!;
+    );
     gpu::cmd_texture_barrier(commands, &barrier)!!;
 }
 

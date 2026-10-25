@@ -266,3 +266,87 @@ fn void generated_span_rule_reads_nothing_for_a_zero_maximum() @test {
     assert(!gpu::internal::generated_spans_hold(empty, count, 24, 1));
 }
 
+
+fn void texture_desc_rule_rejects_each_malformed_shape() @test {
+    TextureDesc valid = {
+        .width  = 8,
+        .height = 8,
+        .format = Format.RGBA8_UNORM,
+        .usage  = { .sampled },
+        .access = { .graphics },
+    };
+    assert(gpu::internal::texture_desc_valid(&valid));
+
+    TextureDesc zero_width = valid;
+    zero_width.width = 0;
+    assert(!gpu::internal::texture_desc_valid(&zero_width), "width must be greater than 0");
+
+    TextureDesc unknown_format = valid;
+    unknown_format.format = bitcast(9999, Format);
+    assert(!gpu::internal::texture_desc_valid(&unknown_format), "an unknown format is not in the profile");
+
+    TextureDesc long_chain = valid;
+    long_chain.mip_levels = 5;
+    assert(!gpu::internal::texture_desc_valid(&long_chain), "an 8x8 texture has four mips");
+}
+
+fn void texture_view_rules_reject_an_overflowing_range_or_unknown_aspect() @test {
+    TextureViewDesc whole = {};
+    TextureViewDesc ranged = { .base_mip = 1, .mip_count = 2, .base_layer = 3, .layer_count = 4 };
+    TextureViewDesc[2] good = { whole, ranged };
+    assert(gpu::internal::texture_view_desc_valid(null), "null selects the default view");
+    assert(gpu::internal::texture_view_descs_valid(good[..]));
+    assert(gpu::internal::texture_view_descs_valid({}), "an empty batch is valid");
+
+    TextureViewDesc last_mip = { .base_mip = uint::max };
+    assert(!gpu::internal::texture_view_desc_valid(&last_mip), "base_mip must leave room for one mip");
+    TextureViewDesc mip_overflow = { .base_mip = uint::max - 1, .mip_count = 2 };
+    assert(!gpu::internal::texture_view_desc_valid(&mip_overflow));
+    TextureViewDesc layer_overflow = { .base_layer = uint::max, .layer_count = 1 };
+    assert(!gpu::internal::texture_view_desc_valid(&layer_overflow));
+    TextureViewDesc unknown_aspect = { .aspect = bitcast(77, TextureAspect) };
+    assert(!gpu::internal::texture_view_desc_valid(&unknown_aspect), "aspect must be defined");
+
+    TextureViewDesc[2] mixed = { whole, last_mip };
+    assert(!gpu::internal::texture_view_descs_valid(mixed[..]), "one bad element rejects the slice");
+
+    TextureViewCreateDesc[2] created = { { .view = whole }, { .view = last_mip } };
+    assert(gpu::internal::texture_view_create_descs_valid(created[:1]));
+    assert(!gpu::internal::texture_view_create_descs_valid(created[..]));
+}
+
+fn void sampler_rule_rejects_each_malformed_clause() @test {
+    SamplerDesc valid = { .min_lod = 0.0f, .max_lod = 8.0f };
+    assert(gpu::internal::sampler_desc_valid(&valid));
+
+    SamplerDesc inverted = valid;
+    inverted.min_lod = 4.0f;
+    inverted.max_lod = 2.0f;
+    assert(!gpu::internal::sampler_desc_valid(&inverted), "min_lod must not exceed max_lod");
+
+    SamplerDesc not_a_number = valid;
+    not_a_number.mip_lod_bias = float::nan;
+    assert(!gpu::internal::sampler_desc_valid(&not_a_number), "bias must be finite");
+    SamplerDesc infinite = valid;
+    infinite.max_lod = float::inf;
+    assert(!gpu::internal::sampler_desc_valid(&infinite), "max_lod must be finite");
+
+    SamplerDesc bad_filter = valid;
+    bad_filter.mag_filter = bitcast(5, Filter);
+    assert(!gpu::internal::sampler_desc_valid(&bad_filter), "filters must be defined");
+    SamplerDesc bad_compare = valid;
+    bad_compare.compare_enable = true;
+    bad_compare.compare = bitcast(50, CompareOp);
+    assert(!gpu::internal::sampler_desc_valid(&bad_compare), "an enabled compare op must be defined");
+    bad_compare.compare_enable = false;
+    assert(gpu::internal::sampler_desc_valid(&bad_compare), "a disabled compare op is ignored");
+
+    SamplerDesc weak = valid;
+    weak.anisotropy_enable = true;
+    weak.max_anisotropy = 0.5f;
+    assert(!gpu::internal::sampler_desc_valid(&weak), "active anisotropy must be at least 1");
+    weak.max_anisotropy = float::nan;
+    assert(!gpu::internal::sampler_desc_valid(&weak), "active anisotropy must be finite");
+    weak.anisotropy_enable = false;
+    assert(gpu::internal::sampler_desc_valid(&weak), "inactive anisotropy is ignored");
+}

@@ -613,7 +613,7 @@ fn gpu::SamplerIndex? vk_intern_sampler(
     VkDeviceState* state,
     gpu::SamplerDesc* desc,
 ) {
-    if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    assert(state != null && desc != null, "sampler intern needs a device state and description");
     lock_stub_samplers(state);
     defer unlock_stub_samplers(state);
     state.sampler_intern_attempts++;
@@ -1482,9 +1482,6 @@ fn gpu::TextureRequirements? vk_get_texture_requirements(
     gpu::TextureDesc* desc,
 ) {
     state.texture_requirements_calls++;
-    if (!gpu::internal::texture_desc_valid(desc)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     return {
         .size      = 64,
         .alignment = 64,
@@ -1532,9 +1529,6 @@ fn gpu::TextureHandle? vk_create_texture(
     gpu::TextureDesc* desc,
 ) {
     state.texture_create_attempts++;
-    if (!gpu::internal::texture_desc_valid(desc)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     if (state.texture_out_of_memory) return gpu::OUT_OF_DEVICE_MEMORY~;
     if (state.texture_live) return gpu::INVALID_RESOURCE_STATE~;
     state.texture = {
@@ -1555,13 +1549,14 @@ fn gpu::TextureHandle? vk_create_placed_texture(
     state.texture_placed_calls++;
     gpu::TextureRequirements requirements =
         vk_get_texture_requirements(state, desc)!;
-    if (!state.allocation_live
-        || state.allocation != placement
-        || state.allocation_desc.memory_class != gpu::MemoryClass.TEXTURE
-        || state.allocation_desc.size < requirements.size
-        || offset > state.allocation_desc.size - requirements.size) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state.allocation_live
+            && state.allocation == placement
+            && state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE
+            && state.allocation_desc.size >= requirements.size
+            && offset <= state.allocation_desc.size - requirements.size,
+        "placement must be memory-compatible, fit the allocation, and not overlap another placed texture"
+    );
     gpu::TextureHandle texture = vk_create_texture(state, desc)!;
     state.allocation_has_texture_placement = true;
     return texture;

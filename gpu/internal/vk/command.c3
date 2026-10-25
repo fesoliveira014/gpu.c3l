@@ -1551,7 +1551,7 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
 ) @private {
     if (mip >= slot.mip_levels) return gpu::INVALID_ARGUMENT~;
     if (!gpu::internal::texture_aspect_valid(aspect)) return gpu::INVALID_ARGUMENT~;
-    vk::ImageAspectFlags aspect_mask = resolve_aspect(slot.format, aspect)!;
+    vk::ImageAspectFlags aspect_mask = resolve_aspect(slot.format, aspect);
     MipExtent extent = texture_mip_extent(slot, mip);
     bool is_3d = texture_slot_is_3d(slot);
     if (x > extent.width || y > extent.height) {
@@ -1784,8 +1784,8 @@ fn void? vk_cmd_copy_texture(
         dst:          &dst_shape,
         desc:         desc,
         same_texture: src == dst,
-    )!;
-    vk::ImageAspectFlags aspect_mask = resolve_aspect(src.format, desc.aspect)!;
+    );
+    vk::ImageAspectFlags aspect_mask = resolve_aspect(src.format, desc.aspect);
 
     vk::ImageCopy region = {
         .src_subresource = {
@@ -1862,7 +1862,7 @@ fn BoundPipeline? lower_bound_pipeline(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    validate_descriptor_heap_binding(state)!;
+    validate_descriptor_heap_binding(state);
     PipelineCell* cell = state.pipelines.get_cell(pipeline);
     PipelineSlot* slot = &cell.value;
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[slot.entry];
@@ -1944,7 +1944,7 @@ fn void? record_bound_pipeline_with_ops(
         record:     record,
         layout:     bound.layout,
         bind_point: bind_point,
-    )!;
+    );
     if (bound.kind == PipelineKind.GRAPHICS
         && record.graphics_state_initialized
         && !record.raster_topology_emitted) {

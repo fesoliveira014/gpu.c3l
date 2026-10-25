@@ -93,17 +93,18 @@ second.
 Build a transition and record it:
 
 ```c3
-gpu::TextureBarrier barrier = gpu::texture_transition(texture, undefined, attachment)!;
+gpu::TextureBarrier barrier = gpu::texture_transition(texture, undefined, attachment);
 gpu::cmd_texture_barrier(&commands, &barrier)!;
 
 gpu::TextureViewDesc mip0 = { .base_mip = 0, .mip_count = 1 };
-gpu::TextureBarrier one_mip = gpu::texture_view_transition(texture, mip0, attachment, sampled)!;
+gpu::TextureBarrier one_mip = gpu::texture_view_transition(texture, mip0, attachment, sampled);
 ```
 
 `before` must be the state established by the last ordered use. The
 library keeps no history and does not repair a wrong `before`. A
-`TextureBarrier` value can be built inline as well; the helper functions
-only check layouts.
+`TextureBarrier` value can be built inline as well. The helper functions
+return the barrier directly and require both layouts to be defined and
+`after.layout` not to be `UNDEFINED`; a violation panics in safe builds.
 
 An `UNDEFINED` `before` honors its `stages` and ignores its `access`. The
 stages enter the transition's source scope, so a submit wait that gates them

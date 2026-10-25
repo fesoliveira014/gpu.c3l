@@ -357,23 +357,6 @@ fn void three_dimensional_texture_lifecycle_and_views() @test {
     assert(found_three_dimensional_view,
         "three-dimensional mip views use the existing cache with TYPE_3D");
 
-    gpu::TextureViewDesc invalid_layer = {
-        .base_layer = 1,
-    };
-    assert(@catch(gpu::create_texture_view(
-        &device,
-        texture,
-        &invalid_layer,
-    )) == gpu::INVALID_ARGUMENT,
-        "three-dimensional views reject nonzero base layers");
-    invalid_layer = { .layer_count = 2 };
-    assert(@catch(gpu::create_texture_view(
-        &device,
-        texture,
-        &invalid_layer,
-    )) == gpu::INVALID_ARGUMENT,
-        "three-dimensional views reject multiple layers");
-
     gpu::destroy_texture_view(&device, view);
     gpu::destroy_texture(&device, texture)!!;
 
@@ -550,53 +533,6 @@ fn void default_texture_views_follow_usage_eligibility() @test {
     }
 }
 
-fn void texture_unsupported_desc_rejected() @test {
-    gpu::Device device = make_texture_test_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc depth_storage = {
-        .access    = { .graphics, .compute, .transfer },
-        .width     = 16,
-        .height    = 16,
-        .format    = gpu::Format.D32_FLOAT,
-        .usage     = { .depth_attach, .storage },
-    };
-    fault storage_fault = @catch(gpu::create_texture(&device, &depth_storage));
-    assert(storage_fault == gpu::INVALID_ARGUMENT, "storage usage on a depth format faults INVALID_ARGUMENT");
-
-    gpu::TextureDesc color_with_depth_usage = {
-        .access    = { .graphics, .compute, .transfer },
-        .width     = 16,
-        .height    = 16,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .depth_attach },
-    };
-    fault cross_fault = @catch(gpu::create_texture(&device, &color_with_depth_usage));
-    assert(cross_fault == gpu::INVALID_ARGUMENT, "depth_attach on a color format faults INVALID_ARGUMENT");
-
-    gpu::TextureDesc transfer_only = {
-        .access    = { .graphics, .compute, .transfer },
-        .width     = 16,
-        .height    = 16,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .transfer_dst },
-    };
-    gpu::TextureHandle staging_target = gpu::create_texture(&device, &transfer_only)!!;
-    fault view_fault = @catch(gpu::create_texture_view(&device, staging_target, null));
-    assert(view_fault == gpu::INVALID_ARGUMENT,
-        "a view on a non-shader-visible texture faults INVALID_ARGUMENT");
-    gpu::AttachmentViewDesc attachment_desc = {
-        .texture = staging_target,
-    };
-    fault attachment_fault = @catch(gpu::create_attachment_view(
-        &device,
-        &attachment_desc,
-    ));
-    assert(attachment_fault == gpu::INVALID_ARGUMENT,
-        "an attachment view on a transfer-only texture faults INVALID_ARGUMENT");
-    gpu::destroy_texture(&device, staging_target)!!;
-}
-
 fn void texture_barrier_records_texture_states() @test {
     gpu::Device device = make_texture_test_device();
     defer destroy_test_device(&device)!!;
@@ -664,11 +600,6 @@ fn void texture_multi_mip_create_destroy() @test {
     gpu::TextureHandle texture = gpu::create_texture(&device, &desc)!!;
     assert(texture.is_valid(), "multi-mip texture created");
     gpu::destroy_texture(&device, texture)!!;
-
-    gpu::TextureDesc over_chain = desc;
-    over_chain.mip_levels = 6;
-    fault chain_fault = @catch(gpu::create_texture(&device, &over_chain));
-    assert(chain_fault == gpu::INVALID_ARGUMENT, "mip count past the full chain (16x16 -> 5) faults INVALID_ARGUMENT");
 }
 
 fn void texture_multi_mip_barrier_covers_chain() @test {
@@ -1362,9 +1293,6 @@ fn void texture_capability_queries_reject_uncreatable_descriptors() @test {
     };
     assert(!gpu::supports_texture_desc(&device, &invalid)!!,
         "deterministically invalid mip count preflights false");
-    fault invalid_fault = @catch(gpu::create_texture(&device, &invalid));
-    assert(invalid_fault == gpu::INVALID_ARGUMENT,
-        "deterministically invalid descriptor keeps INVALID_ARGUMENT");
 
     gpu::TextureDesc beyond_adapter = {
         .access    = { .graphics, .compute, .transfer },
@@ -1379,45 +1307,6 @@ fn void texture_capability_queries_reject_uncreatable_descriptors() @test {
     fault unsupported_fault = @catch(gpu::create_texture(&device, &beyond_adapter));
     assert(unsupported_fault == gpu::UNSUPPORTED_FEATURE,
         "adapter-limit rejection faults UNSUPPORTED_FEATURE before allocation");
-}
-
-fn void invalid_texture_descriptor_diagnostic_preserves_fault() @test {
-    TextureDiagnosticCapture capture = {
-        .expected_operation      = "create_texture",
-        .expected_debug_name     = "invalid_texture_desc",
-        .expected_rejected_field = "TextureDesc",
-        .expected_invariant      = "descriptor must satisfy the texture creation contract",
-    };
-    gpu::Device device = make_texture_diagnostic_device(&capture);
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc invalid = {
-        .access     = { .graphics, .compute },
-        .width      = 0,
-        .height     = 16,
-        .format     = gpu::Format.RGBA8_UNORM,
-        .usage      = { .sampled },
-        .debug_name = "invalid_texture_desc",
-    };
-    fault with_callback = @catch(gpu::create_texture(&device, &invalid));
-
-    assert(with_callback == gpu::INVALID_ARGUMENT, "invalid descriptor keeps INVALID_ARGUMENT");
-    assert(capture.calls == 1, "invalid descriptor emits exactly one diagnostic");
-    assert(capture.operation_matches, "operation is create_texture");
-    assert(capture.has_fault && capture.public_fault == with_callback,
-        "diagnostic carries the unchanged public fault");
-    assert(capture.public_contract, "invalid descriptor is a public-contract diagnostic");
-    assert(capture.resource_kind == gpu::DebugResourceKind.TEXTURE, "resource kind is texture");
-    assert(!capture.has_public_identity, "rejected creation has no public identity");
-    assert(capture.debug_name_matches, "descriptor debug name is preserved");
-    assert(capture.rejected_field_matches, "invalid descriptor is reported without re-deriving its field");
-    assert(capture.invariant_matches, "generic texture creation invariant is identified");
-
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    state.debug_callback = null;
-    fault without_callback = @catch(gpu::create_texture(&device, &invalid));
-    assert(without_callback == with_callback, "callback presence does not alter the descriptor fault");
-    assert(capture.calls == 1, "null callback emits no additional diagnostic");
 }
 
 fn void unsupported_texture_capability_diagnostic_preserves_fault() @test {
@@ -1499,29 +1388,6 @@ fn void placed_texture_requirements_validate_and_release_storage() @test {
         allocation: allocation,
         offset:     0,
     )!!;
-    assert(@catch(gpu::create_placed_texture(
-        device:     &device,
-        desc:       &texture_desc,
-        allocation: allocation,
-        offset:     0,
-    )) == gpu::INVALID_ARGUMENT,
-        "live placement ranges cannot overlap");
-    assert(@catch(gpu::create_placed_texture(
-        device:     &device,
-        desc:       &texture_desc,
-        allocation: allocation,
-        offset:     allocation_desc.size,
-    )) == gpu::INVALID_ARGUMENT,
-        "placement ranges must fit in the allocation");
-    if (requirements.alignment > 1) {
-        assert(@catch(gpu::create_placed_texture(
-            device:     &device,
-            desc:       &texture_desc,
-            allocation: allocation,
-            offset:     1,
-        )) == gpu::INVALID_ARGUMENT,
-            "placement offsets must satisfy texture alignment");
-    }
 
     gpu::TextureHandle second = gpu::create_placed_texture(
         device:     &device,
@@ -1532,25 +1398,9 @@ fn void placed_texture_requirements_validate_and_release_storage() @test {
     gpu::destroy_texture(&device, first)!!;
     gpu::destroy_texture(&device, second)!!;
     gpu::free_allocation(&device, &allocation)!!;
-
-    gpu::AllocationDesc generic_desc = {
-        .size         = requirements.size,
-        .memory_class = gpu::MemoryClass.GPU_PRIVATE,
-        .access       = texture_desc.access,
-    };
-    gpu::GpuAllocation generic =
-        gpu::allocate_memory(&device, &generic_desc)!!;
-    assert(@catch(gpu::create_placed_texture(
-        device:     &device,
-        desc:       &texture_desc,
-        allocation: generic,
-        offset:     0,
-    )) == gpu::INVALID_ARGUMENT,
-        "generic data allocations cannot back textures");
-    gpu::free_allocation(&device, &generic)!!;
 }
 
-fn void placed_texture_validation_precedes_native_mutation() @test {
+fn void placed_texture_refusals_stop_before_native_mutation() @test {
     PlacementFixture fixture;
     gpu::GpuAllocation allocation = init_placement_fixture(&fixture);
     defer (void)fixture.state.resource_mutex.destroy();
@@ -1558,17 +1408,6 @@ fn void placed_texture_validation_precedes_native_mutation() @test {
     gpu::TextureDesc desc = placement_test_desc();
     gpu::TextureRequirements requirements =
         placement_test_requirements(&fixture);
-
-    requirements.alignment = 0;
-    assert(@catch(vk::create_placed_texture_for_state_with_ops(
-        state:        &fixture.state,
-        desc:         &desc,
-        placement:    allocation,
-        offset:       0,
-        requirements: requirements,
-        ops:          &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    requirements.alignment = 64;
 
     requirements.dedicated_only = true;
     assert(@catch(vk::create_placed_texture_for_state_with_ops(
@@ -1580,88 +1419,6 @@ fn void placed_texture_validation_precedes_native_mutation() @test {
         ops:          &ops,
     )) == gpu::UNSUPPORTED_FEATURE);
     requirements.dedicated_only = false;
-    assert(@catch(vk::create_placed_texture_for_state_with_ops(
-        state:        &fixture.state,
-        desc:         &desc,
-        placement:    allocation,
-        offset:       1,
-        requirements: requirements,
-        ops:          &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk::create_placed_texture_for_state_with_ops(
-        state:        &fixture.state,
-        desc:         &desc,
-        placement:    allocation,
-        offset:       256,
-        requirements: requirements,
-        ops:          &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk::create_placed_texture_for_state_with_ops(
-        state:        &fixture.state,
-        desc:         &desc,
-        placement:    allocation,
-        offset:       usz::max - 63,
-        requirements: requirements,
-        ops:          &ops,
-    )) == gpu::INVALID_ARGUMENT);
-
-    requirements.compatibility = vk::texture_compatibility(
-        fixture.state.allocations.owner,
-        0b0100,
-    );
-    assert(@catch(vk::create_placed_texture_for_state_with_ops(
-        state:        &fixture.state,
-        desc:         &desc,
-        placement:    allocation,
-        offset:       0,
-        requirements: requirements,
-        ops:          &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    requirements.compatibility = vk::texture_compatibility(
-        fixture.state.allocations.owner,
-        0b0010,
-    );
-    requirements.alignment = 128;
-    assert(@catch(vk::create_placed_texture_for_state_with_ops(
-        state:        &fixture.state,
-        desc:         &desc,
-        placement:    allocation,
-        offset:       0,
-        requirements: requirements,
-        ops:          &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    requirements.alignment = 64;
-    fixture.allocations[0].value.texture_memory = false;
-    assert(@catch(vk::create_placed_texture_for_state_with_ops(
-        state:        &fixture.state,
-        desc:         &desc,
-        placement:    allocation,
-        offset:       0,
-        requirements: requirements,
-        ops:          &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    fixture.allocations[0].value.texture_memory = true;
-    fixture.allocations[0].value.dedicated_texture = true;
-    assert(@catch(vk::create_placed_texture_for_state_with_ops(
-        state:        &fixture.state,
-        desc:         &desc,
-        placement:    allocation,
-        offset:       0,
-        requirements: requirements,
-        ops:          &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    fixture.allocations[0].value.dedicated_texture = false;
-
-    gpu::TextureDesc wrong_access = desc;
-    wrong_access.access = { .graphics };
-    assert(@catch(vk::create_placed_texture_for_state_with_ops(
-        state:        &fixture.state,
-        desc:         &wrong_access,
-        placement:    allocation,
-        offset:       0,
-        requirements: requirements,
-        ops:          &ops,
-    )) == gpu::INVALID_ARGUMENT);
 
     fixture.state.textures.next_new = 1;
     fixture.allocations[0].value.live_placements = uint::max;
@@ -1674,30 +1431,10 @@ fn void placed_texture_validation_precedes_native_mutation() @test {
         ops:          &ops,
     )) == gpu::INVALID_RESOURCE_STATE);
     fixture.allocations[0].value.live_placements = 0;
-
-    fixture.textures[0] = {
-        .used       = true,
-        .generation = 1,
-        .value = {
-            .placed           = true,
-            .placement        = allocation,
-            .placement_offset = 0,
-            .allocation_size  = 64,
-        },
-    };
-    assert(@catch(vk::create_placed_texture_for_state_with_ops(
-        state:        &fixture.state,
-        desc:         &desc,
-        placement:    allocation,
-        offset:       0,
-        requirements: requirements,
-        ops:          &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    fixture.textures[0].used = false;
     assert(fixture.probe.create_calls == 0
         && fixture.probe.view_calls == 0
         && fixture.allocations[0].value.live_placements == 0,
-        "every invalid placement stops before native mutation");
+        "every refused placement stops before native mutation");
 }
 
 fn void placed_texture_publication_rolls_back_native_failures() @test {

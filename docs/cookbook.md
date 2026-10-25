@@ -94,7 +94,7 @@ gpu::TextureBarrier to_dst = gpu::texture_transition(
         .stages = { .transfer },
         .access = { .write },
     },
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_dst)!;
 
 gpu::BufferTextureCopyDesc upload = { .src = staging.span, .texture = texture };
@@ -104,7 +104,7 @@ gpu::TextureBarrier to_sampled = gpu::texture_transition(
     texture: texture,
     before:  to_dst.after,
     after:   gpu::sampled_at({ .fragment_shader }),
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_sampled)!;
 ```
 
@@ -134,7 +134,7 @@ gpu::TextureHandle albedo = gpu::create_texture(device, &bc_desc)!;
 // ... transition to TRANSFER_DESTINATION as in "Upload a texture"
 usz offset = 0;
 for (uint mip = 0; mip < MIP_COUNT; mip++) {
-    usz mip_bytes = gpu::texture_mip_bytes(&bc_desc, mip)!;
+    usz mip_bytes = gpu::texture_mip_bytes(&bc_desc, mip);
     gpu::BufferTextureCopyDesc upload = {
         .src     = staging_span.subspan(offset, mip_bytes),
         .texture = albedo,
@@ -224,14 +224,14 @@ gpu::TextureBarrier to_storage = gpu::texture_transition(
     texture: image,
     before:  { .layout = gpu::TextureLayout.UNDEFINED },
     after:   gpu::storage_at({ .compute }, { .write }),
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_storage)!;
 // dispatch that writes the image ...
 gpu::TextureBarrier to_sampled = gpu::texture_transition(
     texture: image,
     before:  to_storage.after,
     after:   gpu::sampled_at({ .fragment_shader }),
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_sampled)!;
 ```
 
@@ -329,7 +329,7 @@ gpu::TextureBarrier to_attach = gpu::texture_transition(
         .stages = { .color_output },
         .access = { .read, .write },
     },
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_attach)!;
 
 gpu::ColorTargetDesc[1] colors = {{
@@ -392,7 +392,7 @@ gpu::TextureBarrier to_depth = gpu::texture_transition(
         .stages = { .depth_output },
         .access = { .read, .write },
     },
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_depth)!;
 
 gpu::DepthTargetDesc depth_target = {
@@ -541,7 +541,7 @@ gpu::TextureBarrier to_source = gpu::texture_transition(
         .stages = { .transfer },
         .access = { .read },
     },
-)!;
+);
 gpu::cmd_texture_barrier(&commands, &to_source)!;
 gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = readback_span };
 gpu::cmd_copy_texture_to_buffer(&commands, &copy)!;
@@ -925,7 +925,7 @@ gpu::TextureBarrier to_sampled = gpu::texture_transition(
         .access = { .read, .write },
     },
     after:   gpu::sampled_at({ .fragment_shader }),
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_sampled)!;
 ```
 

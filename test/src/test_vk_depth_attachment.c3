@@ -121,7 +121,7 @@ fn void record_depth_to_attach(gpu::CommandList* cmd, gpu::TextureHandle depth) 
             .stages = { .depth_output },
             .access = { .read, .write },
         },
-    )!!;
+    );
     gpu::cmd_texture_barrier(cmd, &to_attach)!!;
 }
 
@@ -812,19 +812,19 @@ fn void depth_nonzero_mip_layer_isolated() @test {
         view:    target_range,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   depth_state,
-    )!!;
+    );
     gpu::TextureBarrier layer_to_depth = gpu::texture_view_transition(
         texture: depth,
         view:    layer_range,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   depth_state,
-    )!!;
+    );
     gpu::TextureBarrier mip_to_depth = gpu::texture_view_transition(
         texture: depth,
         view:    mip_range,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   depth_state,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &target_to_depth)!!;
     gpu::cmd_texture_barrier(&commands, &layer_to_depth)!!;
     gpu::cmd_texture_barrier(&commands, &mip_to_depth)!!;
@@ -950,36 +950,6 @@ fn void depth_nonzero_mip_layer_isolated() @test {
     ).ptr;
     assert(untouched_mip[DP_RT / 2 * DP_RT + DP_RT / 2] == 0.75f,
         "drawing one mip leaves the neighboring mip unchanged");
-}
-
-fn void depth_pass_validation_faults() @test {
-    gpu::Device device = make_depth_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc sampled_only_desc = {
-        .access    = { .graphics, .compute, .transfer },
-        .width     = DP_RT,
-        .height    = DP_RT,
-        .format    = gpu::Format.D32_FLOAT,
-        .usage     = { .sampled },
-    };
-    gpu::TextureHandle sampled_only = gpu::create_texture(&device, &sampled_only_desc)!!;
-    defer gpu::destroy_texture(&device, sampled_only)!!;
-
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
-    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
-    defer gpu::destroy_command_allocator(&command_allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-
-    gpu::AttachmentViewDesc no_usage = { .texture = sampled_only };
-    assert(@catch(gpu::create_attachment_view(&device, &no_usage))
-        == gpu::INVALID_ARGUMENT,
-        "attachment creation rejects a texture without attachment usage");
-
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
-    defer discard_test_executable(&cmd_executable)!!;
 }
 
 const char[*] SHADOW_PROBE_SPIRV = $embed("shaders/shadow_probe.comp.spv");
