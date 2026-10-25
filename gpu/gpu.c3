@@ -1133,8 +1133,9 @@ fn void? update_texture_view(Device* device, TextureView* view, TextureHandle te
    Creation binds no memory; sparse page allocations remain caller-owned.
    @param device : "Live sparse-enabled device that will own the texture."
    @param desc : "Borrowed sparse texture description."
-   @return "An owning texture handle, or a recoverable validation, support, capacity, or allocation fault."
+   @return "An owning texture handle, or a recoverable support, capacity, or allocation fault."
    @require desc != null : "desc must not be null"
+   @require gpu::internal::sparse_texture_desc_valid(desc) : "desc must be a valid single-layer, uncompressed, non-depth texture description with no attachment usage"
    @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles" *>
 fn TextureHandle? create_sparse_texture(Device* device, TextureDesc* desc) {
     gpu::internal::DeviceOperation operation =
@@ -1147,11 +1148,13 @@ fn TextureHandle? create_sparse_texture(Device* device, TextureDesc* desc) {
     return texture;
 }
 
-<* Return the immutable requirements cached for a live sparse texture.
+<* Return the immutable requirements cached for a live sparse texture. The
+   texture must have been created by `create_sparse_texture`; that rule reads
+   texture state, so a violation panics in safe builds.
    @param device : "Live device that owns the texture."
    @param texture : "Live sparse texture handle."
-   @return "The cached requirements, or a recoverable argument fault." *>
-fn SparseTextureRequirements? get_sparse_texture_requirements(Device* device, TextureHandle texture) {
+   @return "The cached requirements." *>
+fn SparseTextureRequirements get_sparse_texture_requirements(Device* device, TextureHandle texture) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -1173,14 +1176,31 @@ fn SparseTextureRequirements? get_sparse_texture_requirements(Device* device, Te
    live through completion and keeps resident bytes exclusive until an ordered
    unbind or replacement and every prior GPU user complete. The library retains
    no residency map. The caller externally synchronizes submit, present, and
-   sparse-bind host calls on the same native queue, including aliased roles. *>
+   sparse-bind host calls on the same native queue, including aliased roles.
+   The queue must be a sparse-binding queue named by
+   `DeviceCaps.sparse_textures.binding_queues` and `desc.texture` must be a
+   sparse texture. Tile binds must target mips below the aspect's
+   `mip_tail_first_lod`, be tile-aligned and inside the mip extent, end
+   partial tiles at the mip edge, and use z offset 0 and z extent 1 on 2D
+   textures. Opaque binds must name an aspect listed in the texture's sparse
+   requirements, be page-aligned, and lie inside that aspect's mip tail. Each
+   backing allocation must be non-dedicated texture memory compatible with
+   `get_sparse_texture_requirements`, admit the texture's queue access, hold
+   the bound range, and be addressed at an `allocation_offset` that is a
+   multiple of the sparse page alignment; backing ranges in one call must not
+   overlap each other or the memory of a placed texture. Those rules read
+   device and texture state, so a violation panics in safe builds.
+   @param queue : "Sparse-binding queue that executes the bind."
+   @param desc : "Borrowed texture, tile and opaque binds, and completion waits."
+   @return "The completion point of the bind, or a recoverable capacity, allocation, or device fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::sparse_bind_desc_valid(desc) : "desc.tiles, desc.opaque and desc.waits must hold at most MAX_SPARSE_TILE_BINDS, MAX_SPARSE_OPAQUE_BINDS and MAX_SPARSE_BIND_WAITS entries, desc.tiles and desc.opaque must hold at least one bind in total, tile binds must use the color aspect with a nonzero extent and an offset no greater than int::max, opaque binds must use a defined aspect with a nonzero size, an unbind must use allocation_offset 0, and tile boxes of one mip and opaque ranges of one aspect must not overlap" *>
 fn CompletionPoint? bind_sparse_texture_memory(Queue queue, SparseTextureBindDesc* desc) {
     Device device = queue.device;
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(&device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_queue(&operation, &device, queue);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_bind_sparse_texture_memory(
         operation.state,
         queue,
@@ -1208,9 +1228,14 @@ fn SamplerIndex? intern_sampler(Device* device, SamplerDesc* desc) {
 
 <* Return persistent and caller-owned scratch requirements for an acceleration
    structure capacity descriptor.
+   `desc.geometries.len` of a bottom-level description must not exceed
+   `DeviceCaps.acceleration_structures.max_geometry_count`; that rule reads
+   device caps, so a violation panics in safe builds.
    @param device : "Live ray-query-enabled device to query."
    @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
-   @return "Storage and scratch requirements, or a recoverable validation or support fault." *>
+   @return "Storage and scratch requirements, or a recoverable support fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_desc_valid(desc) : "desc must have known flags without both prefer_fast_trace and prefer_fast_build, a defined kind, geometries of one defined kind with nonzero counts, a defined index type and a primitive total that fits in uint for a bottom-level structure, and a nonzero max_instance_count with no geometries for a top-level structure" *>
 fn AccelerationStructureRequirements? get_acceleration_structure_requirements(
     Device* device,
     AccelerationStructureDesc* desc,
@@ -1218,7 +1243,6 @@ fn AccelerationStructureRequirements? get_acceleration_structure_requirements(
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_get_acceleration_structure_requirements(
         operation.state,
         desc,
@@ -1226,14 +1250,18 @@ fn AccelerationStructureRequirements? get_acceleration_structure_requirements(
 }
 
 <* Create an acceleration structure with internally managed persistent storage.
+   `desc.geometries.len` of a bottom-level description must not exceed
+   `DeviceCaps.acceleration_structures.max_geometry_count`; that rule reads
+   device caps, so a violation panics in safe builds.
    @param device : "Live ray-query-enabled device that will own the structure."
    @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
-   @return "An owning handle, or a recoverable validation, support, capacity, or allocation fault." *>
+   @return "An owning handle, or a recoverable support, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_desc_valid(desc) : "desc must have known flags without both prefer_fast_trace and prefer_fast_build, a defined kind, geometries of one defined kind with nonzero counts, a defined index type and a primitive total that fits in uint for a bottom-level structure, and a nonzero max_instance_count with no geometries for a top-level structure" *>
 fn AccelerationStructureHandle? create_acceleration_structure(Device* device, AccelerationStructureDesc* desc) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     AccelerationStructureHandle acceleration_structure =
         gpu::internal::vk::vk_create_acceleration_structure(
             operation.state,
@@ -1244,12 +1272,21 @@ fn AccelerationStructureHandle? create_acceleration_structure(Device* device, Ac
 }
 
 <* Create an acceleration structure in caller-owned compatible GPU memory.
-   The allocation must outlive the structure.
+   The allocation must outlive the structure. The allocation must be buffer
+   memory with acceleration-structure storage usage, `offset` must be aligned
+   to the reported storage alignment, the storage must fit inside the
+   allocation, and the range must not overlap another placed structure; those
+   rules read allocation state, so a violation panics in safe builds.
+   `desc.geometries.len` of a bottom-level description must not exceed
+   `DeviceCaps.acceleration_structures.max_geometry_count`; that rule reads
+   device caps, so a violation panics in safe builds.
    @param device : "Live device that owns the placement allocation."
    @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
    @param allocation : "Caller-owned compatible allocation."
    @param offset : "Aligned byte offset within the allocation."
-   @return "An owning handle, or a recoverable validation, compatibility, capacity, or allocation fault." *>
+   @return "An owning handle, or a recoverable support, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_desc_valid(desc) : "desc must have known flags without both prefer_fast_trace and prefer_fast_build, a defined kind, geometries of one defined kind with nonzero counts, a defined index type and a primitive total that fits in uint for a bottom-level structure, and a nonzero max_instance_count with no geometries for a top-level structure" *>
 fn AccelerationStructureHandle? create_placed_acceleration_structure(
     Device* device,
     AccelerationStructureDesc* desc,
@@ -1259,7 +1296,6 @@ fn AccelerationStructureHandle? create_placed_acceleration_structure(
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
@@ -1278,9 +1314,14 @@ fn AccelerationStructureHandle? create_placed_acceleration_structure(
 
 <* Create an acceleration structure and dedicated persistent allocation
    atomically. Destroy the structure before freeing the returned allocation.
+   `desc.geometries.len` of a bottom-level description must not exceed
+   `DeviceCaps.acceleration_structures.max_geometry_count`; that rule reads
+   device caps, so a violation panics in safe builds.
    @param device : "Live ray-query-enabled device that will own both resources."
    @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
-   @return "The owning structure and allocation pair, or a recoverable validation, support, capacity, or allocation fault." *>
+   @return "The owning structure and allocation pair, or a recoverable support, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_desc_valid(desc) : "desc must have known flags without both prefer_fast_trace and prefer_fast_build, a defined kind, geometries of one defined kind with nonzero counts, a defined index type and a primitive total that fits in uint for a bottom-level structure, and a nonzero max_instance_count with no geometries for a top-level structure" *>
 fn DedicatedAccelerationStructure? create_dedicated_acceleration_structure(
     Device* device,
     AccelerationStructureDesc* desc,
@@ -1288,7 +1329,6 @@ fn DedicatedAccelerationStructure? create_dedicated_acceleration_structure(
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     DedicatedAccelerationStructure created =
         gpu::internal::vk::vk_create_dedicated_acceleration_structure(
             operation.state,
@@ -1321,10 +1361,12 @@ fn void? destroy_acceleration_structure(Device* device, AccelerationStructureHan
 }
 
 <* Return the ordinary GPU address of a live bottom-level acceleration
-   structure. Top-level structures are not address inputs to instances.
+   structure. Top-level structures are not address inputs to instances; the
+   structure must be bottom-level, and that rule reads structure state, so a
+   violation panics in safe builds.
    @param device : "Live device that owns the BLAS."
    @param acceleration_structure : "Live bottom-level structure handle."
-   @return "A nonzero BLAS address, or a recoverable argument fault." *>
+   @return "A nonzero BLAS address, or a recoverable support or backend fault." *>
 fn GpuAddress? get_acceleration_structure_address(Device* device, AccelerationStructureHandle acceleration_structure) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
@@ -1340,10 +1382,14 @@ fn GpuAddress? get_acceleration_structure_address(Device* device, AccelerationSt
     );
 }
 
-<* Validate a bottom-level structure and pack one exact 64-byte TLAS instance.
+<* Pack one exact 64-byte TLAS instance for a bottom-level structure. The
+   referenced structure must be bottom-level; that rule reads structure state,
+   so a violation panics in safe builds.
    @param device : "Live device that owns the referenced BLAS."
    @param desc : "Borrowed transform, BLAS, mask, index, and flag values."
-   @return "A packed instance, or a recoverable argument fault." *>
+   @return "A packed instance, or a recoverable support or backend fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_instance_desc_valid(desc) : "desc.custom_index must fit 24 bits, desc.mask must fit 8 bits, and desc.flags must use known bits and not combine force_opaque with force_non_opaque" *>
 fn AccelerationStructureInstance? make_acceleration_structure_instance(
     Device* device,
     AccelerationStructureInstanceDesc* desc,
@@ -1351,7 +1397,6 @@ fn AccelerationStructureInstance? make_acceleration_structure_instance(
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_resource_owner(
         &operation,
         desc.bottom_level.owner,
@@ -2072,13 +2117,21 @@ fn void? cmd_copy_texture(CommandList* commands, TextureCopyDesc* desc) {
    must be nonempty, lie within its buffer allocation, and the scratch span
    must cover the build scratch size reported by
    `get_acceleration_structure_requirements`; a violation panics in safe builds.
+   `desc.destination` must match the build: a top-level destination takes no
+   geometries and between one and its `max_instance_count` instances; a
+   bottom-level destination takes exactly its geometries, each of its kind,
+   with triangle and primitive counts within its maxima, a transform exactly
+   when it has one, no indices and at least three vertices per primitive for
+   non-indexed triangles, and no instances. Those rules read destination
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, dynamic inputs, and build scratch."
-   @return "Success, or a recoverable command, validation, range, capacity, or support fault." *>
+   @return "Success, or a recoverable command, capacity, or support fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_build_desc_valid(desc) : "desc.geometries[] must have a defined kind, nonzero primitive and vertex counts, a vertex_stride of at least 12 or an aabbs stride of at least 24, and a stride times count that fits in usz" *>
 fn void? cmd_build_acceleration_structure(CommandList* commands, AccelerationStructureBuildDesc* desc) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_build_acceleration_structure(record, desc);
 }
 
@@ -2089,13 +2142,22 @@ fn void? cmd_build_acceleration_structure(CommandList* commands, AccelerationStr
    allocation, and the scratch span must cover the update scratch size reported
    by `get_acceleration_structure_requirements`; a violation panics in safe
    builds.
+   `desc.destination` must match the build: a top-level destination takes no
+   geometries and between one and its `max_instance_count` instances; a
+   bottom-level destination takes exactly its geometries, each of its kind,
+   with triangle and primitive counts within its maxima, a transform exactly
+   when it has one, no indices and at least three vertices per primitive for
+   non-indexed triangles, and no instances. An update destination must have been created with
+   `flags.allow_update`. Those rules read destination
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, matching dynamic inputs, and update scratch."
-   @return "Success, or a recoverable command, validation, range, capacity, or support fault." *>
+   @return "Success, or a recoverable command, capacity, or support fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_build_desc_valid(desc) : "desc.geometries[] must have a defined kind, nonzero primitive and vertex counts, a vertex_stride of at least 12 or an aabbs stride of at least 24, and a stride times count that fits in usz" *>
 fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationStructureBuildDesc* desc) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_update_acceleration_structure(record, desc);
 }
 
@@ -2115,10 +2177,19 @@ fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationSt
    within its buffer allocation and the scratch span must cover the build
    scratch size reported by `get_acceleration_structure_requirements`; a
    violation panics in safe builds.
+   `desc.destination` must match the build: a top-level destination takes no
+   geometries and between one and its `max_instance_count` instances; a
+   bottom-level destination takes exactly its geometries, each of its kind,
+   with triangle and primitive counts within its maxima, a transform exactly
+   when it has one, no indices and at least three vertices per primitive for
+   non-indexed triangles, and no instances. Those rules read destination
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, maximum-count inputs, and build scratch."
    @param ranges : "Caller-owned GPU-authored fixed-stride range records."
-   @return "Success, or a recoverable command, validation, range, capacity, or support fault."
+   @return "Success, or a recoverable command, capacity, or support fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_build_desc_valid(desc) : "desc.geometries[] must have a defined kind, nonzero primitive and vertex counts, a vertex_stride of at least 12 or an aabbs stride of at least 24, and a stride times count that fits in usz"
    @require ranges.size > 0 : "ranges.size must be greater than 0" *>
 fn void? cmd_build_acceleration_structure_indirect(
     CommandList* commands,
@@ -2127,7 +2198,6 @@ fn void? cmd_build_acceleration_structure_indirect(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_build_acceleration_structure_indirect(
         record,
         desc,
@@ -2147,10 +2217,20 @@ fn void? cmd_build_acceleration_structure_indirect(
    Every span must lie within its buffer allocation and the scratch span must
    cover the update scratch size reported by
    `get_acceleration_structure_requirements`; a violation panics in safe builds.
+   `desc.destination` must match the build: a top-level destination takes no
+   geometries and between one and its `max_instance_count` instances; a
+   bottom-level destination takes exactly its geometries, each of its kind,
+   with triangle and primitive counts within its maxima, a transform exactly
+   when it has one, no indices and at least three vertices per primitive for
+   non-indexed triangles, and no instances. An update destination must have been created with
+   `flags.allow_update`. Those rules read destination
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, maximum-count inputs, and update scratch."
    @param ranges : "Caller-owned GPU-authored fixed-stride range records."
-   @return "Success, or a recoverable command, validation, range, capacity, or support fault."
+   @return "Success, or a recoverable command, capacity, or support fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_build_desc_valid(desc) : "desc.geometries[] must have a defined kind, nonzero primitive and vertex counts, a vertex_stride of at least 12 or an aabbs stride of at least 24, and a stride times count that fits in usz"
    @require ranges.size > 0 : "ranges.size must be greater than 0" *>
 fn void? cmd_update_acceleration_structure_indirect(
     CommandList* commands,
@@ -2159,7 +2239,6 @@ fn void? cmd_update_acceleration_structure_indirect(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_update_acceleration_structure_indirect(
         record,
         desc,
@@ -2169,10 +2248,13 @@ fn void? cmd_update_acceleration_structure_indirect(
 
 <* Record one device clone into distinct compatible storage. The application
    orders source construction before execution; no host wait or implicit barrier.
+   The destination storage must be at least as large as the source storage;
+   that rule reads structure state, so a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param source : "Source constructed before clone execution and kept live through completion."
    @param destination : "Compatible destination with sufficient storage, kept live through completion."
-   @return "Success, or a recoverable command, validation, capacity, or support fault." *>
+   @return "Success, or a recoverable command, capacity, or support fault."
+   @require source != destination : "source and destination must be distinct acceleration structures" *>
 fn void? cmd_clone_acceleration_structure(
     CommandList* commands,
     AccelerationStructureHandle source,
@@ -2277,8 +2359,9 @@ fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan 
    @param shader_binding_table : "Borrowed caller-owned SBT regions."
    @param dimensions : "Nonzero direct trace width, height, and depth within the selected device limits."
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
-   @return "Success, or a recoverable command, pipeline, SBT, range, or limit fault."
+   @return "Success, or a recoverable command, pipeline, or limit fault."
    @require shader_binding_table != null : "shader_binding_table must not be null"
+   @require gpu::internal::ray_tracing_shader_binding_table_valid(shader_binding_table) : "shader_binding_table regions must each be the zero value with stride 0 or a span with a nonzero size"
    @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_trace_rays(
     CommandList* commands,
@@ -2310,6 +2393,7 @@ fn void? cmd_trace_rays(
    @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
    @return "Success, or a recoverable command, pipeline, or support fault."
    @require shader_binding_table != null : "shader_binding_table must not be null"
+   @require gpu::internal::ray_tracing_shader_binding_table_valid(shader_binding_table) : "shader_binding_table regions must each be the zero value with stride 0 or a span with a nonzero size"
    @require gpu::internal::span_holds_bytes(args, TraceRaysIndirectCommand::size) : "args must be nonempty and hold one TraceRaysIndirectCommand"
    @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_trace_rays_indirect(
@@ -2352,7 +2436,8 @@ fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpa
    The value must fit uint and cover every shader execution in later traces.
    @param commands : "Live recording token outside a render pass on a compute-capable graphics or compute family."
    @param pipeline_stack_size : "Sufficient byte count, which may be zero; must fit uint."
-   @return "Success, or a recoverable command, pipeline, queue, scope, range, or support fault." *>
+   @return "Success, or a recoverable command, pipeline, queue, scope, or support fault."
+   @require pipeline_stack_size <= uint::max : "pipeline_stack_size must fit uint" *>
 fn void? cmd_set_ray_tracing_pipeline_stack_size(CommandList* commands, ulong pipeline_stack_size) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);

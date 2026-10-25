@@ -78,27 +78,15 @@ fn bool sparse_allocation_is_exact_invalid(
         && allocation.generation == 0;
 }
 
-fn bool intervals_overlap(
-    usz a_offset,
-    usz a_size,
-    usz b_offset,
-    usz b_size,
-) {
-    if (a_size == 0 || b_size == 0) return false;
-    if (a_offset <= b_offset) return b_offset - a_offset < a_size;
-    return a_offset - b_offset < b_size;
-}
-
-fn gpu::Vec3u? sparse_mip_extent(
+fn gpu::Vec3u sparse_mip_extent(
     bool image_3d,
     gpu::Vec3u base_extent,
     uint mip_level,
 ) {
-    if (base_extent.x == 0
-        || base_extent.y == 0
-        || base_extent.z == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        base_extent.x != 0 && base_extent.y != 0 && base_extent.z != 0,
+        "sparse texture base extent must be non-zero"
+    );
     gpu::Vec3u extent = {
         .x = mip_level < 32 ? max(1u, base_extent.x >> mip_level) : 1,
         .y = mip_level < 32 ? max(1u, base_extent.y >> mip_level) : 1,
@@ -110,63 +98,59 @@ fn gpu::Vec3u? sparse_mip_extent(
     return extent;
 }
 
-fn usz? sparse_tile_backing_size(
+fn usz sparse_tile_backing_size(
     gpu::Vec3u extent,
     gpu::Vec3u tile_extent,
     usz page_size,
 ) {
-    if (extent.x == 0
-        || extent.y == 0
-        || extent.z == 0
-        || tile_extent.x == 0
-        || tile_extent.y == 0
-        || tile_extent.z == 0
-        || page_size == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        extent.x != 0 && extent.y != 0 && extent.z != 0
+            && tile_extent.x != 0 && tile_extent.y != 0 && tile_extent.z != 0
+            && page_size != 0,
+        "tile extent, bind extent, and page size must be non-zero"
+    );
     usz tile_count_x =
         ((usz)extent.x - 1) / (usz)tile_extent.x + 1;
     usz tile_count_y =
         ((usz)extent.y - 1) / (usz)tile_extent.y + 1;
     usz tile_count_z =
         ((usz)extent.z - 1) / (usz)tile_extent.z + 1;
-    if (tile_count_x > usz::max / tile_count_y) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        tile_count_x <= usz::max / tile_count_y,
+        "sparse tile count must fit usz"
+    );
     usz tile_count = tile_count_x * tile_count_y;
-    if (tile_count > usz::max / tile_count_z) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        tile_count <= usz::max / tile_count_z,
+        "sparse tile count must fit usz"
+    );
     tile_count *= tile_count_z;
-    if (tile_count > usz::max / page_size) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        tile_count <= usz::max / page_size,
+        "sparse backing size must fit usz"
+    );
     return tile_count * page_size;
 }
 
-fn gpu::SparseTextureAspectRequirements*? sparse_aspect_requirements(
+fn gpu::SparseTextureAspectRequirements* sparse_aspect_requirements(
     TextureSlot* texture,
     gpu::SparseTextureAspect aspect,
 ) {
+    gpu::SparseTextureAspectRequirements* found;
     for (uint i = 0; i < texture.sparse_requirements.aspect_count; i++) {
         if (texture.sparse_requirements.aspects[i].aspect == aspect) {
-            return &texture.sparse_requirements.aspects[i];
+            found = &texture.sparse_requirements.aspects[i];
+            break;
         }
     }
-    return gpu::INVALID_ARGUMENT~;
+    assert(
+        found != null,
+        "bind.aspect must name an aspect listed in the texture's sparse requirements"
+    );
+    return found;
 }
 
-fn bool sparse_tile_boxes_overlap(
-    gpu::SparseTextureTileBind* a,
-    gpu::SparseTextureTileBind* b,
-) {
-    if (a.aspect != b.aspect || a.mip_level != b.mip_level) return false;
-    return intervals_overlap(a.offset.x, a.extent.x, b.offset.x, b.extent.x)
-        && intervals_overlap(a.offset.y, a.extent.y, b.offset.y, b.extent.y)
-        && intervals_overlap(a.offset.z, a.extent.z, b.offset.z, b.extent.z);
-}
-
-fn void? validate_sparse_tile_geometry(
+fn void validate_sparse_tile_geometry(
     TextureSlot* texture,
     gpu::SparseTextureTileBind[] binds,
 ) {
@@ -174,147 +158,147 @@ fn void? validate_sparse_tile_geometry(
         sparse_aspect_requirements(
             texture,
             gpu::SparseTextureAspect.COLOR,
-        )!;
+        );
     bool image_3d = texture_slot_is_3d(texture);
     gpu::Vec3u base_extent = {
         texture.width,
         texture.height,
         texture_slot_native_depth(texture),
     };
+    gpu::Vec3u tile = requirements.tile_extent;
+    assert(
+        tile.x != 0 && tile.y != 0 && tile.z != 0,
+        "sparse tile extent must be non-zero"
+    );
     foreach (i, &bind : binds) {
-        if (bind.aspect != gpu::SparseTextureAspect.COLOR
-            || bind.mip_level >= texture.mip_levels
-            || bind.mip_level >= requirements.mip_tail_first_lod) {
-            return gpu::INVALID_ARGUMENT~;
-        }
+        assert(
+            bind.mip_level < texture.mip_levels
+                && bind.mip_level < requirements.mip_tail_first_lod,
+            "desc.tiles[%s].mip_level must be below the texture's mip count and mip_tail_first_lod: mip %s, mips %s, first tail mip %s",
+            i,
+            bind.mip_level,
+            texture.mip_levels,
+            requirements.mip_tail_first_lod
+        );
         gpu::Vec3u mip_extent = sparse_mip_extent(
-            image_3d:   image_3d,
+            image_3d:    image_3d,
             base_extent: base_extent,
-            mip_level:  bind.mip_level,
-        )!;
-        gpu::Vec3u tile = requirements.tile_extent;
-        if (bind.extent.x == 0 || bind.extent.y == 0 || bind.extent.z == 0
-            || tile.x == 0 || tile.y == 0 || tile.z == 0
-            || bind.offset.x % tile.x != 0
-            || bind.offset.y % tile.y != 0
-            || bind.offset.z % tile.z != 0
-            || bind.offset.x > (uint)int::max
-            || bind.offset.y > (uint)int::max
-            || bind.offset.z > (uint)int::max
-            || !gpu::internal::range_fits(
-                mip_extent.x,
-                bind.offset.x,
-                bind.extent.x,
-            )
-            || !gpu::internal::range_fits(
-                mip_extent.y,
-                bind.offset.y,
-                bind.extent.y,
-            )
-            || !gpu::internal::range_fits(
-                mip_extent.z,
-                bind.offset.z,
-                bind.extent.z,
-            )) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-        if ((!image_3d && (bind.offset.z != 0 || bind.extent.z != 1))
-            || (bind.extent.x % tile.x != 0
-                && bind.offset.x + bind.extent.x != mip_extent.x)
-            || (bind.extent.y % tile.y != 0
-                && bind.offset.y + bind.extent.y != mip_extent.y)
-            || (bind.extent.z % tile.z != 0
-                && bind.offset.z + bind.extent.z != mip_extent.z)) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-        for (sz prior = 0; prior < i; prior++) {
-            if (sparse_tile_boxes_overlap(&binds[prior], bind)) {
-                return gpu::INVALID_ARGUMENT~;
-            }
-        }
+            mip_level:   bind.mip_level,
+        );
+        assert(
+            bind.offset.x % tile.x == 0
+                && bind.offset.y % tile.y == 0
+                && bind.offset.z % tile.z == 0
+                && gpu::internal::range_fits(
+                    mip_extent.x,
+                    bind.offset.x,
+                    bind.extent.x,
+                )
+                && gpu::internal::range_fits(
+                    mip_extent.y,
+                    bind.offset.y,
+                    bind.extent.y,
+                )
+                && gpu::internal::range_fits(
+                    mip_extent.z,
+                    bind.offset.z,
+                    bind.extent.z,
+                ),
+            "desc.tiles[%s] must be tile-aligned and inside the mip extent",
+            i
+        );
+        assert(
+            !((!image_3d && (bind.offset.z != 0 || bind.extent.z != 1))
+                || (bind.extent.x % tile.x != 0
+                    && bind.offset.x + bind.extent.x != mip_extent.x)
+                || (bind.extent.y % tile.y != 0
+                    && bind.offset.y + bind.extent.y != mip_extent.y)
+                || (bind.extent.z % tile.z != 0
+                    && bind.offset.z + bind.extent.z != mip_extent.z)),
+            "desc.tiles[%s] partial tiles must end at the mip edge and 2D binds must use z offset 0 and z extent 1",
+            i
+        );
     }
 }
 
-fn void? validate_sparse_opaque_geometry(
+fn void validate_sparse_opaque_geometry(
     TextureSlot* texture,
     gpu::SparseTextureOpaqueBind[] binds,
 ) {
     usz alignment = texture.sparse_requirements.page_allocation.alignment;
-    if (alignment == 0) return gpu::INVALID_ARGUMENT~;
+    assert(alignment != 0, "sparse page alignment must be non-zero");
     foreach (i, &bind : binds) {
         gpu::SparseTextureAspectRequirements* requirements =
-            sparse_aspect_requirements(texture, bind.aspect)!;
-        if (bind.size == 0
-            || bind.resource_offset % alignment != 0
-            || bind.allocation_offset % alignment != 0
-            || bind.resource_offset < requirements.mip_tail_offset
-            || !gpu::internal::range_fits(
-                requirements.mip_tail_size,
-                bind.resource_offset - requirements.mip_tail_offset,
-                bind.size,
-            )) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-        for (sz prior = 0; prior < i; prior++) {
-            if (binds[prior].aspect == bind.aspect
-                && intervals_overlap(
-                    binds[prior].resource_offset,
-                    binds[prior].size,
-                    bind.resource_offset,
+            sparse_aspect_requirements(texture, bind.aspect);
+        assert(
+            bind.resource_offset % alignment == 0
+                && bind.allocation_offset % alignment == 0
+                && bind.resource_offset >= requirements.mip_tail_offset
+                && gpu::internal::range_fits(
+                    requirements.mip_tail_size,
+                    bind.resource_offset - requirements.mip_tail_offset,
                     bind.size,
-                )) {
-                return gpu::INVALID_ARGUMENT~;
-            }
-        }
+                ),
+            "desc.opaque[%s] must be page-aligned and inside the aspect's mip tail",
+            i
+        );
     }
 }
 
-fn ResolvedSparseBacking? resolve_sparse_backing_locked(
+fn ResolvedSparseBacking resolve_sparse_backing_locked(
     VkDeviceState* state,
     TextureSlot* texture,
     gpu::GpuAllocation allocation,
     usz allocation_offset,
     usz size,
 ) {
-    if (sparse_allocation_is_exact_invalid(allocation)) {
-        if (allocation_offset != 0) return gpu::INVALID_ARGUMENT~;
-        return {};
-    }
+    if (sparse_allocation_is_exact_invalid(allocation)) return {};
     if (!allocation.is_valid()) abort("gpu: malformed GpuAllocation");
     AllocationSlot* slot = state.allocations.get(allocation);
     gpu::TextureRequirements requirements =
         texture.sparse_requirements.page_allocation;
-    if (slot.memory_class != gpu::MemoryClass.TEXTURE
-        || !slot.texture_memory
-        || slot.dedicated_texture
-        || slot.raw_info.device_memory == null
-        || slot.raw_info.memory_type >= 32
-        || requirements.alignment == 0
-        || slot.alignment < requirements.alignment
-        || !gpu::internal::queue_roles_are_subset(
-            texture.access,
-            slot.access,
-        )
-        || !gpu::internal::range_fits(slot.size, allocation_offset, size)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        slot.memory_class == gpu::MemoryClass.TEXTURE
+            && slot.texture_memory
+            && !slot.dedicated_texture
+            && slot.raw_info.device_memory != null
+            && slot.raw_info.memory_type < 32
+            && requirements.alignment != 0
+            && slot.alignment >= requirements.alignment
+            && gpu::internal::queue_roles_are_subset(
+                texture.access,
+                slot.access,
+            )
+            && gpu::internal::range_fits(
+                slot.size,
+                allocation_offset,
+                size,
+            ),
+        "backing allocation must be non-dedicated texture memory with compatible alignment, access, and room for the bind"
+    );
     uint selected_memory_type = 1 << slot.raw_info.memory_type;
-    if (texture_compatibility_owner(requirements.compatibility)
-            != state.allocations.owner
-        || (selected_memory_type
-            & texture_compatibility_value(requirements.compatibility)) == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        texture_compatibility_owner(requirements.compatibility)
+            == state.allocations.owner,
+        "sparse page requirements must come from this device"
+    );
+    assert(
+        (selected_memory_type
+            & texture_compatibility_value(requirements.compatibility)) != 0,
+        "backing allocation memory type must be compatible with the sparse page requirements"
+    );
     usz base_offset = (usz)slot.raw_info.offset;
-    if ((vk::DeviceSize)base_offset != slot.raw_info.offset
-        || allocation_offset > usz::max - base_offset) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        (vk::DeviceSize)base_offset == slot.raw_info.offset
+            && allocation_offset <= usz::max - base_offset,
+        "backing offset must fit usz"
+    );
     usz absolute_offset = base_offset + allocation_offset;
-    if (absolute_offset % requirements.alignment != 0
-        || (vk::DeviceSize)absolute_offset != absolute_offset) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        absolute_offset % requirements.alignment == 0
+            && (vk::DeviceSize)absolute_offset == absolute_offset,
+        "allocation_offset must be a multiple of the sparse page alignment"
+    );
     return {
         .memory          = slot.raw_info.device_memory,
         .absolute_offset = absolute_offset,
@@ -337,7 +321,7 @@ fn bool sparse_backing_overlaps_placed_locked(
             continue;
         }
         usz offset = base + cell.value.placement_offset;
-        if (intervals_overlap(
+        if (gpu::internal::sparse_ranges_overlap(
             interval.offset,
             interval.size,
             offset,
@@ -347,7 +331,7 @@ fn bool sparse_backing_overlaps_placed_locked(
     return false;
 }
 
-fn void? add_sparse_backing_interval_locked(
+fn void add_sparse_backing_interval_locked(
     VkDeviceState* state,
     SparseBackingInterval[] intervals,
     usz count,
@@ -360,23 +344,25 @@ fn void? add_sparse_backing_interval_locked(
         .size   = resolved.size,
     };
     foreach (&prior : intervals[:count]) {
-        if (prior.memory == interval.memory
-            && intervals_overlap(
-                prior.offset,
-                prior.size,
-                interval.offset,
-                interval.size,
-            )) {
-            return gpu::INVALID_ARGUMENT~;
-        }
+        assert(
+            prior.memory != interval.memory
+                || !gpu::internal::sparse_ranges_overlap(
+                    prior.offset,
+                    prior.size,
+                    interval.offset,
+                    interval.size,
+                ),
+            "binds in one call must not share backing memory"
+        );
     }
-    if (sparse_backing_overlaps_placed_locked(state, interval)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        !sparse_backing_overlaps_placed_locked(state, interval),
+        "sparse backing must not overlap a placed texture's memory"
+    );
     intervals[count] = interval;
 }
 
-fn ResolvedSparseBacking? resolve_sparse_bind_backing_locked(
+fn ResolvedSparseBacking resolve_sparse_bind_backing_locked(
     VkDeviceState* state,
     TextureSlot* texture,
     gpu::SparseTextureBindDesc* desc,
@@ -385,12 +371,12 @@ fn ResolvedSparseBacking? resolve_sparse_bind_backing_locked(
     if (index < desc.tiles.len) {
         gpu::SparseTextureTileBind* bind = &desc.tiles[index];
         gpu::SparseTextureAspectRequirements* requirements =
-            sparse_aspect_requirements(texture, bind.aspect)!;
+            sparse_aspect_requirements(texture, bind.aspect);
         usz size = sparse_tile_backing_size(
             extent:      bind.extent,
             tile_extent: requirements.tile_extent,
             page_size:   texture.sparse_requirements.page_allocation.size,
-        )!;
+        );
         return resolve_sparse_backing_locked(
             state:             state,
             texture:           texture,
@@ -400,7 +386,10 @@ fn ResolvedSparseBacking? resolve_sparse_bind_backing_locked(
         );
     }
     usz opaque_index = index - desc.tiles.len;
-    if (opaque_index >= desc.opaque.len) return gpu::INVALID_ARGUMENT~;
+    assert(
+        opaque_index < desc.opaque.len,
+        "bind index must be within desc.tiles and desc.opaque"
+    );
     gpu::SparseTextureOpaqueBind* bind = &desc.opaque[opaque_index];
     return resolve_sparse_backing_locked(
         state:             state,
@@ -411,7 +400,7 @@ fn ResolvedSparseBacking? resolve_sparse_bind_backing_locked(
     );
 }
 
-fn void? validate_sparse_backings_locked(
+fn void validate_sparse_backings_locked(
     VkDeviceState* state,
     TextureSlot* texture,
     gpu::SparseTextureBindDesc* desc,
@@ -424,16 +413,17 @@ fn void? validate_sparse_backings_locked(
                 texture: texture,
                 desc:    desc,
                 index:   index,
-            )!;
+            );
         if (resolved.memory == null) continue;
         SparseBackingInterval interval = {
             .memory = resolved.memory,
             .offset = resolved.absolute_offset,
             .size   = resolved.size,
         };
-        if (sparse_backing_overlaps_placed_locked(state, interval)) {
-            return gpu::INVALID_ARGUMENT~;
-        }
+        assert(
+            !sparse_backing_overlaps_placed_locked(state, interval),
+            "sparse backing must not overlap a placed texture's memory"
+        );
     }
 }
 
@@ -575,23 +565,11 @@ fn gpu::SparseTextureRequirements? sparse_texture_requirements_from_native(
     return requirements;
 }
 
-fn bool sparse_texture_desc_valid(gpu::TextureDesc* desc) {
-    if (desc == null || !gpu::internal::texture_desc_valid(desc)) {
-        return false;
-    }
-    return gpu::internal::texture_array_layers(desc) == 1
-        && !texture_format_is_depth_stencil(desc.format)
-        && !gpu::internal::format_is_block_compressed(desc.format)
-        && !desc.usage.color_attach
-        && !desc.usage.depth_attach;
-}
-
 fn gpu::TextureHandle? create_sparse_texture_for_state_with_ops(
     VkDeviceState* state,
     gpu::TextureDesc* desc,
     SparseTextureNativeOps* ops,
 ) {
-    if (!sparse_texture_desc_valid(desc)) return gpu::INVALID_ARGUMENT~;
     bool is_3d = gpu::internal::texture_desc_is_3d(desc);
     if ((is_3d && !state.caps.sparse_textures.image_3d)
         || (!is_3d && !state.caps.sparse_textures.image_2d)) {
@@ -746,7 +724,7 @@ fn SparseTextureFeaturePlan? resolve_sparse_texture_feature_plan(
     vk::PhysicalDeviceFeatures* features,
 ) {
     if (!requested) return {};
-    if (features == null) return gpu::INVALID_ARGUMENT~;
+    assert(features != null, "physical device features must not be null");
     if (features.sparse_binding == 0
         || (features.sparse_residency_image2d == 0
             && features.sparse_residency_image3d == 0)) {
@@ -896,14 +874,14 @@ fn gpu::TextureHandle? vk_create_sparse_texture(
     return create_sparse_texture_for_state_with_ops(state, desc, &ops);
 }
 
-fn gpu::SparseTextureRequirements? vk_get_sparse_texture_requirements(
+fn gpu::SparseTextureRequirements vk_get_sparse_texture_requirements(
     VkDeviceState* state,
     gpu::TextureHandle texture,
 ) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     TextureSlot* slot = state.textures.get(texture);
-    if (!slot.sparse) return gpu::INVALID_ARGUMENT~;
+    assert(slot.sparse, "texture must be a sparse texture");
     return slot.sparse_requirements;
 }
 
@@ -920,42 +898,35 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     gpu::SparseTextureBindDesc* desc,
     SparseBindNativeOps* ops,
 ) {
-    if (state == null || desc == null || ops == null
-        || ops.queue_bind_sparse == null
-        || ops.get_semaphore_counter_value == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && desc != null && ops != null
+            && ops.queue_bind_sparse != null
+            && ops.get_semaphore_counter_value != null,
+        "sparse bind inputs must not be null"
+    );
     usz tile_count = desc.tiles.len;
     usz opaque_count = desc.opaque.len;
     usz wait_count = desc.waits.len;
-    if ((tile_count > 0 && desc.tiles.ptr == null)
-        || (opaque_count > 0 && desc.opaque.ptr == null)
-        || (wait_count > 0 && desc.waits.ptr == null)
-        || tile_count > gpu::MAX_SPARSE_TILE_BINDS
-        || opaque_count > gpu::MAX_SPARSE_OPAQUE_BINDS
-        || wait_count > gpu::MAX_SPARSE_BIND_WAITS
-        || tile_count + opaque_count == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
 
     if (queue.device != state.owner) abort("gpu: foreign Queue");
     QueueCompletionState* target = queue_completion_state(state, queue.id);
     if ((uint)target.roles != (uint)queue.roles) {
         abort("gpu: mismatched Queue");
     }
-    if (((uint)target.roles
-        & (uint)state.caps.sparse_textures.binding_queues) == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        ((uint)target.roles
+            & (uint)state.caps.sparse_textures.binding_queues) != 0,
+        "queue must be a sparse-binding queue (DeviceCaps.sparse_textures.binding_queues)"
+    );
 
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
         TextureSlot* texture = state.textures.get(desc.texture);
-        if (!texture.sparse) return gpu::INVALID_ARGUMENT~;
-        validate_sparse_tile_geometry(texture, desc.tiles)!;
-        validate_sparse_opaque_geometry(texture, desc.opaque)!;
-        validate_sparse_backings_locked(state, texture, desc)!;
+        assert(texture.sparse, "desc.texture must be a sparse texture");
+        validate_sparse_tile_geometry(texture, desc.tiles);
+        validate_sparse_opaque_geometry(texture, desc.opaque);
+        validate_sparse_backings_locked(state, texture, desc);
     }
     validate_sparse_wait_publications(state, desc.waits);
 
@@ -1043,9 +1014,9 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     resource_locked = true;
     defer if (resource_locked) state.resource_mutex.unlock();
     TextureSlot* texture = state.textures.get(desc.texture);
-    if (!texture.sparse) return gpu::INVALID_ARGUMENT~;
-    validate_sparse_tile_geometry(texture, desc.tiles)!;
-    validate_sparse_opaque_geometry(texture, desc.opaque)!;
+    assert(texture.sparse, "desc.texture must be a sparse texture");
+    validate_sparse_tile_geometry(texture, desc.tiles);
+    validate_sparse_opaque_geometry(texture, desc.opaque);
 
     usz backing_count;
     foreach (i, &bind : desc.tiles) {
@@ -1054,13 +1025,13 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
             texture: texture,
             desc:    desc,
             index:   (usz)i,
-        )!;
+        );
         add_sparse_backing_interval_locked(
             state:     state,
             intervals: backing_intervals,
             count:     backing_count,
             resolved:  resolved,
-        )!;
+        );
         if (resolved.memory != null) backing_count++;
         tile_binds[i] = {
             .subresource = {
@@ -1092,13 +1063,13 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
                 texture: texture,
                 desc:    desc,
                 index:   resolved_index,
-            )!;
+            );
         add_sparse_backing_interval_locked(
             state:     state,
             intervals: backing_intervals,
             count:     backing_count,
             resolved:  resolved,
-        )!;
+        );
         if (resolved.memory != null) backing_count++;
         opaque_binds[i] = {
             .resource_offset = (vk::DeviceSize)bind.resource_offset,
@@ -1114,10 +1085,11 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
 
     target.submission_mutex.lock()!!;
     defer target.submission_mutex.unlock();
-    if (((uint)target.roles
-        & (uint)state.caps.sparse_textures.binding_queues) == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        ((uint)target.roles
+            & (uint)state.caps.sparse_textures.binding_queues) != 0,
+        "queue must be a sparse-binding queue (DeviceCaps.sparse_textures.binding_queues)"
+    );
 
     usz native_wait_count = wait_count;
     ulong maximum_same_queue_wait;

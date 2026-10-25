@@ -539,3 +539,277 @@ fn void submit_desc_rules_reject_each_clause() @test {
     bad[0].before = { .compute };
     assert(gpu::internal::submit_desc_valid(&host_wait));
 }
+
+fn void sparse_bind_rules_reject_each_clause() @test {
+    SparseTextureTileBind tile = {
+        .extent = { 1, 1, 1 },
+    };
+    SparseTextureOpaqueBind opaque = {
+        .size = 1,
+    };
+    SparseTextureBindDesc one_tile = { .tiles = (&tile)[:1] };
+    SparseTextureBindDesc one_opaque = { .opaque = (&opaque)[:1] };
+    assert(gpu::internal::sparse_bind_desc_valid(&one_tile));
+    assert(gpu::internal::sparse_bind_desc_valid(&one_opaque));
+
+    SparseTextureBindDesc empty;
+    assert(!gpu::internal::sparse_bind_desc_valid(&empty), "a bind needs a tile or an opaque bind");
+
+    SparseTextureTileBind[MAX_SPARSE_TILE_BINDS + 1] tiles;
+    foreach (i, &each : tiles) {
+        *each = { .offset = { (uint)i, 0, 0 }, .extent = { 1, 1, 1 } };
+    }
+    SparseTextureBindDesc tiles_at_limit = { .tiles = tiles[:MAX_SPARSE_TILE_BINDS] };
+    assert(gpu::internal::sparse_bind_desc_valid(&tiles_at_limit), "the tile limit itself is allowed");
+    SparseTextureBindDesc too_many_tiles = { .tiles = tiles[:MAX_SPARSE_TILE_BINDS + 1] };
+    assert(!gpu::internal::sparse_bind_desc_valid(&too_many_tiles), "one tile over the limit");
+
+    SparseTextureOpaqueBind[MAX_SPARSE_OPAQUE_BINDS + 1] opaques;
+    foreach (i, &each : opaques) {
+        *each = { .resource_offset = (usz)i, .size = 1 };
+    }
+    SparseTextureBindDesc opaque_at_limit = { .opaque = opaques[:MAX_SPARSE_OPAQUE_BINDS] };
+    assert(gpu::internal::sparse_bind_desc_valid(&opaque_at_limit), "the opaque limit itself is allowed");
+    SparseTextureBindDesc too_many_opaque = { .opaque = opaques[:MAX_SPARSE_OPAQUE_BINDS + 1] };
+    assert(!gpu::internal::sparse_bind_desc_valid(&too_many_opaque), "one opaque bind over the limit");
+
+    CompletionPoint[MAX_SPARSE_BIND_WAITS + 1] waits;
+    SparseTextureBindDesc waits_at_limit = { .tiles = (&tile)[:1], .waits = waits[:MAX_SPARSE_BIND_WAITS] };
+    assert(gpu::internal::sparse_bind_desc_valid(&waits_at_limit), "the wait limit itself is allowed");
+    SparseTextureBindDesc too_many_waits = { .tiles = (&tile)[:1], .waits = waits[:MAX_SPARSE_BIND_WAITS + 1] };
+    assert(!gpu::internal::sparse_bind_desc_valid(&too_many_waits), "one wait over the limit");
+
+    SparseTextureBindDesc null_tiles = { .tiles = ((SparseTextureTileBind*)null)[:1] };
+    assert(!gpu::internal::sparse_bind_desc_valid(&null_tiles), "a null tile slice needs length 0");
+    SparseTextureBindDesc null_opaque = { .opaque = ((SparseTextureOpaqueBind*)null)[:1] };
+    assert(!gpu::internal::sparse_bind_desc_valid(&null_opaque), "a null opaque slice needs length 0");
+    SparseTextureBindDesc null_waits = { .tiles = (&tile)[:1], .waits = ((CompletionPoint*)null)[:1] };
+    assert(!gpu::internal::sparse_bind_desc_valid(&null_waits), "a null wait slice needs length 0");
+}
+
+fn void sparse_bind_rules_reject_overlapping_and_empty_binds() @test {
+    SparseTextureTileBind[2] tiles = {
+        { .mip_level = 1, .offset = { 0, 0, 0 }, .extent = { 4, 4, 1 } },
+        { .mip_level = 1, .offset = { 3, 3, 0 }, .extent = { 4, 4, 1 } },
+    };
+    SparseTextureBindDesc overlapping = { .tiles = tiles[..] };
+    assert(!gpu::internal::sparse_bind_desc_valid(&overlapping), "intersecting boxes of one mip overlap");
+    tiles[1].offset = { 4, 0, 0 };
+    assert(gpu::internal::sparse_bind_desc_valid(&overlapping), "touching boxes do not overlap");
+    tiles[1].offset = { 3, 3, 0 };
+    tiles[1].mip_level = 2;
+    assert(gpu::internal::sparse_bind_desc_valid(&overlapping), "boxes of different mips do not overlap");
+    tiles[1].mip_level = 1;
+    tiles[1].extent.x = 0;
+    assert(!gpu::internal::sparse_bind_desc_valid(&overlapping), "a tile bind needs a nonempty extent");
+    tiles[1].extent = { 1, 1, 1 };
+    tiles[1].offset.z = (uint)int::max + 1;
+    assert(!gpu::internal::sparse_bind_desc_valid(&overlapping), "a tile offset must fit int");
+    tiles[1].offset = { 8, 8, 0 };
+    tiles[1].aspect = SparseTextureAspect.METADATA;
+    assert(!gpu::internal::sparse_bind_desc_valid(&overlapping), "tile binds use the color aspect");
+
+    SparseTextureOpaqueBind[2] opaque = {
+        { .resource_offset = 0, .size = 8 },
+        { .resource_offset = 7, .size = 2 },
+    };
+    SparseTextureBindDesc opaque_overlap = { .opaque = opaque[..] };
+    assert(!gpu::internal::sparse_bind_desc_valid(&opaque_overlap), "intersecting opaque ranges overlap");
+    opaque[1].resource_offset = 8;
+    assert(gpu::internal::sparse_bind_desc_valid(&opaque_overlap), "adjacent opaque ranges do not overlap");
+    opaque[1].resource_offset = 7;
+    opaque[1].aspect = SparseTextureAspect.METADATA;
+    assert(gpu::internal::sparse_bind_desc_valid(&opaque_overlap), "ranges of different aspects do not overlap");
+    opaque[1].size = 0;
+    assert(!gpu::internal::sparse_bind_desc_valid(&opaque_overlap), "an opaque bind needs a nonempty range");
+    opaque[1].size = 2;
+    opaque[1].aspect = bitcast(7, SparseTextureAspect);
+    assert(!gpu::internal::sparse_bind_desc_valid(&opaque_overlap), "an opaque bind needs a defined aspect");
+
+    SparseTextureTileBind unbind = { .extent = { 1, 1, 1 }, .allocation_offset = 64 };
+    SparseTextureBindDesc unbind_desc = { .tiles = (&unbind)[:1] };
+    assert(!gpu::internal::sparse_bind_desc_valid(&unbind_desc), "an unbind needs offset 0");
+    unbind.allocation = { .owner = 1, .index = 0, .generation = 1 };
+    assert(gpu::internal::sparse_bind_desc_valid(&unbind_desc), "a bind to an allocation may offset into it");
+}
+
+fn void sparse_texture_rule_follows_the_supported_shape() @test {
+    TextureDesc desc = {
+        .width  = 256,
+        .height = 256,
+        .format = Format.RGBA8_UNORM,
+        .usage  = { .sampled },
+    };
+    assert(gpu::internal::sparse_texture_desc_valid(&desc));
+    desc.usage = { .sampled, .color_attach };
+    assert(!gpu::internal::sparse_texture_desc_valid(&desc), "attachment usage is not sparse");
+    desc.usage = { .sampled };
+    desc.array_layers = 2;
+    assert(!gpu::internal::sparse_texture_desc_valid(&desc), "one layer only");
+    desc.array_layers = 1;
+    desc.format = Format.D32_FLOAT;
+    assert(!gpu::internal::sparse_texture_desc_valid(&desc), "no depth formats");
+    desc.format = Format.RGBA8_UNORM;
+    desc.width = 0;
+    assert(!gpu::internal::sparse_texture_desc_valid(&desc), "the texture rules apply first");
+}
+
+fn AccelerationStructureGeometryDesc triangle_capacity(uint vertices, uint primitives) {
+    return {
+        .kind      = AccelerationStructureGeometryKind.TRIANGLES,
+        .triangles = {
+            .max_vertex_count    = vertices,
+            .max_primitive_count = primitives,
+            .index_type          = AccelerationStructureIndexType.U32,
+        },
+    };
+}
+
+fn void acceleration_structure_desc_rules_reject_each_clause() @test {
+    AccelerationStructureGeometryDesc[1] geometry = { triangle_capacity(3, 1) };
+    AccelerationStructureDesc blas = {
+        .kind       = AccelerationStructureKind.BOTTOM_LEVEL,
+        .geometries = geometry[..],
+    };
+    assert(gpu::internal::acceleration_structure_desc_valid(&blas));
+
+    AccelerationStructureDesc tlas = {
+        .kind               = AccelerationStructureKind.TOP_LEVEL,
+        .max_instance_count = 1,
+    };
+    assert(gpu::internal::acceleration_structure_desc_valid(&tlas));
+    tlas.max_instance_count = 0;
+    assert(!gpu::internal::acceleration_structure_desc_valid(&tlas), "a top-level structure needs instances");
+    tlas.max_instance_count = 1;
+    tlas.geometries = geometry[..];
+    assert(!gpu::internal::acceleration_structure_desc_valid(&tlas), "a top-level structure has no geometries");
+
+    AccelerationStructureDesc no_geometry = { .kind = AccelerationStructureKind.BOTTOM_LEVEL };
+    assert(!gpu::internal::acceleration_structure_desc_valid(&no_geometry), "a bottom-level structure needs geometries");
+    blas.max_instance_count = 1;
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "a bottom-level structure has no instances");
+    blas.max_instance_count = 0;
+    blas.kind = bitcast(9, AccelerationStructureKind);
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "the kind must be defined");
+    blas.kind = AccelerationStructureKind.BOTTOM_LEVEL;
+
+    blas.flags = { .prefer_fast_trace, .prefer_fast_build };
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "fast trace and fast build conflict");
+    blas.flags = (AccelerationStructureBuildFlags)(1u << 4);
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "unknown build flag bits");
+    blas.flags = {};
+
+    geometry[0] = triangle_capacity(0, 1);
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "triangles need vertices");
+    geometry[0] = triangle_capacity(3, 0);
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "triangles need primitives");
+    geometry[0] = triangle_capacity(3, 1);
+    geometry[0].triangles.index_type = AccelerationStructureIndexType.NONE;
+    assert(gpu::internal::acceleration_structure_desc_valid(&blas), "non-indexed triangles with three vertices");
+    geometry[0].triangles.max_vertex_count = 2;
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "non-indexed triangles need three vertices each");
+    geometry[0].triangles.max_primitive_count = uint::max / 3 + 1;
+    geometry[0].triangles.max_vertex_count = uint::max;
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "the vertex requirement must not overflow");
+    geometry[0] = triangle_capacity(3, 1);
+    geometry[0].triangles.index_type = bitcast(7, AccelerationStructureIndexType);
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "the index type must be defined");
+    geometry[0] = triangle_capacity(3, 1);
+    geometry[0].flags = (AccelerationStructureGeometryFlags)2;
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "unknown geometry flag bits");
+    geometry[0] = triangle_capacity(3, 1);
+    geometry[0].kind = bitcast(5, AccelerationStructureGeometryKind);
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "the geometry kind must be defined");
+}
+
+fn void acceleration_structure_desc_rules_check_every_geometry() @test {
+    AccelerationStructureGeometryDesc[2] geometry = {
+        triangle_capacity(3, 1),
+        { .kind = AccelerationStructureGeometryKind.AABBS, .aabbs = { .max_primitive_count = 1 } },
+    };
+    AccelerationStructureDesc blas = {
+        .kind       = AccelerationStructureKind.BOTTOM_LEVEL,
+        .geometries = geometry[..],
+    };
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "a structure holds one geometry kind");
+    geometry[1] = triangle_capacity(3, uint::max);
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "the primitive total must fit uint");
+    geometry[1] = triangle_capacity(3, uint::max - 1);
+    assert(gpu::internal::acceleration_structure_desc_valid(&blas), "a total of uint::max is representable");
+
+    AccelerationStructureGeometryDesc[1] aabbs = {
+        { .kind = AccelerationStructureGeometryKind.AABBS, .aabbs = { .max_primitive_count = 0 } },
+    };
+    blas.geometries = aabbs[..];
+    assert(!gpu::internal::acceleration_structure_desc_valid(&blas), "AABB geometry needs primitives");
+    aabbs[0].aabbs.max_primitive_count = 4;
+    assert(gpu::internal::acceleration_structure_desc_valid(&blas));
+}
+
+fn void acceleration_structure_build_rules_bound_stride_and_count() @test {
+    AccelerationStructureGeometryBuildDesc triangles = {
+        .kind      = AccelerationStructureGeometryKind.TRIANGLES,
+        .triangles = { .vertex_stride = 12, .vertex_count = 3, .primitive_count = 1 },
+    };
+    assert(gpu::internal::acceleration_structure_geometry_valid(&triangles));
+    triangles.triangles.vertex_stride = 11;
+    assert(!gpu::internal::acceleration_structure_geometry_valid(&triangles), "the stride covers one vertex");
+    triangles.triangles.vertex_stride = 12;
+    triangles.triangles.vertex_count = 0;
+    assert(!gpu::internal::acceleration_structure_geometry_valid(&triangles), "triangles need vertices");
+    triangles.triangles.vertex_count = 3;
+    triangles.triangles.primitive_count = 0;
+    assert(!gpu::internal::acceleration_structure_geometry_valid(&triangles), "triangles need primitives");
+    triangles.triangles.primitive_count = 1;
+    triangles.triangles.vertex_count = 3;
+    triangles.triangles.vertex_stride = usz::max / 2;
+    assert(!gpu::internal::acceleration_structure_geometry_valid(&triangles),
+        "(count - 1) * stride + element_size overflows usz");
+    triangles.triangles.vertex_count = 1;
+    assert(gpu::internal::acceleration_structure_geometry_valid(&triangles), "one element has no preceding stride");
+
+    AccelerationStructureGeometryBuildDesc aabbs = {
+        .kind  = AccelerationStructureGeometryKind.AABBS,
+        .aabbs = { .stride = 24, .primitive_count = 2 },
+    };
+    assert(gpu::internal::acceleration_structure_geometry_valid(&aabbs));
+    aabbs.aabbs.stride = 23;
+    assert(!gpu::internal::acceleration_structure_geometry_valid(&aabbs), "the stride covers one box");
+    aabbs.aabbs.stride = usz::max;
+    assert(!gpu::internal::acceleration_structure_geometry_valid(&aabbs), "the byte extent overflows usz");
+    aabbs.aabbs.stride = 24;
+    aabbs.aabbs.primitive_count = 0;
+    assert(!gpu::internal::acceleration_structure_geometry_valid(&aabbs), "AABB geometry needs primitives");
+
+    AccelerationStructureGeometryBuildDesc undefined = { .kind = bitcast(5, AccelerationStructureGeometryKind) };
+    assert(!gpu::internal::acceleration_structure_geometry_valid(&undefined), "the kind must be defined");
+
+    AccelerationStructureGeometryBuildDesc[2] geometries = { triangles, aabbs };
+    geometries[0].triangles.vertex_count = 3;
+    geometries[0].triangles.vertex_stride = 12;
+    geometries[1].aabbs.primitive_count = 2;
+    AccelerationStructureBuildDesc build = { .geometries = geometries[..] };
+    assert(gpu::internal::acceleration_structure_build_desc_valid(&build));
+    geometries[1].aabbs.stride = 1;
+    assert(!gpu::internal::acceleration_structure_build_desc_valid(&build), "every geometry is checked");
+    AccelerationStructureBuildDesc null_geometries = { .geometries = ((AccelerationStructureGeometryBuildDesc*)null)[:1] };
+    assert(!gpu::internal::acceleration_structure_build_desc_valid(&null_geometries), "a null slice needs length 0");
+}
+
+fn void shader_binding_table_rules_reject_each_clause() @test {
+    RayTracingShaderBindingTable table;
+    assert(gpu::internal::ray_tracing_shader_binding_table_valid(&table), "all-empty regions are canonical");
+    GpuSpan span = { .owner = 1, .index = 2, .generation = 3, .offset = 0, .size = 64 };
+    table.ray_generation = { .span = span, .stride = 64 };
+    assert(gpu::internal::ray_tracing_shader_binding_table_valid(&table));
+    table.miss = { .stride = 32 };
+    assert(!gpu::internal::ray_tracing_shader_binding_table_valid(&table), "an empty region has stride 0");
+    table.miss = { .span = span, .stride = 32 };
+    table.miss.span.size = 0;
+    assert(!gpu::internal::ray_tracing_shader_binding_table_valid(&table), "a nonempty region has a size");
+    table.miss = {};
+    table.hit = { .span = span };
+    assert(gpu::internal::ray_tracing_shader_binding_table_valid(&table), "a stride of 0 is a single record");
+    table.callable = { .stride = 8 };
+    assert(!gpu::internal::ray_tracing_shader_binding_table_valid(&table), "every region is checked");
+}

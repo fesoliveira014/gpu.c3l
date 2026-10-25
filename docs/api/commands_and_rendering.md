@@ -441,6 +441,19 @@ Direct builds carry actual counts; indirect builds carry CPU maxima and
 read one `AccelerationStructureIndirectBuildRange` per geometry from
 `ranges_span`. Clone uses no scratch.
 
+The rules for these calls are contracts: a violation panics in safe builds.
+Every geometry in `AccelerationStructureBuildDesc` names a defined kind with
+nonzero primitive counts. A triangle geometry has a nonzero `vertex_count`
+and a `vertex_stride` of at least 12; an AABB geometry has a `stride` of at
+least 24; and `(count - 1) * stride` plus the element size fits `usz`. The
+build matches the destination: a TLAS takes no geometries and between one
+and its `max_instance_count` instances; a BLAS takes exactly its geometries,
+each of its kind, within its maxima, with a transform exactly when the
+destination has one, no indices and three vertices per primitive for
+non-indexed triangles, and no instances. An update destination was created
+with `allow_update`. A clone's source and destination are distinct and the
+destination storage is at least as large as the source's.
+
 None of these insert barriers. Order them with
 `.acceleration_structure_build` on both sides of a `Barrier`. Keep the destination
 and every named span valid through their last GPU use, including scratch reuse.
@@ -455,7 +468,7 @@ family supports compute. A ray-tracing pipeline must be bound.
 
 ```c3
 gpu::cmd_bind_pipeline(&commands, ray_pipeline)!;
-gpu::cmd_set_ray_tracing_pipeline_stack_size(&commands, stack_bytes)!;   // dynamic_stack_size pipelines only
+gpu::cmd_set_ray_tracing_pipeline_stack_size(&commands, stack_bytes)!;   // dynamic_stack_size pipelines only; stack_bytes fits uint
 gpu::cmd_trace_rays(
     commands:             &commands,
     root:                 root_address,
@@ -478,6 +491,11 @@ gpu::cmd_trace_rays_indirect2(&commands, root_address, packet_span);   // TraceR
 span is four-byte aligned and made visible with a barrier to `.indirect`.
 The library never reads the packet back.
 
+`shader_binding_table` is not null, and each of its regions is either the
+zero value with stride 0 or a span with a nonzero size. The value passed to
+`cmd_set_ray_tracing_pipeline_stack_size` fits `uint`. These are contracts: a
+violation panics in safe builds.
+
 The stack-size value persists across binds of other dynamic-stack ray
 pipelines and is invalidated by binding a static-stack ray pipeline.
 
@@ -498,7 +516,6 @@ command list; label text is borrowed only for the begin call.
 |---|---|
 | wrong token phase or unbalanced pass | `COMMAND_RECORDING_ERROR` |
 | unusable pipeline snapshot or incompatible implementation state | `INVALID_RESOURCE_STATE` |
-| bad acceleration-structure build descriptor, shader binding table region, or ray-tracing stack size | `INVALID_ARGUMENT` |
 | unavailable capability or native procedure | `UNSUPPORTED_FEATURE` |
 | every unit held by unsubmitted lists, or geometry capacity exceeded | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` |
 | generated reservation exceeded | `GENERATED_SCRATCH_EXHAUSTED` |

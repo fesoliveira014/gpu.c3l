@@ -480,7 +480,7 @@ fn void dynamic_stack_size_lowers() @test {
         &fixture.record,
         19,
         &ops,
-    )!!;
+    );
     assert(capture.matched && capture.calls == 1);
 }
 

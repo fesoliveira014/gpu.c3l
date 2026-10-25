@@ -37,7 +37,7 @@ fn void instance_packing_matches_the_shader_abi_for_every_flag() @test {
             gpu::internal::pack_acceleration_structure_instance(
                 &desc,
                 address,
-            )!!;
+            );
 
         assert(packed.transform_row_0 == desc.transform_row_0);
         assert(packed.transform_row_1 == desc.transform_row_1);
@@ -48,42 +48,30 @@ fn void instance_packing_matches_the_shader_abi_for_every_flag() @test {
     }
 }
 
-fn void instance_packing_rejects_every_unrepresentable_value() @test {
+fn void instance_desc_rules_reject_every_unrepresentable_value() @test {
     gpu::AccelerationStructureInstanceDesc desc = instance_desc();
-    gpu::GpuAddress address = (gpu::GpuAddress)1;
+    assert(gpu::internal::acceleration_structure_instance_desc_valid(&desc));
 
+    desc.custom_index = 0x00_FF_FF_FF;
+    desc.mask = 0xFF;
+    assert(gpu::internal::acceleration_structure_instance_desc_valid(&desc),
+        "the field maxima are representable");
+
+    desc = instance_desc();
     desc.custom_index = 0x01_00_00_00;
-    assert(@catch(gpu::internal::pack_acceleration_structure_instance(
-        &desc,
-        address,
-    )) == gpu::INVALID_ARGUMENT);
+    assert(!gpu::internal::acceleration_structure_instance_desc_valid(&desc));
 
     desc = instance_desc();
     desc.mask = 0x100;
-    assert(@catch(gpu::internal::pack_acceleration_structure_instance(
-        &desc,
-        address,
-    )) == gpu::INVALID_ARGUMENT);
+    assert(!gpu::internal::acceleration_structure_instance_desc_valid(&desc));
 
     desc = instance_desc();
     desc.flags = { .force_opaque, .force_non_opaque };
-    assert(@catch(gpu::internal::pack_acceleration_structure_instance(
-        &desc,
-        address,
-    )) == gpu::INVALID_ARGUMENT);
+    assert(!gpu::internal::acceleration_structure_instance_desc_valid(&desc));
 
     desc = instance_desc();
     desc.flags = (gpu::AccelerationStructureInstanceFlags)(1u << 4);
-    assert(@catch(gpu::internal::pack_acceleration_structure_instance(
-        &desc,
-        address,
-    )) == gpu::INVALID_ARGUMENT);
-
-    desc = instance_desc();
-    assert(@catch(gpu::internal::pack_acceleration_structure_instance(
-        &desc,
-        (gpu::GpuAddress)0,
-    )) == gpu::INVALID_ARGUMENT);
+    assert(!gpu::internal::acceleration_structure_instance_desc_valid(&desc));
 }
 
 fn void public_instance_packing_resolves_only_a_live_blas() @test {
@@ -115,13 +103,4 @@ fn void public_instance_packing_resolves_only_a_live_blas() @test {
     gpu::AccelerationStructureInstance packed =
         gpu::make_acceleration_structure_instance(&device, &desc)!!;
     assert(packed.acceleration_structure == (gpu::GpuAddress)0x1000);
-
-    state.acceleration_structure_kind =
-        gpu::AccelerationStructureKind.TOP_LEVEL;
-    assert(@catch(gpu::make_acceleration_structure_instance(&device, &desc))
-        == gpu::INVALID_ARGUMENT);
-
-    state.acceleration_structure_kind =
-        gpu::AccelerationStructureKind.BOTTOM_LEVEL;
-    desc.bottom_level.generation++;
 }

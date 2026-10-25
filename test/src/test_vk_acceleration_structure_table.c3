@@ -288,15 +288,15 @@ fn void acceleration_structure_desc_normalization_is_capacity_first() @test {
             && normalized.max_instance_count == caps.max_instance_count);
 }
 
-fn void acceleration_structure_desc_normalization_rejects_invalid_shapes() @test {
+fn void acceleration_structure_desc_normalization_applies_device_limits() @test {
     gpu::AccelerationStructureCaps caps = acceleration_structure_test_caps();
     gpu::internal::NormalizedAccelerationStructureGeometry[1] storage;
     gpu::internal::NormalizedAccelerationStructureDesc normalized;
     gpu::AccelerationStructureGeometryDesc geometry = {
         .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
         .triangles = {
-            .max_vertex_count = 2,
-            .max_primitive_count = 1,
+            .max_vertex_count = uint::max,
+            .max_primitive_count = caps.max_primitive_count + 1,
             .index_type = gpu::AccelerationStructureIndexType.NONE,
         },
     };
@@ -304,25 +304,6 @@ fn void acceleration_structure_desc_normalization_rejects_invalid_shapes() @test
         .kind = gpu::AccelerationStructureKind.BOTTOM_LEVEL,
         .geometries = (&geometry)[:1],
     };
-    assert(@catch(gpu::internal::normalize_acceleration_structure_desc(
-        &desc,
-        &caps,
-        storage[..],
-        &normalized,
-    )) == gpu::INVALID_ARGUMENT,
-        "non-indexed triangles require three vertices per primitive");
-
-    geometry.triangles.max_vertex_count = 3;
-    geometry.triangles.max_primitive_count = caps.max_primitive_count + 1;
-    assert(@catch(gpu::internal::normalize_acceleration_structure_desc(
-        &desc,
-        &caps,
-        storage[..],
-        &normalized,
-    )) == gpu::INVALID_ARGUMENT,
-        "unsafe non-indexed capacity arithmetic rejects before limit checks");
-
-    geometry.triangles.max_vertex_count = uint::max;
     assert(@catch(gpu::internal::normalize_acceleration_structure_desc(
         &desc,
         &caps,
@@ -359,39 +340,6 @@ fn void acceleration_structure_desc_normalization_rejects_invalid_shapes() @test
         &normalized,
     )) == gpu::UNSUPPORTED_FEATURE,
         "the device primitive limit applies to the whole BLAS");
-
-    desc.flags = {
-        .prefer_fast_trace = true,
-        .prefer_fast_build = true,
-    };
-    assert(@catch(gpu::internal::normalize_acceleration_structure_desc(
-        &desc,
-        &caps,
-        storage[..],
-        &normalized,
-    )) == gpu::INVALID_ARGUMENT,
-        "conflicting portable build preferences are incoherent");
-
-    gpu::AccelerationStructureGeometryDesc[2] heterogeneous = {
-        geometry,
-        {
-            .kind = gpu::AccelerationStructureGeometryKind.AABBS,
-            .aabbs.max_primitive_count = 1,
-        },
-    };
-    heterogeneous[0].triangles.max_vertex_count = 3;
-    heterogeneous[0].triangles.max_primitive_count = 1;
-    desc.flags = {};
-    desc.geometries = heterogeneous[..];
-    gpu::internal::NormalizedAccelerationStructureGeometry[2]
-        heterogeneous_storage;
-    assert(@catch(gpu::internal::normalize_acceleration_structure_desc(
-        &desc,
-        &caps,
-        heterogeneous_storage[..],
-        &normalized,
-    )) == gpu::INVALID_ARGUMENT,
-        "one BLAS cannot mix triangle and AABB geometry types");
 }
 
 fn void acceleration_structure_requirements_lower_exact_capacity_schema() @test {
@@ -736,7 +684,7 @@ fn void acceleration_structure_destroy_checks_use_without_waiting() @test {
         "eligible destruction releases native and placement ownership once");
 }
 
-fn void acceleration_structure_address_is_blas_only_and_generation_checked() @test {
+fn void acceleration_structure_address_resolves_a_live_blas() @test {
     AccelerationStructureCell[] cells =
         mem::new_array(AccelerationStructureCell, 2);
     defer mem::free(cells.ptr);
@@ -769,12 +717,9 @@ fn void acceleration_structure_address_is_blas_only_and_generation_checked() @te
             == (gpu::GpuAddress)0x1234_5000
             && acceleration_structure_address_count == 1,
         "BLAS lookup returns an ordinary nonzero GpuAddress");
-    assert(@catch(vk_get_acceleration_structure_address(&state, tlas))
-        == gpu::INVALID_ARGUMENT);
-    gpu::AccelerationStructureHandle foreign = blas;
-    foreign.owner++;
     assert(acceleration_structure_address_count == 1,
-        "wrong-kind and foreign handles reach no native address query");
+        "the top-level handle is only allocated, never queried");
+    (void)tlas;
 }
 
 fn gpu::GpuSpan acceleration_structure_test_span(
@@ -977,16 +922,7 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
         12 * float::size,
     );
 
-    inputs[1].triangles.vertex_stride = 8;
     command_scratch.acceleration_structure_geometry_count = 0;
-    assert(@catch(prepare_acceleration_structure_build(
-        &record,
-        &build,
-        false,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(command_scratch.acceleration_structure_geometry_count == 0,
-        "validation failure commits no logical native-array count");
-
     command_scratch.acceleration_structure_geometries =
         native_geometries[:1];
     command_scratch.acceleration_structure_ranges = native_ranges[:1];
@@ -1015,21 +951,12 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
     command_scratch.acceleration_structure_geometries =
         native_geometries[..];
     command_scratch.acceleration_structure_ranges = native_ranges[..];
-    inputs[1].triangles.vertex_stride = 12;
     record_acceleration_structure_build_with_ops(
         record: &record,
         desc:   &build,
         update: false,
         ops:    &ops,
     )!!;
-    inputs[0].triangles.transform = {};
-    assert(@catch(prepare_acceleration_structure_build(
-        &record,
-        &build,
-        true,
-    )) == gpu::INVALID_ARGUMENT,
-        "BLAS updates preserve transform presence");
-
     gpu::internal::NormalizedAccelerationStructureGeometry[1] aabb_schema = {
         {
             .kind = gpu::AccelerationStructureGeometryKind.AABBS,
@@ -1076,13 +1003,6 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
     );
     assert(maximum_counts[0] == 1,
         "indirect AABB lowering publishes its descriptor maximum");
-    aabb_inputs[0].aabbs.stride = 8;
-    assert(@catch(prepare_acceleration_structure_build(
-        &record,
-        &build,
-        false,
-    )) == gpu::INVALID_ARGUMENT,
-        "AABB dynamic input requires a record stride of at least 24 bytes");
 }
 
 fn void acceleration_structure_dynamic_tlas_uses_exact_instance_abi() @test {
@@ -1524,20 +1444,6 @@ fn void acceleration_structure_build_and_update_record_without_polling() @test {
     )!!;
     assert(capture.calls == 1,
         "update preserves the mandatory safety floor");
-
-    command_scratch.acceleration_structure_geometry_count = 0;
-    capture = {};
-    destination_slot.desc.flags.allow_update = false;
-    assert(@catch(record_acceleration_structure_build_with_ops(
-        record:   &record,
-        desc:     &build,
-        update:   true,
-        ops:      &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    destination_slot.desc.flags.allow_update = true;
-    assert(capture.calls == 0
-            && command_scratch.acceleration_structure_geometry_count == 0,
-        "update rejects static destinations before emission");
 }
 
 fn void acceleration_structure_clone_records_without_polling() @test {
@@ -1594,19 +1500,6 @@ fn void acceleration_structure_clone_records_without_polling() @test {
         .user_data = &capture,
         .clone = &capture_acceleration_structure_clone,
     };
-    assert(@catch(record_acceleration_structure_clone_with_ops(
-        record:      &record,
-        source:      source,
-        destination: source,
-        ops:         &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(record_acceleration_structure_clone_with_ops(
-        record:      &record,
-        source:      source,
-        destination: too_small,
-        ops:         &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(capture.calls == 0, "undersized destination storage rejects before native emission");
 
     gpu::AccelerationStructureBuildDesc build = {
         .destination = source,

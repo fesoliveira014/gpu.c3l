@@ -382,26 +382,13 @@ fn void run_sparse_preflight_case(uint stage) {
     gpu::TextureDesc desc = sparse_test_texture_desc();
     switch (stage) {
         case 0:
-            desc.width = 0;
-        case 1:
-            desc.array_layers = 2;
-        case 2:
-            desc.format = gpu::Format.D32_FLOAT;
-            desc.usage = { .transfer_src };
-        case 3:
-            desc.usage = { .color_attach };
-        case 4:
-            desc.usage = {};
-        case 5:
-            desc.sample_count = gpu::SampleCount.TWO;
-        case 6:
             fixture.state.caps.sparse_textures.image_2d = false;
-        case 7:
+        case 1:
             desc.depth = 4;
             fixture.state.caps.sparse_textures.image_3d = false;
-        case 8:
+        case 2:
             fixture.probe.support_result = false;
-        case 9:
+        case 3:
             fixture.probe.sparse_format_count = 0;
         default:
             unreachable();
@@ -413,17 +400,14 @@ fn void run_sparse_preflight_case(uint stage) {
         &desc,
         &ops,
     ));
-    fault expected = stage <= 5
-        ? gpu::INVALID_ARGUMENT
-        : gpu::UNSUPPORTED_FEATURE;
-    assert(actual == expected);
+    assert(actual == gpu::UNSUPPORTED_FEATURE);
     assert(fixture.probe.create_calls == 0);
-    assert(fixture.probe.support_calls == (stage < 8 ? 0 : 1));
-    assert(fixture.probe.sparse_format_calls == (stage == 9 ? 1 : 0));
+    assert(fixture.probe.support_calls == (stage < 2 ? 0 : 1));
+    assert(fixture.probe.sparse_format_calls == (stage == 3 ? 1 : 0));
 }
 
 fn void sparse_texture_preflight_precedes_native_mutation() @test {
-    for (uint stage = 0; stage < 10; stage++) {
+    for (uint stage = 0; stage < 4; stage++) {
         run_sparse_preflight_case(stage);
     }
 }
@@ -543,14 +527,14 @@ fn void sparse_requirements_query_returns_only_cached_sparse_snapshot() @test {
         vk::vk_get_sparse_texture_requirements(
             &fixture.state,
             sparse,
-        )!!;
+        );
     fixture.probe.memory.size = 8192;
     fixture.probe.native[0].format_properties.image_granularity.width = 1;
     gpu::SparseTextureRequirements second =
         vk::vk_get_sparse_texture_requirements(
             &fixture.state,
             sparse,
-        )!!;
+        );
 
     assert(first.virtual_size == 4096);
     assert(second.virtual_size == first.virtual_size);
@@ -561,15 +545,6 @@ fn void sparse_requirements_query_returns_only_cached_sparse_snapshot() @test {
     assert(fixture.probe.sparse_fill_calls == 1);
 
     fixture.state.textures.free(sparse)!!;
-    vk::TextureSlot ordinary;
-    gpu::TextureHandle ordinary_handle =
-        fixture.state.textures.alloc(ordinary)!!;
-    assert(@catch(vk::vk_get_sparse_texture_requirements(
-        &fixture.state,
-        ordinary_handle,
-    )) == gpu::INVALID_ARGUMENT);
-
-    fixture.state.textures.free(ordinary_handle)!!;
 }
 
 fn vk::SparseImageMemoryRequirements valid_sparse_color_requirement() {
@@ -906,7 +881,7 @@ fn bool exercise_real_sparse_three_dimensional_lifecycle(
         }
         gpu::TextureHandle texture = created;
         gpu::SparseTextureRequirements requirements =
-            gpu::get_sparse_texture_requirements(device, texture)!!;
+            gpu::get_sparse_texture_requirements(device, texture);
         assert(requirements.virtual_size > 0);
         assert(requirements.page_allocation.size > 0);
         assert(requirements.aspect_count > 0);
@@ -1025,7 +1000,7 @@ fn void sparse_texture_real_lifecycle_when_supported() @test {
                 gpu::get_sparse_texture_requirements(
                     &device,
                     texture,
-                )!!;
+                );
             assert(requirements.virtual_size > 0);
             assert(requirements.page_allocation.size > 0);
             assert(requirements.aspect_count > 0);

@@ -14,6 +14,10 @@ fn gpu::RayTracingPipelineInfo ray_tracing_pipeline_info(gpu::Device* device, gp
     return gpu::get_ray_tracing_pipeline_info(device, pipeline);
 }
 
+fn gpu::SparseTextureRequirements sparse_texture_requirements(gpu::Device* device, gpu::TextureHandle texture) {
+    return gpu::get_sparse_texture_requirements(device, texture);
+}
+
 fn gpu::GraphicsState geometry_state() {
     return gpu::render_geometry_state(320, 240);
 }

@@ -94,10 +94,11 @@ fn gpu::GpuAddress? vk_get_acceleration_structure_address(
         || state.acceleration_structure != acceleration_structure) {
         abort("gpu: stale AccelerationStructureHandle");
     }
-    if (state.acceleration_structure_kind
-        != gpu::AccelerationStructureKind.BOTTOM_LEVEL) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state.acceleration_structure_kind
+            == gpu::AccelerationStructureKind.BOTTOM_LEVEL,
+        "acceleration structure must be bottom-level"
+    );
     return state.acceleration_structure_address;
 }
 
@@ -1501,13 +1502,13 @@ fn gpu::TextureHandle? vk_create_sparse_texture(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn gpu::SparseTextureRequirements? vk_get_sparse_texture_requirements(
+fn gpu::SparseTextureRequirements vk_get_sparse_texture_requirements(
     VkDeviceState* state,
     gpu::TextureHandle texture,
 ) {
     (void)state;
     (void)texture;
-    return gpu::INVALID_ARGUMENT~;
+    unreachable("texture must be a sparse texture");
 }
 
 fn gpu::CompletionPoint? vk_bind_sparse_texture_memory(
@@ -1518,7 +1519,7 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory(
     (void)state;
     (void)queue;
     (void)desc;
-    return gpu::INVALID_ARGUMENT~;
+    return gpu::UNSUPPORTED_FEATURE~;
 }
 
 fn gpu::TextureHandle? vk_create_texture(

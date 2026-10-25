@@ -145,13 +145,6 @@ fn void lavapipe_acceleration_structure_storage_models_are_explicit() @test {
             allocation,
             0,
         )!!;
-    assert(@catch(gpu::create_placed_acceleration_structure(
-        &device,
-        &desc,
-        allocation,
-        0,
-    )) == gpu::INVALID_ARGUMENT,
-        "overlapping placed acceleration structures publish nothing");
     assert(@catch(gpu::free_allocation(&device, &allocation))
         == gpu::RESOURCE_IN_USE && allocation.is_valid(),
         "a live placed structure retains caller-owned storage without freeing it");

@@ -418,6 +418,32 @@ Binding shares the [native-queue host synchronization boundary](../architecture.
 with submit and present, including aliased roles. Sparse images are single-layer,
 single-sample color 2D or 3D.
 
+The rules for these calls are contracts: a violation panics in safe builds.
+
+- `create_sparse_texture` takes a valid single-layer, uncompressed, non-depth
+  `TextureDesc` with no attachment usage.
+- `get_sparse_texture_requirements` takes a texture made by
+  `create_sparse_texture`, and returns the requirements directly.
+- A `SparseTextureBindDesc` holds at most `MAX_SPARSE_TILE_BINDS` tile binds,
+  `MAX_SPARSE_OPAQUE_BINDS` opaque binds and `MAX_SPARSE_BIND_WAITS` waits,
+  and at least one tile or opaque bind. Tile binds use the color aspect, a
+  nonempty extent and offsets no greater than `int::max`; opaque binds use a
+  defined aspect and a nonempty range. An unbind, with `GPU_ALLOCATION_INVALID`,
+  uses `allocation_offset` 0. Tile boxes of one mip, and opaque ranges of one
+  aspect, do not overlap.
+- The queue is a sparse-binding queue from
+  `caps.sparse_textures.binding_queues`, and `desc.texture` is a sparse
+  texture. Tile binds target mips below the aspect's `mip_tail_first_lod`, are
+  tile-aligned and inside the mip extent, end partial tiles at the mip edge,
+  and use z offset 0 and z extent 1 on 2D textures. Opaque binds name an aspect
+  from the texture's requirements, are page-aligned, and lie inside that
+  aspect's mip tail.
+- Each backing allocation is non-dedicated texture memory that fits the
+  texture's requirements, admits the texture's queue access, holds the bound
+  range, and is addressed at an `allocation_offset` that is a multiple of the
+  sparse page alignment. Backing ranges in one call overlap neither each other
+  nor the memory of a placed texture.
+
 ## Acceleration structures
 
 Available on devices created with `enable_ray_queries` or
@@ -445,6 +471,20 @@ storage), `create_placed_acceleration_structure` (range of a caller
 allocation), `create_dedicated_acceleration_structure` (returns the handle
 and its allocation).
 
+A descriptor follows these rules, which are contracts: a violation panics in
+safe builds. Flags use known bits and do not combine `prefer_fast_trace` with
+`prefer_fast_build`. A BLAS has at least one geometry, all of one defined kind,
+and no instances; a TLAS has a nonzero `max_instance_count` and no geometries.
+Triangle geometry has nonzero vertex and primitive maxima and a defined index
+type, and a non-indexed geometry has at least three vertices per primitive.
+AABB geometry has a nonzero primitive maximum. The primitive total fits `uint`,
+and the geometry count of a BLAS does not exceed
+`caps.acceleration_structures.max_geometry_count`. Exceeding the instance or
+primitive limits of the device returns `UNSUPPORTED_FEATURE`. A placed
+structure uses an allocation with acceleration-structure storage usage and an
+`offset` that is aligned, fits the allocation and overlaps no other placed
+structure.
+
 Input formats:
 
 | Geometry | Layout | Alignment |
@@ -457,8 +497,11 @@ Input formats:
 
 `make_acceleration_structure_instance` packs a live BLAS, a transform,
 custom index (24 bits), mask (8 bits), and flags into the 64-byte record.
+The custom index and mask must fit their widths, flags use known bits and do
+not combine `force_opaque` with `force_non_opaque`, and the referenced
+structure is a BLAS; a violation panics in safe builds.
 `get_acceleration_structure_address` returns a BLAS address for GPU-authored
-instances.
+instances; passing a TLAS panics in safe builds.
 
 `create_acceleration_structure_view` publishes a TLAS to the heap. The
 view owns the slot, blocks TLAS destruction while live, and exposes
@@ -474,7 +517,9 @@ Rules:
 - Build, clone, and update can be recorded in one list or dependent lists
   before any host completion poll. Use explicit barriers and submission waits.
   Recording does not validate construction history or update compatibility.
-- Clone destinations need compatible creation parameters and sufficient storage.
+- Clone destinations need compatible creation parameters and storage at
+  least as large as the source, and differ from the source; a violation panics
+  in safe builds.
   A cloned BLAS has its own address; instance records must explicitly name it
   to use the clone. A cloned TLAS needs its own view and still refers to the
   BLASes represented by its instance addresses: it neither owns nor retargets
@@ -493,6 +538,8 @@ On a device with ray-tracing pipelines, any addressable allocation may hold
 SBT records. `RayTracingShaderBindingTable` names four
 `RayTracingShaderBindingTableRegion` values (span plus stride). The
 ray-generation region holds exactly one record; the others may be zero.
+A region is either the zero value with stride 0 or a span with a nonzero size;
+a violation panics in safe builds.
 Pack with `RayTracingPipelineCaps` alignments and
 `get_ray_tracing_shader_group_handles`. The library never allocates or
 fills an SBT.
@@ -501,7 +548,6 @@ fills an SBT.
 
 | Cause | Fault |
 |---|---|
-| bad range, alignment, descriptor, or limit | `INVALID_ARGUMENT` |
 | unsupported usage, format, or feature, or texture requirements with no shared memory type | `UNSUPPORTED_FEATURE` |
 | out of memory | `OUT_OF_HOST_MEMORY`, `OUT_OF_DEVICE_MEMORY` |
 | fixed table full | `SLOT_TABLE_FULL` |

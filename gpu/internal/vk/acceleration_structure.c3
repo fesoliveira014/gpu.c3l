@@ -220,25 +220,21 @@ fn void? record_acceleration_structure_build_with_ops(
     emit_acceleration_structure_build(record, &prepared, ops);
 }
 
-fn ResolvedSpan? lower_acceleration_structure_indirect_ranges(
+fn ResolvedSpan lower_acceleration_structure_indirect_ranges(
     CommandRecord* record,
     gpu::GpuSpan* ranges,
     uint geometry_count,
 ) {
     usz range_size = gpu::AccelerationStructureIndirectBuildRange::size;
-    if (geometry_count == 0
-        || (usz)geometry_count > usz::max / range_size) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    ResolvedSpan resolved = resolve_span_slot(
+    assert(
+        geometry_count > 0,
+        "indirect build geometry count must be non-zero"
+    );
+    return resolve_span_slot(
         record.device_state,
         ranges,
         (usz)geometry_count * range_size,
     );
-    if ((ulong)resolved.address == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    return resolved;
 }
 
 fn void fill_acceleration_structure_max_primitive_counts(
@@ -285,7 +281,7 @@ fn void? record_acceleration_structure_indirect_build_with_ops(
         record:         record,
         ranges:         &ranges,
         geometry_count: prepared.geometry_count,
-    )!;
+    );
     fill_acceleration_structure_max_primitive_counts(
         record,
         desc,
@@ -306,24 +302,22 @@ prepare_acceleration_structure_clone(
     gpu::AccelerationStructureHandle source,
     gpu::AccelerationStructureHandle destination,
 ) {
-    if (record == null) return gpu::INVALID_ARGUMENT~;
+    assert(record != null, "command record must not be null");
     VkDeviceState* state = record.device_state;
     if (state == null || !state.acceleration_structures_enabled) {
         return gpu::UNSUPPORTED_FEATURE~;
-    }
-    if (source.owner == destination.owner
-        && source.index == destination.index
-        && source.generation == destination.generation) {
-        return gpu::INVALID_ARGUMENT~;
     }
     AccelerationStructureSlot* source_slot =
         state.acceleration_structures.get(source);
     AccelerationStructureSlot* destination_slot =
         state.acceleration_structures.get(destination);
-    if (destination_slot.desc.requirements.storage_size
-        < source_slot.desc.requirements.storage_size) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        destination_slot.desc.requirements.storage_size
+            >= source_slot.desc.requirements.storage_size,
+        "destination storage must be at least as large as the source storage: destination %s bytes, source %s bytes",
+        destination_slot.desc.requirements.storage_size,
+        source_slot.desc.requirements.storage_size
+    );
     return {
         .source             = source_slot,
         .destination        = destination_slot,
@@ -369,34 +363,34 @@ fn void? record_acceleration_structure_clone_with_ops(
     emit_acceleration_structure_clone(record, &prepared, ops);
 }
 
-fn usz? acceleration_structure_strided_bytes(
+fn usz acceleration_structure_strided_bytes(
     uint count,
     usz stride,
     usz element_size,
 ) {
-    if (count == 0 || stride < element_size) return gpu::INVALID_ARGUMENT~;
-    usz preceding = (usz)count - 1;
-    if (preceding > (usz::max - element_size) / stride) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    return preceding * stride + element_size;
+    assert(
+        gpu::internal::acceleration_structure_strided_bytes_fit(
+            count,
+            stride,
+            element_size,
+        ),
+        "geometry count must be non-zero and stride must cover one element without overflowing usz"
+    );
+    return ((usz)count - 1) * stride + element_size;
 }
 
-fn usz? acceleration_structure_index_bytes(
+fn usz acceleration_structure_index_bytes(
     uint primitive_count,
     gpu::AccelerationStructureIndexType index_type,
 ) {
     usz element_size = index_type == gpu::AccelerationStructureIndexType.U16
         ? 2
         : 4;
-    if (primitive_count == 0 || primitive_count > uint::max / 3) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    usz index_count = (usz)primitive_count * 3;
-    if (index_count > usz::max / element_size) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    return index_count * element_size;
+    assert(
+        primitive_count > 0 && primitive_count <= uint::max / 3,
+        "triangle primitive count must be non-zero and fit three indices per primitive in uint"
+    );
+    return (usz)primitive_count * 3 * element_size;
 }
 
 fn bool gpu_span_is_zero(gpu::GpuSpan span) {
@@ -404,16 +398,12 @@ fn bool gpu_span_is_zero(gpu::GpuSpan span) {
         && span.offset == 0 && span.size == 0;
 }
 
-fn ResolvedSpan? lower_acceleration_structure_input_span(
+fn ResolvedSpan lower_acceleration_structure_input_span(
     VkDeviceState* state,
     gpu::GpuSpan* span,
     usz required,
 ) {
-    ResolvedSpan resolved = resolve_span_slot(state, span, required);
-    if ((ulong)resolved.address == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    return resolved;
+    return resolve_span_slot(state, span, required);
 }
 
 fn PreparedAccelerationStructureBuild?
@@ -423,7 +413,10 @@ prepare_acceleration_structure_build_mode(
     bool update,
     bool indirect,
 ) {
-    if (record == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    assert(
+        record != null && desc != null,
+        "command record and build desc must not be null"
+    );
     VkDeviceState* state = record.device_state;
     if (state == null || !state.acceleration_structures_enabled) {
         return gpu::UNSUPPORTED_FEATURE~;
@@ -435,11 +428,12 @@ prepare_acceleration_structure_build_mode(
     }
     AccelerationStructureSlot* destination =
         state.acceleration_structures.get(desc.destination);
-    if (update
-        && (!destination.desc.flags.allow_update
-            || destination.desc.requirements.update_scratch_size == 0)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        !update
+            || (destination.desc.flags.allow_update
+                && destination.desc.requirements.update_scratch_size != 0),
+        "an update destination must be created with flags.allow_update"
+    );
     uint required_geometry_count = destination.desc.kind
         == gpu::AccelerationStructureKind.TOP_LEVEL
         ? 1
@@ -456,23 +450,22 @@ prepare_acceleration_structure_build_mode(
 
     if (destination.desc.kind
         == gpu::AccelerationStructureKind.TOP_LEVEL) {
-        if (desc.geometries.len != 0 || desc.instance_count == 0
-            || desc.instance_count > destination.desc.max_instance_count) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-        usz instance_bytes;
-        if ((usz)desc.instance_count
-            > usz::max / gpu::AccelerationStructureInstance::size) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-        instance_bytes = (usz)desc.instance_count
+        assert(
+            desc.geometries.len == 0
+                && desc.instance_count >= 1
+                && desc.instance_count <= destination.desc.max_instance_count,
+            "a top-level build must have no geometries and between 1 and the destination's max_instance_count instances: %s geometries, %s instances, limit %s",
+            desc.geometries.len,
+            desc.instance_count,
+            destination.desc.max_instance_count
+        );
+        usz instance_bytes = (usz)desc.instance_count
             * gpu::AccelerationStructureInstance::size;
         ResolvedSpan instances = lower_acceleration_structure_input_span(
             state,
             &desc.instances,
             instance_bytes,
-
-        )!;
+        );
         vk::AccelerationStructureGeometryDataKHR geometry_data;
         geometry_data.instances =
             vk::acceleration_structure_geometry_instances_data_khr()
@@ -487,62 +480,67 @@ prepare_acceleration_structure_build_mode(
             .primitive_count = desc.instance_count,
         };
     } else {
-        if ((desc.geometries.len > 0 && desc.geometries.ptr == null)
-            || desc.geometries.len != destination.desc.geometries.len
-            || desc.instance_count != 0
-            || !gpu_span_is_zero(desc.instances)) {
-            return gpu::INVALID_ARGUMENT~;
-        }
+        assert(
+            desc.geometries.len == destination.desc.geometries.len
+                && desc.instance_count == 0
+                && gpu_span_is_zero(desc.instances),
+            "a bottom-level build must supply exactly the destination's geometries and no instances: %s geometries, destination has %s",
+            desc.geometries.len,
+            destination.desc.geometries.len
+        );
         foreach (i, &input : desc.geometries) {
             gpu::internal::NormalizedAccelerationStructureGeometry* schema =
                 &destination.desc.geometries[i];
-            if (input.kind != schema.kind) return gpu::INVALID_ARGUMENT~;
+            assert(
+                input.kind == schema.kind,
+                "desc.geometries[].kind must match the destination geometry kind"
+            );
             vk::AccelerationStructureGeometryDataKHR geometry_data;
             if (schema.kind
                 == gpu::AccelerationStructureGeometryKind.TRIANGLES) {
-                if (input.triangles.vertex_count == 0
-                    || input.triangles.vertex_count
-                        > schema.max_vertex_count
-                    || input.triangles.primitive_count == 0
-                    || input.triangles.primitive_count
-                        > schema.max_primitive_count
-                    || input.triangles.vertex_stride < 12
-                    || !gpu_span_is_zero(input.triangles.transform)
-                        != schema.has_transform) {
-                    return gpu::INVALID_ARGUMENT~;
-                }
+                assert(
+                    input.triangles.vertex_count <= schema.max_vertex_count
+                        && input.triangles.primitive_count
+                            <= schema.max_primitive_count
+                        && !gpu_span_is_zero(input.triangles.transform)
+                            == schema.has_transform,
+                    "desc.geometries[] triangle counts must not exceed the destination maxima and the transform must be present exactly when the destination has one: vertices %s of %s, primitives %s of %s",
+                    input.triangles.vertex_count,
+                    schema.max_vertex_count,
+                    input.triangles.primitive_count,
+                    schema.max_primitive_count
+                );
                 usz vertex_bytes = acceleration_structure_strided_bytes(
                     input.triangles.vertex_count,
                     input.triangles.vertex_stride,
                     12,
-                )!;
+                );
                 ResolvedSpan vertices =
                     lower_acceleration_structure_input_span(
                         state,
                         &input.triangles.vertices,
                         vertex_bytes,
-
-                    )!;
+                    );
                 vk::DeviceOrHostAddressConstKHR index_address;
                 if (schema.index_type
                     == gpu::AccelerationStructureIndexType.NONE) {
-                    if (!gpu_span_is_zero(input.triangles.indices)
-                        || input.triangles.vertex_count
-                            < input.triangles.primitive_count * 3) {
-                        return gpu::INVALID_ARGUMENT~;
-                    }
+                    assert(
+                        gpu_span_is_zero(input.triangles.indices)
+                            && input.triangles.vertex_count
+                                >= input.triangles.primitive_count * 3,
+                        "non-indexed triangles must supply no indices and at least three vertices per primitive"
+                    );
                 } else {
                     usz index_bytes = acceleration_structure_index_bytes(
                         input.triangles.primitive_count,
                         schema.index_type,
-                    )!;
+                    );
                     ResolvedSpan indices =
                         lower_acceleration_structure_input_span(
                             state,
                             &input.triangles.indices,
                             index_bytes,
-
-                        )!;
+                        );
                     index_address.device_address =
                         (vk::DeviceAddress)indices.address;
                 }
@@ -553,8 +551,7 @@ prepare_acceleration_structure_build_mode(
                             state,
                             &input.triangles.transform,
                             12 * float::size,
-
-                        )!;
+                        );
                     transform_address.device_address =
                         (vk::DeviceAddress)transform.address;
                 }
@@ -589,22 +586,22 @@ prepare_acceleration_structure_build_mode(
                     .primitive_count = input.triangles.primitive_count,
                 };
             } else {
-                if (input.aabbs.primitive_count == 0
-                    || input.aabbs.primitive_count
-                        > schema.max_primitive_count
-                    || input.aabbs.stride < 24) {
-                    return gpu::INVALID_ARGUMENT~;
-                }
+                assert(
+                    input.aabbs.primitive_count <= schema.max_primitive_count,
+                    "desc.geometries[].aabbs.primitive_count must not exceed the destination maximum: %s of %s",
+                    input.aabbs.primitive_count,
+                    schema.max_primitive_count
+                );
                 usz aabb_bytes = acceleration_structure_strided_bytes(
                     input.aabbs.primitive_count,
                     input.aabbs.stride,
                     24,
-                )!;
+                );
                 ResolvedSpan aabbs = lower_acceleration_structure_input_span(
                     state,
                     &input.aabbs.aabbs,
                     aabb_bytes,
-                )!;
+                );
                 geometry_data.aabbs =
                     vk::acceleration_structure_geometry_aabbs_data_khr()
                         .set_data({ .device_address =
@@ -634,7 +631,6 @@ prepare_acceleration_structure_build_mode(
         &desc.scratch,
         required_scratch,
     );
-    if ((ulong)scratch.address == 0) return gpu::INVALID_ARGUMENT~;
     record.scratch.acceleration_structure_geometry_count =
         required_geometry_count;
     return {
@@ -753,9 +749,10 @@ fn AccelerationStructureSlot? AccelerationStructureTable.free(
 }
 
 fn void? create_acceleration_structure_state(VkDeviceState* state) {
-    if (state == null || !state.acceleration_structures_enabled) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && state.acceleration_structures_enabled,
+        "acceleration structures must be enabled before creating their state"
+    );
     state.acceleration_structures.owner =
         gpu::internal::resource_owner_tag(
             state.resource_owner,
@@ -899,8 +896,11 @@ get_acceleration_structure_requirements_with_ops(
     gpu::AccelerationStructureDesc* desc,
     AccelerationStructureRequirementsOps* ops,
 ) {
-    if (state == null || desc == null || ops == null
-        || ops.get_build_sizes == null) return gpu::INVALID_ARGUMENT~;
+    assert(
+        state != null && desc != null && ops != null
+            && ops.get_build_sizes != null,
+        "requirements query inputs must not be null"
+    );
     if (!state.acceleration_structures_enabled) return gpu::UNSUPPORTED_FEATURE~;
 
     @pool() {
@@ -1078,10 +1078,11 @@ create_acceleration_structure_on_buffer_with_ops(
     gpu::GpuAllocation placement,
     AccelerationStructureNativeOps* ops,
 ) {
-    if (state == null || desc == null || buffer == null || ops == null
-        || ops.create == null || ops.destroy == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && desc != null && buffer != null && ops != null
+            && ops.create != null && ops.destroy != null,
+        "acceleration structure creation inputs must not be null"
+    );
     usz geometry_count = desc.kind
         == gpu::AccelerationStructureKind.BOTTOM_LEVEL
         ? desc.geometries.len
@@ -1246,22 +1247,26 @@ fn gpu::AccelerationStructureHandle? vk_create_placed_acceleration_structure(
     if (allocation_slot.live_placements == uint::max) {
         return gpu::INVALID_RESOURCE_STATE~;
     }
-    if (allocation_slot.texture_memory
-        || !allocation_slot.backing.usage.acceleration_structure_storage
-        || !gpu::internal::acceleration_structure_storage_fits(
-            &requirements,
-            allocation_slot.size,
-            allocation_slot.alignment,
-            offset,
-        )
-        || placed_acceleration_structure_overlaps(
-            state,
-            allocation,
-            offset,
-            requirements.storage_size,
-        )) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        !allocation_slot.texture_memory
+            && allocation_slot.backing.usage.acceleration_structure_storage
+            && gpu::internal::acceleration_structure_storage_fits(
+                &requirements,
+                allocation_slot.size,
+                allocation_slot.alignment,
+                offset,
+            )
+            && !placed_acceleration_structure_overlaps(
+                state,
+                allocation,
+                offset,
+                requirements.storage_size,
+            ),
+        "allocation must be acceleration-structure storage with room at an aligned, non-overlapping offset: offset %s, required %s bytes at alignment %s",
+        offset,
+        requirements.storage_size,
+        requirements.storage_alignment
+    );
 
     allocation_slot.live_placements++;
     bool retained_placement = true;
@@ -1382,9 +1387,10 @@ fn gpu::GpuAddress? vk_get_acceleration_structure_address(
     defer state.resource_mutex.unlock();
     AccelerationStructureSlot* slot =
         state.acceleration_structures.get(acceleration_structure);
-    if (slot.desc.kind != gpu::AccelerationStructureKind.BOTTOM_LEVEL) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        slot.desc.kind == gpu::AccelerationStructureKind.BOTTOM_LEVEL,
+        "acceleration structure must be bottom-level"
+    );
     vk::AccelerationStructureDeviceAddressInfoKHR info =
         vk::acceleration_structure_device_address_info_khr()
             .set_acceleration_structure(slot.native);

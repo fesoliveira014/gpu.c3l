@@ -1617,9 +1617,7 @@ fn void sparse_texture_feature_plan_is_exact() @test {
     }
 }
 
-fn void sparse_texture_feature_plan_rejects_null_requested_features() @test {
-    assert(@catch(vk::resolve_sparse_texture_feature_plan(true, null))
-        == gpu::INVALID_ARGUMENT);
+fn void sparse_texture_feature_plan_ignores_features_when_not_requested() @test {
     vk::SparseTextureFeaturePlan plan =
         vk::resolve_sparse_texture_feature_plan(false, null)!!;
     assert(!plan.enabled && !plan.image_2d && !plan.image_3d);

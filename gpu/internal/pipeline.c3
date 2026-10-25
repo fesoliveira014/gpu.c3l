@@ -96,6 +96,29 @@ fn bool ray_tracing_hit_groups_valid(gpu::RayTracingHitGroupDesc[] groups) @priv
     return true;
 }
 
+<* Whether a binding-table region is the canonical empty value with stride 0,
+   or a nonempty span. *>
+fn bool ray_tracing_shader_binding_table_region_valid(
+    gpu::RayTracingShaderBindingTableRegion* region,
+) @private {
+    gpu::GpuSpan span = region.span;
+    bool empty = span.owner == 0
+        && span.index == 0
+        && span.generation == 0
+        && span.offset == 0
+        && span.size == 0;
+    return empty ? region.stride == 0 : span.size > 0;
+}
+
+fn bool ray_tracing_shader_binding_table_valid(
+    gpu::RayTracingShaderBindingTable* table,
+) @private {
+    return ray_tracing_shader_binding_table_region_valid(&table.ray_generation)
+        && ray_tracing_shader_binding_table_region_valid(&table.miss)
+        && ray_tracing_shader_binding_table_region_valid(&table.hit)
+        && ray_tracing_shader_binding_table_region_valid(&table.callable);
+}
+
 <* Whether the descriptor has ray generation shaders, no null slice with a
    length, and counts that fit `uint` per slice, as group totals and as stage
    totals. *>

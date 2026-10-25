@@ -25,6 +25,7 @@
     "../../gpu/internal/sampler.c3",
     "../../gpu/internal/texture.c3",
     "../../gpu/internal/pipeline.c3",
+    "../../gpu/internal/sparse.c3",
     "../../gpu/internal/command.c3",
     "../../gpu/internal/render_pass.c3",
     "../../gpu/internal/sync.c3",
