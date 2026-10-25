@@ -4,7 +4,7 @@ import std::hash::fnv64a;
 
 const uint SPIRV_MAGIC @private                    = 0x07230203;
 const usz SPIRV_HEADER_SIZE @private               = 20;
-const usz SHADER_ENTRY_POINT_CAP @private          = 64;
+const usz SHADER_ENTRY_POINT_CAP @private          = gpu::MAX_SHADER_ENTRY_POINT_BYTES + 1;
 const uint SPIRV_OPCODE_MASK @private              = 0xFFFF;
 const uint SPIRV_WORD_COUNT_SHIFT @private         = 16;
 const uint SPIRV_OP_CAPABILITY @private            = 17;

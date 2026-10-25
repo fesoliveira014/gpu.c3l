@@ -1602,7 +1602,7 @@ fn void sparse_bind_shape_limits_precede_allocation_and_native_work() @test {
     gpu::SparseTextureTileBind tile;
     gpu::SparseTextureBindDesc desc = {
         .texture = fixture.texture,
-        .tiles   = (&tile)[:vk::MAX_SPARSE_TILE_BINDS + 1],
+        .tiles   = (&tile)[:gpu::MAX_SPARSE_TILE_BINDS + 1],
     };
     vk::SparseBindNativeOps ops = sparse_bind_ops();
     sparse_bind_capture = {};

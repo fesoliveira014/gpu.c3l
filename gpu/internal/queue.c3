@@ -10,8 +10,6 @@ const ulong COMPLETION_QUEUE_MASK @private =
 const ulong MAX_COMPLETION_SEQUENCE @private =
     ulong::max >> COMPLETION_QUEUE_BITS;
 const uint MAX_SELECTED_QUEUE_IDENTITIES @private = QUEUE_ROLE_COUNT;
-const uint MAX_SUBMIT_COMPLETION_WAITS @private = 1024;
-const uint MAX_SUBMIT_COMMAND_LISTS @private = 1024;
 $assert(MAX_SELECTED_QUEUE_IDENTITIES <= 1 << COMPLETION_QUEUE_BITS);
 
 

@@ -942,6 +942,19 @@ struct TextureRequirements {
 
 const uint MAX_SPARSE_TEXTURE_ASPECTS = 2;
 
+<* Largest command-list count in one `SubmitDesc`. *>
+const uint MAX_SUBMIT_COMMAND_LISTS = 1024;
+<* Largest completion-wait count in one `SubmitDesc`. *>
+const uint MAX_SUBMIT_COMPLETION_WAITS = 1024;
+<* Largest tile-bind count in one sparse bind batch. *>
+const usz MAX_SPARSE_TILE_BINDS = 1024;
+<* Largest opaque-bind count in one sparse bind batch. *>
+const usz MAX_SPARSE_OPAQUE_BINDS = 1024;
+<* Largest wait count in one sparse bind batch. *>
+const usz MAX_SPARSE_BIND_WAITS = 1024;
+<* Longest shader entry-point name in bytes, excluding the terminator. *>
+const usz MAX_SHADER_ENTRY_POINT_BYTES = 63;
+
 enum SparseTextureAspect : int {
     COLOR,
     METADATA,

@@ -82,15 +82,15 @@ struct ResolvedCompletionWait {
 }
 
 struct QueueSubmitScratch {
-    ResolvedCompletionWait[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS]
+    ResolvedCompletionWait[gpu::MAX_SUBMIT_COMPLETION_WAITS]
         completion_waits;
-    CommandRecord*[gpu::internal::MAX_SUBMIT_COMMAND_LISTS]
+    CommandRecord*[gpu::MAX_SUBMIT_COMMAND_LISTS]
         records;
-    CommandRecord*[gpu::internal::MAX_SUBMIT_COMMAND_LISTS + 2]
+    CommandRecord*[gpu::MAX_SUBMIT_COMMAND_LISTS + 2]
         batch;
-    vk::CommandBufferSubmitInfo[gpu::internal::MAX_SUBMIT_COMMAND_LISTS + 2]
+    vk::CommandBufferSubmitInfo[gpu::MAX_SUBMIT_COMMAND_LISTS + 2]
         command_buffer_infos;
-    vk::SemaphoreSubmitInfo[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS + 2]
+    vk::SemaphoreSubmitInfo[gpu::MAX_SUBMIT_COMPLETION_WAITS + 2]
         wait_infos;
 }
 

@@ -34,9 +34,6 @@ const uint KNOWN_SPARSE_FORMAT_FLAGS =
     (uint)vk::SparseImageFormatFlagBits.SINGLE_MIPTAIL_BIT
     | (uint)vk::SparseImageFormatFlagBits.ALIGNED_MIP_SIZE_BIT
     | (uint)vk::SparseImageFormatFlagBits.NONSTANDARD_BLOCK_SIZE_BIT;
-const usz MAX_SPARSE_BIND_WAITS   = 1024;
-const usz MAX_SPARSE_TILE_BINDS   = 1024;
-const usz MAX_SPARSE_OPAQUE_BINDS = 1024;
 
 struct SparseTextureNativeOps {
     void*                                  user_data;
@@ -934,9 +931,9 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory_with_ops(
     if ((tile_count > 0 && desc.tiles.ptr == null)
         || (opaque_count > 0 && desc.opaque.ptr == null)
         || (wait_count > 0 && desc.waits.ptr == null)
-        || tile_count > MAX_SPARSE_TILE_BINDS
-        || opaque_count > MAX_SPARSE_OPAQUE_BINDS
-        || wait_count > MAX_SPARSE_BIND_WAITS
+        || tile_count > gpu::MAX_SPARSE_TILE_BINDS
+        || opaque_count > gpu::MAX_SPARSE_OPAQUE_BINDS
+        || wait_count > gpu::MAX_SPARSE_BIND_WAITS
         || tile_count + opaque_count == 0) {
         return gpu::INVALID_ARGUMENT~;
     }

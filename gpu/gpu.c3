@@ -2894,10 +2894,10 @@ fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_queue(&operation, &device, queue);
     if (desc == null) return INVALID_ARGUMENT~;
-    if (desc.command_lists.len > gpu::internal::MAX_SUBMIT_COMMAND_LISTS) {
+    if (desc.command_lists.len > gpu::MAX_SUBMIT_COMMAND_LISTS) {
         return INVALID_ARGUMENT~;
     }
-    if (desc.completion_waits.len > gpu::internal::MAX_SUBMIT_COMPLETION_WAITS) {
+    if (desc.completion_waits.len > gpu::MAX_SUBMIT_COMPLETION_WAITS) {
         return INVALID_ARGUMENT~;
     }
     foreach (wait : desc.completion_waits) {

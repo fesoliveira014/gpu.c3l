@@ -49,6 +49,7 @@
       "type": "test",
       "sources": [
         "../src/test_internal_helpers.c3",
+        "../src/test_argument_rules.c3",
         "../src/test_vk_internal_helpers.c3",
         "../src/test_handles.c3",
         "../src/test_acceleration_structure_values.c3",
