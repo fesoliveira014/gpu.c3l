@@ -668,7 +668,11 @@ fn void? vk_get_ray_tracing_shader_group_handles_with_ops(
         out.len == required && (required == 0 || out.ptr != null),
         "out.len must equal group_count * shader_group_handle_size"
     );
-    if (group_count == 0) return;
+    ulong handle_size = state.caps.ray_tracing_pipelines.shader_group_handle_size;
+    if (group_count == 0 || handle_size == 0) return;
+    ulong fits = (ulong)out.len / handle_size;
+    uint copy_count = fits < group_count ? (uint)fits : group_count;
+    if (copy_count == 0) return;
     check_backend_result(
         state:     state,
         operation: "get_ray_tracing_shader_group_handles",
@@ -677,8 +681,8 @@ fn void? vk_get_ray_tracing_shader_group_handles_with_ops(
             state.device,
             slot.pipeline,
             first_group,
-            group_count,
-            (sz)required,
+            copy_count,
+            (sz)(copy_count * handle_size),
             out.ptr,
         ),
     )!;
