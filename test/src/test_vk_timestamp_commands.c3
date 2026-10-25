@@ -158,7 +158,7 @@ fn TimestampCommandFixture? create_timestamp_command_fixture(
         gpu::allocate_memory(&device, &allocation_desc)!;
     defer catch (void)gpu::free_allocation(&device, &allocation);
     gpu::GpuSpan destination =
-        gpu::get_allocation_span(&device, allocation)!;
+        gpu::get_allocation_span(&device, allocation);
 
     gpu::Queue queue =
         gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
@@ -508,31 +508,6 @@ fn void timestamp_render_phase_allows_only_writes() @test {
     assert(probe.reset_calls == 0
         && probe.resolve_calls == 0
         && probe.write_calls == 2);
-}
-
-fn void timestamp_destination_bounds_are_transactional() @test {
-    TimestampCommandFixture fixture =
-        create_timestamp_command_fixture(
-        )!!;
-    defer destroy_timestamp_command_fixture(&fixture)!!;
-    TimestampCommandProbe probe;
-    TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
-    AllocationSlot* allocation_slot =
-        fixture.state.allocations.get(fixture.allocation);
-    gpu::GpuSpan destination = fixture.destination;
-
-    destination = fixture.destination;
-    destination.size = ulong::size;
-    assert(@catch(vk_cmd_resolve_timestamps_with(
-        record:      fixture.record,
-        pool:        fixture.pool,
-        first:       0,
-        count:       2,
-        destination: destination,
-        ops:         &ops,
-    )) == gpu::INVALID_ARGUMENT);
-
-    assert(probe.resolve_calls == 0);
 }
 
 fn void timestamp_commands_emit_once() @test {

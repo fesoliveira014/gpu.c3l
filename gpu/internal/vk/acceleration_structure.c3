@@ -234,7 +234,7 @@ fn ResolvedSpan? lower_acceleration_structure_indirect_ranges(
         record.device_state,
         ranges,
         (usz)geometry_count * range_size,
-    )!;
+    );
     if ((ulong)resolved.address == 0) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -409,7 +409,7 @@ fn ResolvedSpan? lower_acceleration_structure_input_span(
     gpu::GpuSpan* span,
     usz required,
 ) {
-    ResolvedSpan resolved = resolve_span_slot(state, span, required)!;
+    ResolvedSpan resolved = resolve_span_slot(state, span, required);
     if ((ulong)resolved.address == 0) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -633,7 +633,7 @@ prepare_acceleration_structure_build_mode(
         state,
         &desc.scratch,
         required_scratch,
-    )!;
+    );
     if ((ulong)scratch.address == 0) return gpu::INVALID_ARGUMENT~;
     record.scratch.acceleration_structure_geometry_count =
         required_geometry_count;
@@ -1187,8 +1187,8 @@ fn gpu::AccelerationStructureHandle? vk_create_acceleration_structure(
     };
     uint[MAX_QUEUE_FAMILIES] families;
     uint family_count = resource_queue_families(state, state.selected_queue_roles, families[..]);
-    vk::BufferCreateInfo buffer_info = make_buffer_create_info(&buffer_desc, families[:family_count])!;
-    vma::AllocationCreateInfo allocation_info = memory_class_to_vma(gpu::MemoryClass.GPU_PRIVATE)!;
+    vk::BufferCreateInfo buffer_info = make_buffer_create_info(&buffer_desc, families[:family_count]);
+    vma::AllocationCreateInfo allocation_info = memory_class_to_vma(gpu::MemoryClass.GPU_PRIVATE);
     vk::Buffer backing_buffer;
     vma::Allocation backing_allocation;
     check_device_result(state, state.allocator.create_buffer(

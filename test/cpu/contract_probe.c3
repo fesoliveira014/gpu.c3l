@@ -23,6 +23,10 @@ fn int main(String[] args) {
             failure = @catch(probe_adapter_index());
         case "queue_role_not_exposed":
             failure = @catch(probe_queue_role(gpu::QueueKind.COMPUTE));
+        case "subspan_out_of_range":
+            gpu::GpuSpan span = { .size = 16 };
+            gpu::GpuSpan child = span.subspan((usz)args.len * 4, 16);
+            if (child.size == 0) return 0;
         default:
             (void)io::eprintfn("contract_probe: unknown case %s", probe_case);
             return EXIT_USAGE;

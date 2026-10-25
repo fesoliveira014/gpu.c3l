@@ -41,25 +41,9 @@ fn AllocationDesc allocation_stub_desc(
     };
 }
 
-fn void allocation_descriptor_validation_and_normalization() @test {
+fn void allocation_descriptor_normalization() @test {
     gpu::internal::vk::VkDeviceState state;
     Device device = create_allocation_stub_device(&state);
-
-    assert(@catch(gpu::allocate_memory(&device, null)) == gpu::INVALID_ARGUMENT);
-    AllocationDesc zero = allocation_stub_desc();
-    zero.size = 0;
-    assert(@catch(gpu::allocate_memory(&device, &zero)) == gpu::INVALID_ARGUMENT);
-    AllocationDesc bad_alignment = allocation_stub_desc();
-    bad_alignment.alignment = 3;
-    assert(@catch(gpu::allocate_memory(&device, &bad_alignment)) == gpu::INVALID_ARGUMENT);
-    AllocationDesc empty_access = allocation_stub_desc();
-    empty_access.access = {};
-    assert(@catch(gpu::allocate_memory(&device, &empty_access)) == gpu::INVALID_ARGUMENT);
-    AllocationDesc wrong_access = allocation_stub_desc();
-    wrong_access.access = { .graphics };
-    assert(@catch(gpu::allocate_memory(&device, &wrong_access)) == gpu::INVALID_ARGUMENT);
-    assert(state.allocation_attempts == 0,
-        "invalid descriptors never reach the backend");
 
     AllocationDesc desc = allocation_stub_desc();
     GpuAllocation allocation = gpu::allocate_memory(&device, &desc)!!;
@@ -87,11 +71,11 @@ fn void allocation_ownership_queries_and_consumption() @test {
     AllocationInfo info = gpu::get_allocation_info(&first, allocation);
     assert(info.size == desc.size, "immutable size round-trips");
     assert(info.alignment == 16, "normalized alignment round-trips");
-    GpuSpan span = gpu::get_allocation_span(&first, allocation)!!;
-    GpuSpan exact = span.checked_subspan(32, 32)!!;
-    assert(gpu::get_span_mapping(&first, exact)!!.len == 32,
+    GpuSpan span = gpu::get_allocation_span(&first, allocation);
+    GpuSpan exact = span.subspan(32, 32);
+    assert(gpu::get_span_mapping(&first, exact).len == 32,
         "mapped subspan has exact length");
-    assert((ulong)gpu::get_span_address(&first, exact)!! == 0x1020,
+    assert((ulong)gpu::get_span_address(&first, exact) == 0x1020,
         "address query includes the checked offset");
 
     first_state.allocation_block_free = true;
@@ -113,16 +97,11 @@ fn void mapped_allocation_composes_views_and_frees_through_span() @test {
     MappedGpuSpan mapped = gpu::allocate_mapped_memory(&device, &desc)!!;
     assert(mapped.bytes.len == mapped.span.size && mapped.span.size == desc.size,
         "the composed mapping covers the allocation");
-    assert((ulong)mapped.address == (ulong)gpu::get_span_address(&device, mapped.span)!!,
+    assert((ulong)mapped.address == (ulong)gpu::get_span_address(&device, mapped.span),
         "the composed address matches the public query");
     GpuAllocation allocation = mapped.span.allocation();
     gpu::free_allocation(&device, &allocation)!!;
     assert(!state.allocation_live, "freeing through the span accessor releases the stub allocation");
-
-    AllocationDesc private_desc = allocation_stub_desc(MemoryClass.GPU_PRIVATE);
-    assert(@catch(gpu::allocate_mapped_memory(&device, &private_desc)) == gpu::INVALID_ARGUMENT,
-        "an unmapped class faults before allocating");
-    assert(!state.allocation_live, "a rejected class leaves nothing allocated");
 
     state.mapping_unavailable = true;
     assert(@catch(gpu::allocate_mapped_memory(&device, &desc)) == gpu::BACKEND_ERROR,
@@ -147,24 +126,9 @@ fn void device_local_cpu_write_class_is_mapped() @test {
         && info.device_local
         && info.addressable,
         "the device-local CPU-write class is mapped and addressable");
-    GpuSpan span = gpu::get_allocation_span(&device, allocation)!!;
-    assert(gpu::get_span_mapping(&device, span)!!.len == desc.size,
+    GpuSpan span = gpu::get_allocation_span(&device, allocation);
+    assert(gpu::get_span_mapping(&device, span).len == desc.size,
         "the device-local CPU-write class exposes its host mapping");
-    gpu::free_allocation(&device, &allocation)!!;
-    gpu::destroy_device(&device)!!;
-}
-
-fn void zero_sized_span_resolvers_are_rejected() @test {
-    gpu::internal::vk::VkDeviceState state;
-    Device device = create_allocation_stub_device(&state);
-    AllocationDesc desc = allocation_stub_desc();
-    GpuAllocation allocation = gpu::allocate_memory(&device, &desc)!!;
-    GpuSpan span = gpu::get_allocation_span(&device, allocation)!!;
-    span.size = 0;
-
-    assert(@catch(gpu::get_span_mapping(&device, span)) == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::get_span_address(&device, span)) == gpu::INVALID_ARGUMENT);
-
     gpu::free_allocation(&device, &allocation)!!;
     gpu::destroy_device(&device)!!;
 }
@@ -176,8 +140,8 @@ fn void mapped_span_visibility_validates_ownership_and_ranges() @test {
     Device second = create_allocation_stub_device(&second_state);
     AllocationDesc desc = allocation_stub_desc();
     GpuAllocation allocation = gpu::allocate_memory(&first, &desc)!!;
-    GpuSpan span = gpu::get_allocation_span(&first, allocation)!!;
-    GpuSpan range = span.checked_subspan(7, 19)!!;
+    GpuSpan span = gpu::get_allocation_span(&first, allocation);
+    GpuSpan range = span.subspan(7, 19);
 
     gpu::flush_mapped_span(&first, range)!!;
     gpu::invalidate_mapped_span(&first, range)!!;
@@ -192,13 +156,9 @@ fn void mapped_span_visibility_validates_ownership_and_ranges() @test {
     );
     assert(first_state.allocation_visibility_entries == 2,
         "cross-kind spans stop before backend dispatch");
-    GpuSpan zero = range;
-    zero.size = 0;
-    assert(@catch(gpu::invalidate_mapped_span(&first, zero))
-        == gpu::INVALID_ARGUMENT);
     assert(second_state.allocation_flush_calls == 0
         && first_state.allocation_invalidate_calls == 1,
-        "rejected ranges perform no visibility mutation");
+        "cross-kind spans perform no visibility mutation");
 
     gpu::free_allocation(&first, &allocation)!!;
     assert(first_state.allocation_flush_calls == 1,
@@ -243,17 +203,14 @@ fn void failed_free_keeps_device_child_live() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void mapping_availability_is_class_specific() @test {
+fn void gpu_private_memory_stays_addressable() @test {
     gpu::internal::vk::VkDeviceState state;
     Device device = create_allocation_stub_device(&state);
     AllocationDesc desc = allocation_stub_desc(MemoryClass.GPU_PRIVATE);
     GpuAllocation allocation = gpu::allocate_memory(&device, &desc)!!;
-    GpuSpan span = gpu::get_allocation_span(&device, allocation)!!;
+    GpuSpan span = gpu::get_allocation_span(&device, allocation);
 
-    assert(@catch(gpu::get_span_mapping(&device, span)) == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::flush_mapped_span(&device, span)) == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::invalidate_mapped_span(&device, span)) == gpu::INVALID_ARGUMENT);
-    assert((ulong)gpu::get_span_address(&device, span)!! != 0,
+    assert((ulong)gpu::get_span_address(&device, span) != 0,
         "GPU-private data remains addressable");
 
     gpu::free_allocation(&device, &allocation)!!;
@@ -307,16 +264,7 @@ fn void texture_memory_requires_prequeried_compatibility() @test {
     assert(requirements.compatibility.is_valid() && !requirements.dedicated_only,
         "requirements carry an opaque live compatibility value");
 
-    AllocationDesc missing = allocation_stub_desc(MemoryClass.TEXTURE);
-    assert(@catch(gpu::allocate_memory(&device, &missing))
-        == gpu::INVALID_ARGUMENT);
-    AllocationDesc generic = allocation_stub_desc(MemoryClass.GPU_PRIVATE);
     TextureRequirements[1] queried = { requirements };
-    generic.texture_requirements = queried[..];
-    assert(@catch(gpu::allocate_memory(&device, &generic))
-        == gpu::INVALID_ARGUMENT);
-    assert(state.allocation_attempts == 0,
-        "malformed texture-memory requests stop before allocation");
 
     AllocationDesc desc = allocation_stub_desc(MemoryClass.TEXTURE);
     desc.size = 128;
@@ -338,54 +286,53 @@ fn void texture_memory_requires_prequeried_compatibility() @test {
     gpu::destroy_device(&device)!!;
 }
 
-fn void texture_memory_rejects_foreign_and_dedicated_requirements() @test {
-    gpu::internal::vk::VkDeviceState first_state;
-    gpu::internal::vk::VkDeviceState second_state;
-    Device first = create_allocation_stub_device(&first_state);
-    Device second = create_allocation_stub_device(&second_state);
+fn void texture_memory_rejects_dedicated_requirements() @test {
+    gpu::internal::vk::VkDeviceState state;
+    Device device = create_allocation_stub_device(&state);
     TextureDesc texture_desc = texture_allocation_desc();
     TextureRequirements requirements = gpu::get_texture_requirements(
-        &first,
+        &device,
         &texture_desc,
     )!!;
-    TextureRequirements[1] queried = { requirements };
-
-    AllocationDesc foreign = allocation_stub_desc(MemoryClass.TEXTURE);
-    foreign.size = 128;
-    foreign.texture_requirements = queried[..];
-    TextureRequirements incompatible_first = requirements;
-    TextureRequirements incompatible_second = requirements;
-    ulong owner = gpu::internal::resource_owner_tag(
-        first_state.resource_owner,
-        gpu::internal::ResourceOwnerKind.ALLOCATION,
-    );
-    incompatible_first.compatibility = test_texture_compatibility(owner, 1);
-    incompatible_second.compatibility = test_texture_compatibility(
-        owner,
-        2,
-    );
-    TextureRequirements[2] incompatible = {
-        incompatible_first,
-        incompatible_second,
-    };
-    AllocationDesc disjoint = allocation_stub_desc(MemoryClass.TEXTURE);
-    disjoint.size = 128;
-    disjoint.texture_requirements = incompatible[..];
-    assert(@catch(gpu::allocate_memory(&first, &disjoint))
-        == gpu::INVALID_ARGUMENT);
     requirements.dedicated_only = true;
-    queried[0] = requirements;
+    TextureRequirements[1] queried = { requirements };
     AllocationDesc dedicated = allocation_stub_desc(MemoryClass.TEXTURE);
     dedicated.size = 128;
     dedicated.texture_requirements = queried[..];
-    assert(@catch(gpu::allocate_memory(&first, &dedicated))
+    assert(@catch(gpu::allocate_memory(&device, &dedicated))
         == gpu::UNSUPPORTED_FEATURE);
-    assert(first_state.allocation_attempts == 0
-        && second_state.allocation_attempts == 0,
-        "foreign, incompatible, and dedicated requirements perform no allocation");
+    assert(state.allocation_attempts == 0,
+        "dedicated-only requirements perform no allocation");
 
-    gpu::destroy_device(&first)!!;
-    gpu::destroy_device(&second)!!;
+    gpu::destroy_device(&device)!!;
+}
+
+fn void allocation_compatibility_without_shared_memory_type_is_unsupported() @test {
+    gpu::internal::vk::VkDeviceState state;
+    Device device = create_allocation_stub_device(&state);
+    TextureDesc texture_desc = texture_allocation_desc();
+    TextureRequirements requirements = gpu::get_texture_requirements(
+        &device,
+        &texture_desc,
+    )!!;
+    ulong owner = gpu::internal::resource_owner_tag(
+        state.resource_owner,
+        gpu::internal::ResourceOwnerKind.ALLOCATION,
+    );
+    TextureRequirements first = requirements;
+    TextureRequirements second = requirements;
+    first.compatibility = test_texture_compatibility(owner, 1);
+    second.compatibility = test_texture_compatibility(owner, 2);
+    TextureRequirements[2] disjoint_requirements = { first, second };
+    AllocationDesc desc = allocation_stub_desc(MemoryClass.TEXTURE);
+    desc.size = 128;
+    desc.texture_requirements = disjoint_requirements[..];
+
+    assert(@catch(gpu::allocate_memory(&device, &desc)) == gpu::UNSUPPORTED_FEATURE,
+        "requirements that share no memory type are unsupported");
+    assert(state.allocation_attempts == 0,
+        "unsupported compatibility performs no allocation");
+    gpu::destroy_device(&device)!!;
 }
 
 fn void dedicated_texture_creation_publishes_independent_tokens() @test {
@@ -410,13 +357,8 @@ fn void dedicated_texture_creation_publishes_independent_tokens() @test {
         null,
         &allocation_desc,
     )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(gpu::create_dedicated_texture(
-        &device,
-        &texture_desc,
-        null,
-    )) == gpu::INVALID_ARGUMENT);
     assert(state.texture_dedicated_calls == 0,
-        "null descriptors stop before dedicated backend mutation");
+        "no dedicated backend mutation happens before creation");
 
     DedicatedTexture created = gpu::create_dedicated_texture(
         &device,

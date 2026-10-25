@@ -1492,9 +1492,6 @@ fn void placed_texture_requirements_validate_and_release_storage() @test {
     assert(info.memory_class == gpu::MemoryClass.TEXTURE
         && !info.mapped && !info.coherent && !info.addressable,
         "texture memory exposes no generic mapping or address");
-    assert(@catch(gpu::get_allocation_span(&device, allocation))
-        == gpu::INVALID_ARGUMENT,
-        "texture memory cannot be borrowed as a generic data span");
 
     gpu::TextureHandle first = gpu::create_placed_texture(
         device:     &device,

@@ -102,7 +102,7 @@ fn vk::StridedDeviceAddressRegionKHR? lower_trace_region(
         return {};
     }
     if (region.span.size == 0) return gpu::INVALID_ARGUMENT~;
-    ResolvedSpan resolved = resolve_span(state, &region.span)!;
+    ResolvedSpan resolved = resolve_span(state, &region.span);
     if ((ulong)resolved.address == 0) {
         return gpu::INVALID_ARGUMENT~;
     }
@@ -170,7 +170,7 @@ fn ResolvedSpan? lower_trace_rays_indirect_args(
         state,
         args,
         gpu::TraceRaysIndirectCommand::size,
-    )!;
+    );
     return resolved;
 }
 
@@ -200,7 +200,7 @@ fn ResolvedSpan? lower_trace_rays_indirect2_args(
         state,
         args,
         gpu::TraceRaysIndirectCommand2::size,
-    )!;
+    );
     return resolved;
 }
 

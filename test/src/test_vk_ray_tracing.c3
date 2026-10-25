@@ -94,7 +94,7 @@ fn OwnedSpan? allocate_trace_span(
     defer catch (void)gpu::free_allocation(device, &allocation);
     return {
         .allocation = allocation,
-        .span       = gpu::get_allocation_span(device, allocation)!,
+        .span       = gpu::get_allocation_span(device, allocation),
     };
 }
 
@@ -351,19 +351,19 @@ fn OwnedSpan? create_functional_sbt(
     gpu::flush_mapped_span(device, sbt.span)!;
 
     table.ray_generation = {
-        .span   = sbt.span.checked_subspan(ray_generation_offset, stride)!,
+        .span   = sbt.span.subspan(ray_generation_offset, stride),
         .stride = stride,
     };
     table.miss = {
-        .span   = sbt.span.checked_subspan(miss_offset, 2 * stride)!,
+        .span   = sbt.span.subspan(miss_offset, 2 * stride),
         .stride = stride,
     };
     table.hit = {
-        .span   = sbt.span.checked_subspan(hit_offset, 2 * stride)!,
+        .span   = sbt.span.subspan(hit_offset, 2 * stride),
         .stride = stride,
     };
     table.callable = {
-        .span   = sbt.span.checked_subspan(callable_offset, stride)!,
+        .span   = sbt.span.subspan(callable_offset, stride),
         .stride = stride,
     };
     return sbt;

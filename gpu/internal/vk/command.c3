@@ -1453,16 +1453,12 @@ fn PreparedBufferCopy? lower_buffer_copy(
             state:          state,
             span:           &desc.src,
             required:       0,
-            operation:      "cmd_copy_buffer",
-            rejected_field: "BufferCopyDesc.src",
-        )!,
+        ),
         .dst = resolve_span_slot(
             state:          state,
             span:           &desc.dst,
             required:       0,
-            operation:      "cmd_copy_buffer",
-            rejected_field: "BufferCopyDesc.dst",
-        )!,
+        ),
     };
 }
 
@@ -1508,9 +1504,7 @@ fn PreparedBufferFill? lower_buffer_fill(
         state:          state,
         span:           &dst,
         required:       0,
-        operation:      "cmd_fill_buffer",
-        rejected_field: "dst",
-    )!;
+    );
     return {
         .span   = resolved,
         .value  = value,
@@ -1648,9 +1642,7 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
         state:          state,
         span:           &desc.src,
         required:       0,
-        operation:      "cmd_copy_buffer_to_texture",
-        rejected_field: "GpuSpan",
-    )!;
+    );
     return {
         .buffer         = buffer,
         .texture        = texture,
@@ -1687,9 +1679,7 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
         state:          state,
         span:           &desc.dst,
         required:       0,
-        operation:      "cmd_copy_texture_to_buffer",
-        rejected_field: "GpuSpan",
-    )!;
+    );
     return {
         .buffer         = buffer,
         .texture        = texture,
@@ -1845,7 +1835,7 @@ fn ResolvedSpan? lower_indirect_span(
     uint count,
 ) {
     usz required = gpu::internal::indirect_argument_bytes(arg_size, count)!;
-    ResolvedSpan resolved = resolve_span_slot(state, span, required)!;
+    ResolvedSpan resolved = resolve_span_slot(state, span, required);
     return resolved;
 }
 
@@ -2135,7 +2125,7 @@ fn ResolvedSpan? lower_generated_work_records(
     uint max_count,
 ) {
     usz required = gpu::internal::indirect_argument_bytes(record_size, max_count)!;
-    ResolvedSpan resolved = resolve_span_slot(state, records, required)!;
+    ResolvedSpan resolved = resolve_span_slot(state, records, required);
     return resolved;
 }
 

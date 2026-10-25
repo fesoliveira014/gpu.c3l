@@ -163,3 +163,72 @@ fn void device_context_desc_rules_reject_each_clause() @test {
     assert(!util::device_context_desc_valid(&queue_not_required));
     assert(!util::device_context_desc_valid(&surface_without_graphics));
 }
+
+fn void allocation_alignment_rule_accepts_zero_and_powers_of_two() @test {
+    assert(gpu::internal::allocation_alignment_valid(0), "zero selects the default");
+    assert(gpu::internal::allocation_alignment_valid(1));
+    assert(gpu::internal::allocation_alignment_valid(64));
+    assert(!gpu::internal::allocation_alignment_valid(3));
+    assert(!gpu::internal::allocation_alignment_valid(24));
+}
+
+fn void queue_access_shape_needs_known_bits() @test {
+    assert(gpu::internal::queue_access_shape_valid({ .compute }));
+    assert(gpu::internal::queue_access_shape_valid({ .graphics, .transfer }));
+    assert(!gpu::internal::queue_access_shape_valid({}), "empty access is invalid");
+    assert(!gpu::internal::queue_access_shape_valid((QueueRoles)0x80),
+        "unknown bits are invalid");
+}
+
+fn void texture_requirement_rules_follow_the_memory_class() @test {
+    TextureCompatibility compatibility = (TextureCompatibility)(((uint128)1 << 64) | 3);
+    TextureRequirements valid = {
+        .size          = 64,
+        .alignment     = 64,
+        .compatibility = compatibility,
+    };
+    TextureRequirements[1] one = { valid };
+    AllocationDesc texture_memory = {
+        .size                 = 128,
+        .memory_class         = MemoryClass.TEXTURE,
+        .texture_requirements = one[..],
+    };
+    assert(gpu::internal::texture_requirements_valid(&texture_memory));
+    assert(gpu::internal::allocation_covers_texture_requirements(&texture_memory));
+
+    AllocationDesc buffer_memory = { .size = 128, .memory_class = MemoryClass.CPU_WRITE };
+    assert(gpu::internal::texture_requirements_valid(&buffer_memory),
+        "a buffer class needs no requirements");
+    buffer_memory.texture_requirements = one[..];
+    assert(!gpu::internal::texture_requirements_valid(&buffer_memory),
+        "a buffer class takes no requirements");
+
+    AllocationDesc missing = { .size = 128, .memory_class = MemoryClass.TEXTURE };
+    assert(!gpu::internal::texture_requirements_valid(&missing),
+        "a TEXTURE class needs a requirement");
+
+    TextureRequirements zero_size = valid;
+    zero_size.size = 0;
+    TextureRequirements zero_alignment = valid;
+    zero_alignment.alignment = 0;
+    TextureRequirements odd_alignment = valid;
+    odd_alignment.alignment = 48;
+    TextureRequirements no_compatibility = valid;
+    no_compatibility.compatibility = (TextureCompatibility)0;
+    TextureRequirements[4] bad = { zero_size, zero_alignment, odd_alignment, no_compatibility };
+    foreach (i, &requirement : bad) {
+        TextureRequirements[1] only = { *requirement };
+        AllocationDesc desc = {
+            .size                 = 128,
+            .memory_class         = MemoryClass.TEXTURE,
+            .texture_requirements = only[..],
+        };
+        assert(!gpu::internal::texture_requirements_valid(&desc), "requirement %d is malformed", i);
+    }
+
+    AllocationDesc small = texture_memory;
+    small.size = 32;
+    assert(!gpu::internal::allocation_covers_texture_requirements(&small),
+        "the allocation must cover every requirement");
+}
+

@@ -1862,7 +1862,7 @@ fn bool run_real_sparse_bind_dimension(
     )!!;
     owns_upload = true;
     char[] upload_bytes =
-        gpu::get_span_mapping(device, upload.span)!!;
+        gpu::get_span_mapping(device, upload.span);
     foreach (i, &byte : upload_bytes) {
         *byte = (char)(((usz)i * 17 + 3) & 0x7f);
     }
@@ -1924,7 +1924,7 @@ fn bool run_real_sparse_bind_dimension(
     gpu::wait_completion(used, ulong::max)!!;
     gpu::invalidate_mapped_span(device, readback.span)!!;
     char[] readback_bytes =
-        gpu::get_span_mapping(device, readback.span)!!;
+        gpu::get_span_mapping(device, readback.span);
     foreach (i, byte : readback_bytes) {
         assert(byte == (char)(((usz)i * 17 + 3) & 0x7f),
             "bound sparse tile preserves uploaded bytes through readback");

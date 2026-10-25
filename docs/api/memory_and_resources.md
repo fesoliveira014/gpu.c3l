@@ -13,7 +13,7 @@ Destroy and update calls do not infer shader use or wait for completion.
 flowchart LR
     AD[AllocationDesc] -->|allocate_memory| A[GpuAllocation]
     A -->|get_allocation_span| S[GpuSpan]
-    S -->|checked_subspan| S2[GpuSpan]
+    S -->|subspan| S2[GpuSpan]
     S -->|get_span_mapping| M["char[]"]
     S -->|get_span_address| G[GpuAddress]
     TD[TextureDesc] -->|create_texture| T[TextureHandle]
@@ -46,6 +46,23 @@ gpu::AllocationInfo info = gpu::get_allocation_info(&device, allocation);
 | `GPU_PRIVATE` | no | yes | device-local buffers |
 | `TEXTURE` | no | no | backing for placed and sparse textures |
 
+`allocate_memory` and `allocate_mapped_memory` require:
+
+- `desc` is not null and `desc.size` is greater than 0;
+- `desc.memory_class` is a defined `MemoryClass`;
+- `desc.alignment` is zero or a power of two;
+- `desc.access` is nonzero, names only known queue roles, and names only
+  roles the device exposes (see `DeviceCaps.queues`);
+- `desc.texture_requirements` is empty unless the class is `TEXTURE`, and a
+  `TEXTURE` allocation has at least one requirement, each with a nonzero size,
+  a power-of-two alignment and the compatibility value returned by
+  `get_texture_requirements`, with `desc.size` covering every `size`; and
+- for `allocate_mapped_memory`, `desc.memory_class` is a host-mapped class
+  (not `GPU_PRIVATE` or `TEXTURE`).
+
+Texture requirements whose compatibility values share no memory type fault
+with `UNSUPPORTED_FEATURE`.
+
 `AllocationInfo` reports the actual `mapped`, `coherent`, `device_local`,
 and `addressable` properties. `CPU_WRITE_GPU_LOCAL` prefers a memory type
 that is both device-local and host-visible and falls back to host memory
@@ -60,18 +77,33 @@ bytes are the application's problem.
 ## Spans, mappings, addresses
 
 A `GpuSpan` is a non-owning byte range inside an allocation.
+`subspan`, `get_allocation_span`, `get_span_mapping` and `get_span_address`
+return values rather than faults.
 
 ```c3
-gpu::GpuSpan whole = gpu::get_allocation_span(&device, allocation)!;
-gpu::GpuSpan part  = whole.checked_subspan(256, 1024)!;   // bounds-checked
-gpu::GpuSpan fast  = whole.unchecked_subspan(256, 1024);  // caller proved bounds
+gpu::GpuSpan whole = gpu::get_allocation_span(&device, allocation);
+gpu::GpuSpan part  = whole.subspan(256, 1024);            // range is a contract
+gpu::GpuSpan fast  = whole.unchecked_subspan(256, 1024);  // no range or overflow rules
 
-char[] bytes = gpu::get_span_mapping(&device, part)!;      // CPU_WRITE / CPU_READ only
-gpu::GpuAddress address = gpu::get_span_address(&device, part)!;
+char[] bytes = gpu::get_span_mapping(&device, part);      // CPU_WRITE / CPU_READ only
+gpu::GpuAddress address = gpu::get_span_address(&device, part);
 
 gpu::MappedGpuSpan mapped = gpu::mapped_gpu_span(&device, part)!;  // span + bytes + address
 gpu::GpuAllocation owner = part.allocation();                      // token for free_allocation
 ```
+
+`subspan` requires `size` to be greater than 0 and `offset + size` not to
+exceed the parent span's `size`, and the new base offset not to overflow.
+`MappedGpuSpan.subspan` also requires `bytes.len` to equal `span.size` and the
+derived GPU address not to overflow. `unchecked_subspan` applies none of
+these rules.
+
+`get_allocation_span` requires a buffer allocation, never a `TEXTURE` one.
+`get_span_mapping`, `get_span_address`, `mapped_gpu_span`,
+`flush_mapped_span` and `invalidate_mapped_span` require a span with
+`size > 0` that lies within its buffer allocation; the mapping, mapped-span
+and visibility calls also require a host-mapped class. Spans from
+`get_allocation_span` and `subspan` satisfy these rules.
 
 `allocate_mapped_memory` allocates a mapped class and returns the same
 three views in one call; free it through `span.allocation()`:
@@ -423,7 +455,7 @@ fills an SBT.
 | Cause | Fault |
 |---|---|
 | bad range, alignment, descriptor, or limit | `INVALID_ARGUMENT` |
-| unsupported usage, format, or feature | `UNSUPPORTED_FEATURE` |
+| unsupported usage, format, or feature, or texture requirements with no shared memory type | `UNSUPPORTED_FEATURE` |
 | out of memory | `OUT_OF_HOST_MEMORY`, `OUT_OF_DEVICE_MEMORY` |
 | fixed table full | `SLOT_TABLE_FULL` |
 | heap full | `DESCRIPTOR_HEAP_FULL` |

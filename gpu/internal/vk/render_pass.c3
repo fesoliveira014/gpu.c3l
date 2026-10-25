@@ -715,7 +715,7 @@ fn PreparedIndexedDraw? lower_indexed_draw(
             state:      state,
             span:       &index_span,
             required:   required,
-        )!,
+        ),
         .vertex_root   = vertex_root,
         .fragment_root = fragment_root,
         .index_count   = index_count,
@@ -875,7 +875,7 @@ fn PreparedIndexedIndirectDraw? lower_indexed_indirect_draw(
             state:      state,
             span:       &index_span,
             required:   0,
-        )!,
+        ),
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
         .draw_count     = draw_count,
@@ -965,7 +965,7 @@ fn PreparedIndexedIndirectCountDraw? lower_indexed_indirect_count_draw(
             state:      state,
             span:       &index_span,
             required:   0,
-        )!,
+        ),
         .vertex_root    = vertex_root,
         .fragment_root  = fragment_root,
         .max_draw_count = max_draw_count,
@@ -1133,7 +1133,7 @@ fn PreparedGeneratedIndexedDraw? lower_generated_indexed_draw(
         state:      state,
         span:       &index_span,
         required:   0,
-    )!;
+    );
     return draw;
 }
 

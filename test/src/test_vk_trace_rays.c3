@@ -413,21 +413,10 @@ fn void indirect2_capability_rejects_before_argument_resolution() @test {
     assert(capture.pushes == 0 && capture.indirect2_traces == 0);
 }
 
-fn void indirect2_packet_requires_complete_range() @test {
+fn void indirect2_packet_resolves_exact_range() @test {
     TraceRaysFixture fixture;
     init_trace_rays_fixture(&fixture);
-    gpu::GpuSpan args = fixture_trace_indirect2_args(
-        &fixture,
-        0,
-        gpu::TraceRaysIndirectCommand2::size - 1,
-    );
-
-    assert(@catch(vk::lower_trace_rays_indirect2(
-        &fixture.record,
-        {},
-        args,
-    )) == gpu::INVALID_ARGUMENT);
-    args = fixture_trace_indirect2_args(&fixture);
+    gpu::GpuSpan args = fixture_trace_indirect2_args(&fixture);
     vk::PreparedTraceRaysIndirect2 prepared =
         vk::lower_trace_rays_indirect2(&fixture.record, {}, args)!!;
     assert(prepared.args.address == (gpu::GpuAddress)0x2000);
@@ -545,21 +534,6 @@ fn void indirect_trace_emits_pipeline_sbt_and_arguments() @test {
         ops:    &ops,
     )!!;
     assert(capture.matched && capture.indirect_traces == 1);
-}
-
-fn void indirect_trace_checks_argument_bounds() @test {
-    TraceRaysFixture fixture;
-    init_trace_rays_fixture(&fixture);
-    gpu::GpuSpan args = fixture_trace_args(&fixture);
-
-    args.size = gpu::TraceRaysIndirectCommand::size - 1;
-    assert(@catch(vk::lower_trace_rays_indirect(
-        &fixture.record,
-        {},
-        &fixture.table,
-        args,
-    )) == gpu::INVALID_ARGUMENT);
-
 }
 
 fn void indirect_trace_repeats() @test {

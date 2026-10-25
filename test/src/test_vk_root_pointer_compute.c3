@@ -378,8 +378,8 @@ fn void inline_root_payload_reaches_shader() @test {
         groups:      { (COUNT + INLINE_ROOT_WORKGROUP - 1) / INLINE_ROOT_WORKGROUP, 1, 1 },
         inline_root: gpu::@inline_root(&payload),
     )!!;
-    payload.input_gpu = test_span_address(&device, input.span.checked_subspan(COUNT / 2 * float::size, COUNT / 2 * float::size)!!);
-    payload.output_gpu = test_span_address(&device, output.span.checked_subspan(COUNT / 2 * float::size, COUNT / 2 * float::size)!!);
+    payload.input_gpu = test_span_address(&device, input.span.subspan(COUNT / 2 * float::size, COUNT / 2 * float::size));
+    payload.output_gpu = test_span_address(&device, output.span.subspan(COUNT / 2 * float::size, COUNT / 2 * float::size));
     gpu::cmd_dispatch(
         commands:    &commands,
         root:        test_span_address(&device, output.span),

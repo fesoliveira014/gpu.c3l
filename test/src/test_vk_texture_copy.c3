@@ -134,13 +134,13 @@ fn void copy_texture_moves_mip_between_textures() @test {
     copy_transition(&cmd, source, { .layout = gpu::TextureLayout.UNDEFINED }, copy_write_state());
     copy_transition(&cmd, dest, { .layout = gpu::TextureLayout.UNDEFINED }, copy_write_state());
     gpu::BufferTextureCopyDesc upload_mip0 = {
-        .src     = staging.span.checked_subspan(0, COPY_RGBA_MIP0_BYTES)!!,
+        .src     = staging.span.subspan(0, COPY_RGBA_MIP0_BYTES),
         .texture = source,
         .mip     = 0,
     };
     gpu::cmd_copy_buffer_to_texture(&cmd, &upload_mip0)!!;
     gpu::BufferTextureCopyDesc upload_mip1 = {
-        .src     = staging.span.checked_subspan(COPY_RGBA_MIP0_BYTES, COPY_RGBA_MIP1_BYTES)!!,
+        .src     = staging.span.subspan(COPY_RGBA_MIP0_BYTES, COPY_RGBA_MIP1_BYTES),
         .texture = source,
         .mip     = 1,
     };
@@ -233,10 +233,10 @@ fn void copy_texture_moves_block_compressed_tail_mips() @test {
     copy_transition(&cmd, dest, { .layout = gpu::TextureLayout.UNDEFINED }, copy_write_state());
     for (uint mip = 0; mip < COPY_BC_SOURCE_MIPS; mip++) {
         gpu::BufferTextureCopyDesc upload = {
-            .src     = staging.span.checked_subspan(
+            .src     = staging.span.subspan(
                 copy_bc_source_offset(mip),
                 COPY_BC_SOURCE_BLOCKS[mip] * COPY_BC_BLOCK_BYTES,
-            )!!,
+            ),
             .texture = source,
             .mip     = mip,
         };
@@ -258,10 +258,10 @@ fn void copy_texture_moves_block_compressed_tail_mips() @test {
     for (uint mip = 0; mip < COPY_BC_DEST_MIPS; mip++) {
         gpu::TextureBufferCopyDesc download = {
             .texture = dest,
-            .dst     = readback.span.checked_subspan(
+            .dst     = readback.span.subspan(
                 copy_bc_dest_offset(mip),
                 COPY_BC_SOURCE_BLOCKS[mip + COPY_BC_LEVEL_SHIFT] * COPY_BC_BLOCK_BYTES,
-            )!!,
+            ),
             .mip     = mip,
         };
         gpu::cmd_copy_texture_to_buffer(&cmd, &download)!!;

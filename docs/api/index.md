@@ -171,8 +171,8 @@ Methods: `GpuAllocation.is_valid`, `GpuAllocation.equals`,
 `AccelerationStructureHandle.is_valid`,
 `AccelerationStructureHandle.equals`, `AccelerationStructureView.is_valid`,
 `AccelerationStructureView.equals`, `AccelerationStructureIndex.is_valid`,
-`GpuSpan.unchecked_subspan`, `GpuSpan.checked_subspan`, `GpuSpan.allocation`,
-`MappedGpuSpan.checked_subspan`, `TextureCompatibility.is_valid`.
+`GpuSpan.unchecked_subspan`, `GpuSpan.subspan`, `GpuSpan.allocation`,
+`MappedGpuSpan.subspan`, `TextureCompatibility.is_valid`.
 
 Functions: `allocate_memory`, `allocate_mapped_memory`, `free_allocation`,
 `get_allocation_info`, `get_allocation_span`, `get_span_mapping`,

@@ -506,12 +506,11 @@ fn GpuSpan GpuSpan.unchecked_subspan(self, usz offset, usz size) {
    The returned view inherits the allocation lifetime.
    @param offset : "Byte offset relative to this span."
    @param size : "Nonzero byte size of the derived span."
-   @return "A non-owning subspan, or a recoverable range or overflow fault." *>
-fn GpuSpan? GpuSpan.checked_subspan(self, usz offset, usz size) {
-    if (size == 0 || !gpu::internal::range_fits(self.size, offset, size)) {
-        return INVALID_ARGUMENT~;
-    }
-    if (offset > usz::max - self.offset) return INVALID_ARGUMENT~;
+   @return "A non-owning subspan."
+   @require size > 0 : "size must be greater than 0"
+   @require offset <= self.size && size <= self.size - offset : "offset + size must not exceed the span size"
+   @require offset <= usz::max - self.offset : "offset must not overflow the span base offset" *>
+fn GpuSpan GpuSpan.subspan(self, usz offset, usz size) {
     return self.unchecked_subspan(offset, size);
 }
 
@@ -528,13 +527,14 @@ fn GpuAllocation GpuSpan.allocation(self) {
    `char`.
    @param offset : "Byte offset relative to this mapped span."
    @param size : "Nonzero byte size of the derived mapped span."
-   @return "A consistent non-owning mapped subspan, or a recoverable invalid-argument range, representation, or address-overflow fault." *>
-fn MappedGpuSpan? MappedGpuSpan.checked_subspan(self, usz offset, usz size) {
-    if (self.bytes.len != self.span.size) return INVALID_ARGUMENT~;
-    GpuSpan child = self.span.checked_subspan(offset, size)!;
-    if ((ulong)offset > ulong::max - (ulong)self.address) {
-        return INVALID_ARGUMENT~;
-    }
+   @return "A consistent non-owning mapped subspan."
+   @require self.bytes.len == self.span.size : "bytes.len must equal span.size"
+   @require size > 0 : "size must be greater than 0"
+   @require offset <= self.span.size && size <= self.span.size - offset : "offset + size must not exceed the span size"
+   @require offset <= usz::max - self.span.offset : "offset must not overflow the span base offset"
+   @require (ulong)offset <= ulong::max - (ulong)self.address : "offset must not overflow the mapped GPU address" *>
+fn MappedGpuSpan MappedGpuSpan.subspan(self, usz offset, usz size) {
+    GpuSpan child = self.span.unchecked_subspan(offset, size);
     return {
         .span    = child,
         .bytes   = self.bytes[offset : size],
@@ -557,7 +557,14 @@ fn bool TextureCompatibility.is_valid(self) {
    allocation and frees it with `free_allocation` after GPU use is quiescent.
    @param device : "Live device that will own the allocation."
    @param desc : "Borrowed size, memory-class, access, alignment, and debug-name description."
-   @return "An owning allocation token, or a recoverable invalid-argument, unsupported-feature, capacity, allocation, or backend fault." *>
+   @return "An owning allocation token, or a recoverable unsupported-feature, capacity, allocation, or backend fault."
+   @require desc != null : "desc must not be null"
+   @require desc.size > 0 : "desc.size must be greater than 0"
+   @require gpu::internal::memory_class_is_known(desc.memory_class) : "desc.memory_class must be a defined MemoryClass"
+   @require gpu::internal::allocation_alignment_valid(desc.alignment) : "desc.alignment must be zero or a power of two"
+   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles"
+   @require gpu::internal::texture_requirements_valid(desc) : "desc.texture_requirements must be empty unless desc.memory_class is TEXTURE, which needs at least one requirement with nonzero size, a power-of-two alignment and a complete compatibility value"
+   @require gpu::internal::allocation_covers_texture_requirements(desc) : "desc.size must cover every texture requirement" *>
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -609,10 +616,12 @@ fn AllocationInfo get_allocation_info(Device* device, GpuAllocation allocation) 
 
 <* Borrow the allocation's complete range.
    The returned non-owning span remains valid only while the allocation is live.
+   The allocation must not be texture memory (`MemoryClass.TEXTURE`); a
+   violation panics in safe builds.
    @param device : "Live device that owns the allocation."
-   @param allocation : "Allocation whose complete range is borrowed."
-   @return "A non-owning span, or a recoverable invalid-argument fault." *>
-fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
+   @param allocation : "Buffer allocation whose complete range is borrowed."
+   @return "A non-owning span." *>
+fn GpuSpan get_allocation_span(Device* device, GpuAllocation allocation) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
@@ -625,10 +634,13 @@ fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
 
 <* Borrow the CPU mapping for a live host-visible span.
    The slice inherits the allocation lifetime; callers synchronize CPU access.
+   The span must be nonempty, lie within its buffer allocation, and belong to a
+   host-mapped class; a violation panics in safe builds.
    @param device : "Live device that owns the span."
    @param span : "Non-owning host-visible allocation range."
-   @return "A borrowed mapped byte slice, or a recoverable mapping or range fault." *>
-fn char[]? get_span_mapping(Device* device, GpuSpan span) {
+   @return "A borrowed mapped byte slice."
+   @require span.size > 0 : "span.size must be greater than 0" *>
+fn char[] get_span_mapping(Device* device, GpuSpan span) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_span_mapping(operation.state, span);
@@ -636,10 +648,13 @@ fn char[]? get_span_mapping(Device* device, GpuSpan span) {
 
 <* Return the stable nonzero address of a live span.
    The address inherits the allocation lifetime.
+   The span must be nonempty and lie within its buffer allocation; a violation
+   panics in safe builds.
    @param device : "Live device that owns the span."
    @param span : "Non-owning allocation range."
-   @return "The span's GPU address, or a recoverable range fault." *>
-fn GpuAddress? get_span_address(Device* device, GpuSpan span) {
+   @return "The span's GPU address."
+   @require span.size > 0 : "span.size must be greater than 0" *>
+fn GpuAddress get_span_address(Device* device, GpuSpan span) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_span_address(operation.state, span);
@@ -648,14 +663,17 @@ fn GpuAddress? get_span_address(Device* device, GpuSpan span) {
 <* Borrow consistent CPU and GPU views of a live host-visible span.
    The mapping and address are independent public queries; the caller must keep
    the owning allocation live for the complete call and result lifetime. The
-   result performs no synchronization.
+   result performs no synchronization. The span must be nonempty, lie within
+   its buffer allocation, and belong to a host-mapped class; a violation
+   panics in safe builds.
    @param device : "Live device that owns the span."
    @param span : "Non-owning host-visible allocation range."
-   @return "Consistent borrowed views, or a recoverable fault from the public mapping or address query." *>
+   @return "Consistent borrowed views, or a recoverable backend fault if the mapping does not cover the span."
+   @require span.size > 0 : "span.size must be greater than 0" *>
 fn MappedGpuSpan? mapped_gpu_span(Device* device, GpuSpan span) {
-    char[] bytes = get_span_mapping(device, span)!;
+    char[] bytes = get_span_mapping(device, span);
     if (bytes.len != span.size) return BACKEND_ERROR~;
-    GpuAddress address = get_span_address(device, span)!;
+    GpuAddress address = get_span_address(device, span);
     return {
         .span    = span,
         .bytes   = bytes,
@@ -664,26 +682,31 @@ fn MappedGpuSpan? mapped_gpu_span(Device* device, GpuSpan span) {
 }
 
 <* Allocate a mapped class and borrow its complete span, mapping, and address.
-   A class without a host mapping faults before any allocation. Free with
-   `free_allocation` on `span.allocation()`.
+   `desc.memory_class` must be a host-mapped class, never `GPU_PRIVATE` or
+   `TEXTURE`. Free with `free_allocation` on `span.allocation()`.
    @param device : "Live device that will own the allocation."
    @param desc : "Borrowed allocation description with a mapped memory class."
-   @return "Consistent borrowed views of the new allocation, or a recoverable invalid-argument, access, or allocation fault. A failed view frees the allocation and returns the view fault; a rollback that cannot free the allocation is unrecoverable and panics after reporting the allocation as abandoned." *>
+   @return "Consistent borrowed views of the new allocation, or a recoverable unsupported-feature, access, or allocation fault. A failed view frees the allocation and returns the view fault; a rollback that cannot free the allocation is unrecoverable and panics after reporting the allocation as abandoned."
+   @require desc != null : "desc must not be null"
+   @require desc.size > 0 : "desc.size must be greater than 0"
+   @require desc.memory_class != MemoryClass.GPU_PRIVATE && desc.memory_class != MemoryClass.TEXTURE : "desc.memory_class must be a host-mapped class"
+   @require gpu::internal::memory_class_is_known(desc.memory_class) : "desc.memory_class must be a defined MemoryClass"
+   @require gpu::internal::allocation_alignment_valid(desc.alignment) : "desc.alignment must be zero or a power of two"
+   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles"
+   @require desc.texture_requirements.len == 0 : "desc.texture_requirements must be empty for a host-mapped class" *>
 fn MappedGpuSpan? allocate_mapped_memory(Device* device, AllocationDesc* desc) {
-    if (desc == null) return INVALID_ARGUMENT~;
-    if (desc.memory_class == MemoryClass.GPU_PRIVATE
-        || desc.memory_class == MemoryClass.TEXTURE) {
-        return INVALID_ARGUMENT~;
-    }
     return gpu::internal::allocate_mapped_allocation(device, desc);
 }
 
 <* Make CPU writes to a live mapped allocation range visible to the GPU.
    Required unless `AllocationInfo.coherent` is true; coherent ranges are
-   no-ops. This call does not submit or wait.
+   no-ops. This call does not submit or wait. The span must be nonempty, lie
+   within its buffer allocation, and belong to a host-mapped class; a
+   violation panics in safe builds.
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose CPU writes become visible."
-   @return "Success, or a recoverable mapping or range fault." *>
+   @return "Success, or a recoverable backend fault."
+   @require span.size > 0 : "span.size must be greater than 0" *>
 fn void? flush_mapped_span(Device* device, GpuSpan span) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -697,10 +720,13 @@ fn void? flush_mapped_span(Device* device, GpuSpan span) {
 
 <* After the relevant GPU completion point, make its writes visible to CPU
    reads. Required unless `AllocationInfo.coherent` is true; coherent ranges
-   are no-ops. This call does not wait.
+   are no-ops. This call does not wait. The span must be nonempty, lie within
+   its buffer allocation, and belong to a host-mapped class; a violation
+   panics in safe builds.
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose GPU writes become visible."
-   @return "Success, or a recoverable mapping or range fault." *>
+   @return "Success, or a recoverable backend fault."
+   @require span.size > 0 : "span.size must be greater than 0" *>
 fn void? invalidate_mapped_span(Device* device, GpuSpan span) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -821,7 +847,7 @@ fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* de
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    gpu::internal::validate_queue_access(&operation, desc.access)!;
+    gpu::internal::validate_queue_access(&operation, desc.access);
     return gpu::internal::vk::vk_get_texture_requirements(operation.state, desc);
 }
 
@@ -836,7 +862,7 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    gpu::internal::validate_queue_access(&operation, desc.access)!;
+    gpu::internal::validate_queue_access(&operation, desc.access);
     TextureHandle texture =
         gpu::internal::vk::vk_create_texture(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
@@ -859,7 +885,7 @@ fn TextureHandle? create_placed_texture(
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    gpu::internal::validate_queue_access(&operation, desc.access)!;
+    gpu::internal::validate_queue_access(&operation, desc.access);
     gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
@@ -881,7 +907,13 @@ fn TextureHandle? create_placed_texture(
    @param device : "Live device that will own both resources."
    @param desc : "Borrowed texture description."
    @param allocation_desc : "Borrowed compatible dedicated-allocation description."
-   @return "The owning texture and allocation pair, or a recoverable validation, support, capacity, or allocation fault." *>
+   @return "The owning texture and allocation pair, or a recoverable validation, support, capacity, or allocation fault."
+   @require allocation_desc != null : "allocation_desc must not be null"
+   @require allocation_desc.size > 0 : "allocation_desc.size must be greater than 0"
+   @require gpu::internal::allocation_alignment_valid(allocation_desc.alignment) : "allocation_desc.alignment must be zero or a power of two"
+   @require gpu::internal::queue_access_shape_valid(allocation_desc.access) : "allocation_desc.access must be nonzero and name only known queue roles"
+   @require gpu::internal::texture_requirements_valid(allocation_desc) : "allocation_desc.texture_requirements must be nonempty with nonzero sizes, power-of-two alignments and complete compatibility values"
+   @require gpu::internal::allocation_covers_texture_requirements(allocation_desc) : "allocation_desc.size must cover every texture requirement" *>
 fn DedicatedTexture? create_dedicated_texture(Device* device, TextureDesc* desc, AllocationDesc* allocation_desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -890,15 +922,15 @@ fn DedicatedTexture? create_dedicated_texture(Device* device, TextureDesc* desc,
         || allocation_desc.memory_class != MemoryClass.TEXTURE) {
         return INVALID_ARGUMENT~;
     }
-    gpu::internal::validate_queue_access(&operation, desc.access)!;
-    gpu::internal::validate_queue_access(&operation, allocation_desc.access)!;
+    gpu::internal::validate_queue_access(&operation, desc.access);
+    gpu::internal::validate_queue_access(&operation, allocation_desc.access);
     if (!gpu::internal::queue_roles_are_subset(desc.access, allocation_desc.access)) {
         return INVALID_ARGUMENT~;
     }
     AllocationDesc normalized = *allocation_desc;
     normalized.alignment = gpu::internal::normalized_allocation_alignment(
         allocation_desc.alignment,
-    )!;
+    );
     gpu::internal::validate_texture_allocation(
         operation:       &operation,
         desc:            allocation_desc,
@@ -1081,7 +1113,7 @@ fn TextureHandle? create_sparse_texture(Device* device, TextureDesc* desc) {
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     if (desc == null) return INVALID_ARGUMENT~;
-    gpu::internal::validate_queue_access(&operation, desc.access)!;
+    gpu::internal::validate_queue_access(&operation, desc.access);
     TextureHandle texture =
         gpu::internal::vk::vk_create_sparse_texture(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);

@@ -68,7 +68,7 @@ fn UploadStorage? create_upload_storage(
     };
     gpu::GpuAllocation allocation = gpu::allocate_memory(device, &desc)!;
     defer catch (void)gpu::free_allocation(device, &allocation);
-    gpu::GpuSpan span = gpu::get_allocation_span(device, allocation)!;
+    gpu::GpuSpan span = gpu::get_allocation_span(device, allocation);
     return { .allocation = allocation, .span = span };
 }
 
@@ -92,7 +92,7 @@ fn void print_upload_adapter(gpu::Device* device) {
 }
 
 fn void record_upload_generation(UploadWorkerArgs* args, uint generation) {
-    char[] mapping = gpu::get_span_mapping(args.device, args.upload.span)!!;
+    char[] mapping = gpu::get_span_mapping(args.device, args.upload.span);
     for (usz i = 0; i < mapping.len; i++) {
         mapping[i] = (char)((i
             + (usz)args.worker_index * 31

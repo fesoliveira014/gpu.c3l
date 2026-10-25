@@ -192,7 +192,7 @@ gpu::flush_mapped_span(&device, root_span)!;
 ```
 
 Alignment: the macros use the extension default of 16-byte reference
-alignment. A whole allocation is 16-aligned, but a `checked_subspan` is not.
+alignment. A whole allocation is 16-aligned, but a `subspan` is not.
 For a single record at a smaller offset, declare the block yourself with
 `buffer_reference_align`. Array accesses use the element's own alignment and
 are unaffected.

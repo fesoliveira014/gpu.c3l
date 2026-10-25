@@ -460,9 +460,7 @@ fn LoweredTimestampResolve? lower_timestamp_resolve(
         state:          record.device_state,
         span:           &destination,
         required:       required,
-        operation:      "cmd_resolve_timestamps",
-        rejected_field: "dst",
-    )!;
+    );
     return {
         .pool             = slot,
         .first            = first,

@@ -349,6 +349,10 @@ fn bool queue_access_intersects(
         && ((uint)access & (uint)queue_roles) != 0;
 }
 
+fn bool queue_access_shape_valid(QueueRoles access) @private {
+    return (uint)access != 0 && queue_roles_are_known(access);
+}
+
 fn bool queue_access_is_valid(
     gpu::internal::DeviceOperation* operation,
     QueueRoles access,
@@ -360,13 +364,18 @@ fn bool queue_access_is_valid(
         && queue_roles_are_subset(access, selected_queue_role_mask(operation));
 }
 
-fn void? validate_queue_access(
+fn void validate_queue_access(
     gpu::internal::DeviceOperation* operation,
     QueueRoles access,
 ) @private {
-    if (!queue_access_is_valid(operation, access)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        queue_access_shape_valid(access),
+        "access must be nonzero and name only known queue roles"
+    );
+    assert(
+        queue_roles_are_subset(access, selected_queue_role_mask(operation)),
+        "access must name only queue roles the device selected"
+    );
 }
 
 fn void validate_selected_queue_kind(

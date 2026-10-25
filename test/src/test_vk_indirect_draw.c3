@@ -1359,7 +1359,7 @@ fn void indirect_dispatch_executes_gpu_counts() @test {
     )!!;
     defer free_owned_span(&device, &scratch_owned)!!;
     gpu::GpuSpan scratch = scratch_owned.span;
-    gpu::GpuSpan dispatch_args = scratch.checked_subspan(16, gpu::DispatchIndirectCommand::size)!!;
+    gpu::GpuSpan dispatch_args = scratch.subspan(16, gpu::DispatchIndirectCommand::size);
 
     OwnedSpan build_root_owned = allocate_owned_span(
         device:       &device,
@@ -1550,8 +1550,8 @@ fn void count_buffer_limits_draws() @test {
     count_values[0] = 0;
     count_values[1] = 1;
     gpu::flush_mapped_span(&device, counts)!!;
-    gpu::GpuSpan count_zero = counts.checked_subspan(0, 4)!!;
-    gpu::GpuSpan count_one = counts.checked_subspan(4, 4)!!;
+    gpu::GpuSpan count_zero = counts.subspan(0, 4);
+    gpu::GpuSpan count_one = counts.subspan(4, 4);
 
     gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
@@ -1643,80 +1643,3 @@ fn void discard_consumes_active_render_pass_recording() @test {
     destroy_test_device(&device)!!;
 }
 
-fn void indirect_argument_validation() @test {
-    gpu::Device device = make_ind_device();
-    defer destroy_test_device(&device)!!;
-    IndDrawCtx ctx = make_ind_draw_ctx(&device);
-    defer destroy_ind_draw_ctx(&device, &ctx);
-    gpu::TextureHandle target = make_ind_target(&device);
-    defer gpu::destroy_texture(&device, target)!!;
-    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
-        &device,
-        target,
-    )!!;
-    defer destroy_test_attachment_view(&device, &target_view)!!;
-
-    OwnedSpan verts_owned = allocate_owned_span(
-        device:       &device,
-        size:         3 * 16,
-        memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .graphics },
-        debug_name:   "validation_vertices",
-    )!!;
-    defer free_owned_span(&device, &verts_owned)!!;
-    gpu::GpuSpan verts_span = verts_owned.span;
-    write_triangle_verts(&device, &verts_span);
-    gpu::flush_mapped_span(&device, verts_span)!!;
-    OwnedSpan frag_owned = allocate_owned_span(
-        device:       &device,
-        size:         16,
-        memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .graphics },
-        debug_name:   "validation_fragment_root",
-    )!!;
-    defer free_owned_span(&device, &frag_owned)!!;
-    gpu::GpuSpan frag_span = frag_owned.span;
-    OwnedSpan args_owned = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .graphics },
-        debug_name:   "validation_indirect_args",
-    )!!;
-    defer free_owned_span(&device, &args_owned)!!;
-    gpu::GpuSpan args_span = args_owned.span;
-
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
-    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
-    defer gpu::destroy_command_allocator(&command_allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-    record_target_to_attach(&cmd, target);
-    gpu::ColorTargetDesc[1] colors = {{
-        .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE,
-    }};
-    gpu::RenderPassDesc pass = { .colors = colors[..], .width = IND_RT, .height = IND_RT };
-    gpu::GraphicsState graphics =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
-    gpu::ColorTargetState[1] color_targets = {{
-        .write_mask = gpu::COLOR_WRITE_ALL,
-    }};
-    graphics.color = { .targets = color_targets[..] };
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    bind_test_graphics_pipeline(&cmd, ctx.pipeline);
-    gpu::cmd_set_graphics_state(&cmd, &graphics)!!;
-
-    bind_test_graphics_pipeline(&cmd, ctx.pipeline);
-    fault overrun = @catch(gpu::cmd_draw_indirect(
-        commands:      &cmd,
-        vertex_root:   test_span_address(&device, verts_span),
-        fragment_root: test_span_address(&device, frag_span),
-        args:          args_span,
-        draw_count:    5,
-    ));
-    assert(overrun == gpu::INVALID_ARGUMENT, "draw_count past the span faults INVALID_ARGUMENT");
-
-    gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-    defer discard_test_executable(&cmd_executable)!!;
-}

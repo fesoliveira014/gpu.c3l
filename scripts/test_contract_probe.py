@@ -20,6 +20,7 @@ PANIC_CASES = {
     "null_runtime_desc": "desc must not be null",
     "adapter_index": "index must be less than the adapter count",
     "queue_role_not_exposed": "kind must be a queue role the device exposes",
+    "subspan_out_of_range": "offset + size must not exceed the span size",
 }
 
 

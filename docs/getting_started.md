@@ -247,8 +247,8 @@ gpu::GpuAllocation root_allocation = root.span.allocation();
 defer (void)gpu::free_allocation(&device, &root_allocation);
 
 DoublerRoot* record = (DoublerRoot*)root.bytes.ptr;
-record.input_gpu  = gpu::get_span_address(&device, input.span)!;
-record.output_gpu = gpu::get_span_address(&device, output.span)!;
+record.input_gpu  = gpu::get_span_address(&device, input.span);
+record.output_gpu = gpu::get_span_address(&device, output.span);
 record.count      = COUNT;
 gpu::flush_mapped_span(&device, root.span)!;
 ```

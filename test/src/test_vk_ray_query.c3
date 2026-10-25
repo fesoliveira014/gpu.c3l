@@ -190,7 +190,7 @@ fn OwnedSpan? allocate_ray_query_span(
     defer catch (void)gpu::free_allocation(device, &allocation);
     return {
         .allocation = allocation,
-        .span = gpu::get_allocation_span(device, allocation)!,
+        .span = gpu::get_allocation_span(device, allocation),
     };
 }
 
@@ -350,10 +350,10 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
         {
             .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
             .triangles = {
-                .vertices = vertices.span.checked_subspan(
+                .vertices = vertices.span.subspan(
                     0,
                     9 * float::size,
-                )!!,
+                ),
                 .vertex_stride = 3 * float::size,
                 .vertex_count = 3,
                 .primitive_count = 1,
@@ -362,10 +362,10 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
         {
             .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
             .triangles = {
-                .vertices = vertices.span.checked_subspan(
+                .vertices = vertices.span.subspan(
                     9 * float::size,
                     9 * float::size,
-                )!!,
+                ),
                 .vertex_stride = 3 * float::size,
                 .vertex_count = 3,
                 .indices = indices_u16.span,
@@ -375,10 +375,10 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
         {
             .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
             .triangles = {
-                .vertices = vertices.span.checked_subspan(
+                .vertices = vertices.span.subspan(
                     18 * float::size,
                     9 * float::size,
-                )!!,
+                ),
                 .vertex_stride = 3 * float::size,
                 .vertex_count = 3,
                 .indices = indices_u32.span,

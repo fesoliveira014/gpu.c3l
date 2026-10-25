@@ -13,7 +13,7 @@ struct ResolvedSpan {
     gpu::GpuAddress   address;
 }
 
-fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
+fn ResolvedSpan resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
     if (state == null || span == null) abort("gpu: corrupt GpuSpan");
 
     if (span.owner != state.allocations.owner) abort("gpu: foreign GpuSpan");
@@ -23,26 +23,29 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
         .generation = span.generation,
     };
     AllocationSlot* allocation_slot = state.allocations.get(allocation);
-    if (allocation_slot.texture_memory) return gpu::INVALID_ARGUMENT~;
+    assert(!allocation_slot.texture_memory, "span must not reference a TEXTURE allocation");
     BufferSlot* slot = &allocation_slot.backing;
     usz offset = span.offset;
 
-    if (span.size == 0) return gpu::INVALID_ARGUMENT~;
-    if (!gpu::internal::range_fits(slot.size, offset, span.size)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(span.size > 0, "span.size must be greater than 0");
+    assert(
+        gpu::internal::range_fits(slot.size, offset, span.size),
+        "span must lie within its allocation"
+    );
     void* mapping;
     if (slot.cpu_base != null) {
-        if ((uptr)offset > uptr::max - (uptr)slot.cpu_base) {
-            return gpu::INVALID_ARGUMENT~;
-        }
+        assert(
+            (uptr)offset <= uptr::max - (uptr)slot.cpu_base,
+            "mapped span pointer must not overflow"
+        );
         mapping = (char*)slot.cpu_base + offset;
     }
     gpu::GpuAddress address;
     if ((ulong)slot.gpu_base != 0) {
-        if ((ulong)offset > ulong::max - (ulong)slot.gpu_base) {
-            return gpu::INVALID_ARGUMENT~;
-        }
+        assert(
+            (ulong)offset <= ulong::max - (ulong)slot.gpu_base,
+            "span GPU address must not overflow"
+        );
         address = (gpu::GpuAddress)((ulong)slot.gpu_base + (ulong)offset);
     }
     return {
@@ -55,60 +58,28 @@ fn ResolvedSpan? resolve_span(VkDeviceState* state, gpu::GpuSpan* span) {
     };
 }
 
-fn char[]? resolved_span_mapping(ResolvedSpan* span) {
-    if (span == null || span.mapping == null || span.size == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+fn char[] resolved_span_mapping(ResolvedSpan* span) {
+    assert(span.mapping != null, "span's allocation must be host-mapped");
     return ((char*)span.mapping)[:span.size];
 }
 
-fn gpu::GpuAddress? resolved_span_address(ResolvedSpan* span) {
-    if (span == null || (ulong)span.address == 0) return gpu::INVALID_ARGUMENT~;
+fn gpu::GpuAddress resolved_span_address(ResolvedSpan* span) {
+    assert((ulong)span.address != 0, "span must have a GPU address");
     return span.address;
 }
 
-fn gpu::DebugResourceKind span_resource_kind(
-    VkDeviceState* state,
-    gpu::GpuSpan* span,
-) {
-    if (span != null && span.owner == state.allocations.owner) {
-        return gpu::DebugResourceKind.ALLOCATION;
-    }
-    return gpu::DebugResourceKind.GPU_SPAN;
-}
-
-fn ResolvedSpan? resolve_span_slot(
+fn ResolvedSpan resolve_span_slot(
     VkDeviceState* state,
     gpu::GpuSpan* span,
     usz required,
-    ZString operation = null,
-    ZString rejected_field = null,
 ) {
-    ResolvedSpan? result = resolve_span(state, span);
-    if (catch span_fault = result) {
-        if (operation == null) return span_fault~;
-        gpu::GpuAllocation allocation = {
-            .owner      = span.owner,
-            .index      = span.index,
-            .generation = span.generation,
-        };
-        AllocationSlot* slot = state.allocations.find(allocation);
-        return report_contract_failure(
-            state:               state,
-            operation:           operation,
-            public_fault:        span_fault,
-            resource_kind:       span_resource_kind(state, span),
-            has_public_identity: true,
-            index:               span.index,
-            generation:          span.generation,
-            debug_name:          slot != null ? slot_name(&slot.backing.debug_name[0]) : null,
-            rejected_field:      rejected_field,
-            invariant:           "span range must fit its live owner",
-            backend_text:        null,
-        )~;
-    }
-    ResolvedSpan resolved = result;
-    if (required > resolved.size) return gpu::INVALID_ARGUMENT~;
+    ResolvedSpan resolved = resolve_span(state, span);
+    assert(
+        required <= resolved.size,
+        "span.size must cover the bytes required by the call (%d required, %d given)",
+        required,
+        resolved.size
+    );
     return resolved;
 }
 

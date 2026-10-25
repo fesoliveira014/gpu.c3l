@@ -10,11 +10,6 @@ fn void null_descriptor_arguments_fault_without_backend_dereference() @test {
     defer destroy_test_device(&device)!!;
 
     assert(
-        @catch(gpu::allocate_memory(&device, (gpu::AllocationDesc*)null))
-            == gpu::INVALID_ARGUMENT,
-        "allocate_memory rejects a null descriptor"
-    );
-    assert(
         @catch(gpu::supports_texture_desc(&device, (gpu::TextureDesc*)null))
             == gpu::INVALID_ARGUMENT,
         "supports_texture_desc rejects a null descriptor"

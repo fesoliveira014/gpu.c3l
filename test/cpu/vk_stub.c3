@@ -1362,16 +1362,17 @@ fn gpu::AllocationInfo vk_get_allocation_info(
     };
 }
 
-fn gpu::GpuSpan? vk_get_allocation_span(
+fn gpu::GpuSpan vk_get_allocation_span(
     VkDeviceState* state,
     gpu::GpuAllocation allocation,
 ) {
     if (!state.allocation_live || allocation != state.allocation) {
         abort("gpu: stale GpuAllocation");
     }
-    if (state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state.allocation_desc.memory_class != gpu::MemoryClass.TEXTURE,
+        "allocation must not be a TEXTURE allocation"
+    );
     return {
         .owner      = allocation.owner,
         .index      = allocation.index,
@@ -1380,29 +1381,34 @@ fn gpu::GpuSpan? vk_get_allocation_span(
     };
 }
 
-fn char[]? vk_get_span_mapping(VkDeviceState* state, gpu::GpuSpan span) {
+fn char[] vk_get_span_mapping(VkDeviceState* state, gpu::GpuSpan span) {
     if (!state.allocation_live || span.owner != state.allocation.owner
         || span.index != state.allocation.index
         || span.generation != state.allocation.generation) {
         abort("gpu: stale GpuSpan");
     }
-    if (span.size == 0
-        || state.allocation_desc.memory_class == gpu::MemoryClass.GPU_PRIVATE
-        || state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (state.mapping_unavailable) return gpu::BACKEND_ERROR~;
-    if (!gpu::internal::range_fits(
-        state.allocation_desc.size,
-        span.offset,
-        span.size,
-    )) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(span.size > 0, "span.size must be greater than 0");
+    assert(
+        state.allocation_desc.memory_class != gpu::MemoryClass.TEXTURE,
+        "span must not reference a TEXTURE allocation"
+    );
+    assert(
+        gpu::internal::range_fits(
+            state.allocation_desc.size,
+            span.offset,
+            span.size,
+        ),
+        "span must lie within its allocation"
+    );
+    assert(
+        state.allocation_desc.memory_class != gpu::MemoryClass.GPU_PRIVATE,
+        "span's allocation must be host-mapped"
+    );
+    if (state.mapping_unavailable) return state.allocation_mapping[0:0];
     return state.allocation_mapping[span.offset:span.size];
 }
 
-fn gpu::GpuAddress? vk_get_span_address(
+fn gpu::GpuAddress vk_get_span_address(
     VkDeviceState* state,
     gpu::GpuSpan span,
 ) {
@@ -1411,27 +1417,31 @@ fn gpu::GpuAddress? vk_get_span_address(
         || span.generation != state.allocation.generation) {
         abort("gpu: stale GpuSpan");
     }
-    if (span.size == 0
-        || state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE
-        || !gpu::internal::range_fits(
+    assert(span.size > 0, "span.size must be greater than 0");
+    assert(
+        state.allocation_desc.memory_class != gpu::MemoryClass.TEXTURE,
+        "span must not reference a TEXTURE allocation"
+    );
+    assert(
+        gpu::internal::range_fits(
             state.allocation_desc.size,
             span.offset,
             span.size,
-        )) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+        ),
+        "span must lie within its allocation"
+    );
     return (gpu::GpuAddress)(0x1000 + span.offset);
 }
 
 fn void? vk_flush_mapped_span(VkDeviceState* state, gpu::GpuSpan span) {
     state.allocation_visibility_entries++;
-    (void)vk_get_span_mapping(state, span)!;
+    (void)vk_get_span_mapping(state, span);
     state.allocation_flush_calls++;
 }
 
 fn void? vk_invalidate_mapped_span(VkDeviceState* state, gpu::GpuSpan span) {
     state.allocation_visibility_entries++;
-    (void)vk_get_span_mapping(state, span)!;
+    (void)vk_get_span_mapping(state, span);
     state.allocation_invalidate_calls++;
 }
 

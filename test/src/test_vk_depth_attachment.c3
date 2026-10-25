@@ -1141,8 +1141,8 @@ fn void depth_bias_shifts_stored_depth() @test {
     OwnedSpan readback = make_readback(&device, DP_DEPTH_BYTES * 2);
     defer free_owned_span(&device, &readback)!!;
     gpu::GpuSpan rb = readback.span;
-    gpu::GpuSpan rb_plain = rb.checked_subspan(0, DP_DEPTH_BYTES)!!;
-    gpu::GpuSpan rb_biased = rb.checked_subspan(DP_DEPTH_BYTES, DP_DEPTH_BYTES)!!;
+    gpu::GpuSpan rb_plain = rb.subspan(0, DP_DEPTH_BYTES);
+    gpu::GpuSpan rb_biased = rb.subspan(DP_DEPTH_BYTES, DP_DEPTH_BYTES);
     OwnedSpan verts_owned = write_tri(&device, NEAR_Z);
     defer free_owned_span(&device, &verts_owned)!!;
     gpu::GpuSpan verts = verts_owned.span;

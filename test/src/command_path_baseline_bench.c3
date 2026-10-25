@@ -83,7 +83,7 @@ fn BenchSpan? allocate_bench_span(
     defer catch (void)gpu::free_allocation(device, &allocation);
     return {
         .allocation = allocation,
-        .span       = gpu::get_allocation_span(device, allocation)!,
+        .span       = gpu::get_allocation_span(device, allocation),
     };
 }
 
@@ -345,22 +345,22 @@ fn EquivalenceResult execute_dispatch_equivalence(
     defer free_bench_span(device, &public_root)!!;
 
     float* input_values =
-        (float*)gpu::get_span_mapping(device, input.span)!!.ptr;
+        (float*)gpu::get_span_mapping(device, input.span).ptr;
     for (uint i = 0; i < COMMAND_PATH_EQUIVALENCE_ELEMENTS; i++) {
         input_values[i] = (float)(i + 1);
     }
     ComputeRoot* direct_data =
-        (ComputeRoot*)gpu::get_span_mapping(device, direct_root.span)!!.ptr;
+        (ComputeRoot*)gpu::get_span_mapping(device, direct_root.span).ptr;
     *direct_data = {
-        .input_gpu  = gpu::get_span_address(device, input.span)!!,
-        .output_gpu = gpu::get_span_address(device, direct_output.span)!!,
+        .input_gpu  = gpu::get_span_address(device, input.span),
+        .output_gpu = gpu::get_span_address(device, direct_output.span),
         .count      = COMMAND_PATH_EQUIVALENCE_ELEMENTS,
     };
     ComputeRoot* public_data =
-        (ComputeRoot*)gpu::get_span_mapping(device, public_root.span)!!.ptr;
+        (ComputeRoot*)gpu::get_span_mapping(device, public_root.span).ptr;
     *public_data = {
-        .input_gpu  = gpu::get_span_address(device, input.span)!!,
-        .output_gpu = gpu::get_span_address(device, public_output.span)!!,
+        .input_gpu  = gpu::get_span_address(device, input.span),
+        .output_gpu = gpu::get_span_address(device, public_output.span),
         .count      = COMMAND_PATH_EQUIVALENCE_ELEMENTS,
     };
     gpu::flush_mapped_span(device, input.span)!!;
@@ -396,12 +396,12 @@ fn EquivalenceResult execute_dispatch_equivalence(
     gpu::Vec3u groups = { 1, 1, 1 };
     vk::command_path_direct_dispatch(
         &native,
-        gpu::get_span_address(device, direct_root.span)!!,
+        gpu::get_span_address(device, direct_root.span),
         groups,
     );
     gpu::cmd_dispatch(
         &library,
-        gpu::get_span_address(device, public_root.span)!!,
+        gpu::get_span_address(device, public_root.span),
         groups,
     )!!;
     gpu::Barrier to_host = {
@@ -420,9 +420,9 @@ fn EquivalenceResult execute_dispatch_equivalence(
     gpu::invalidate_mapped_span(device, public_output.span)!!;
 
     float* direct_values =
-        (float*)gpu::get_span_mapping(device, direct_output.span)!!.ptr;
+        (float*)gpu::get_span_mapping(device, direct_output.span).ptr;
     float* public_values =
-        (float*)gpu::get_span_mapping(device, public_output.span)!!.ptr;
+        (float*)gpu::get_span_mapping(device, public_output.span).ptr;
     EquivalenceResult result;
     for (uint i = 0; i < COMMAND_PATH_EQUIVALENCE_ELEMENTS; i++) {
         float expected = (float)(i + 1) * 2.0f;
@@ -488,7 +488,7 @@ fn EquivalenceResult execute_copy_equivalence(
     defer free_bench_span(device, &public_output)!!;
 
     char* source_values =
-        (char*)gpu::get_span_mapping(device, source.span)!!.ptr;
+        (char*)gpu::get_span_mapping(device, source.span).ptr;
     for (uint i = 0; i < COMMAND_PATH_EQUIVALENCE_ELEMENTS; i++) {
         source_values[i] = (char)(i + 1);
     }
@@ -531,9 +531,9 @@ fn EquivalenceResult execute_copy_equivalence(
     gpu::invalidate_mapped_span(device, public_output.span)!!;
 
     char* direct_values =
-        (char*)gpu::get_span_mapping(device, direct_output.span)!!.ptr;
+        (char*)gpu::get_span_mapping(device, direct_output.span).ptr;
     char* public_values =
-        (char*)gpu::get_span_mapping(device, public_output.span)!!.ptr;
+        (char*)gpu::get_span_mapping(device, public_output.span).ptr;
     EquivalenceResult result;
     for (uint i = 0; i < COMMAND_PATH_EQUIVALENCE_ELEMENTS; i++) {
         assert(direct_values[i] == source_values[i]);
@@ -559,8 +559,8 @@ fn OperationSamples measure_inline_recording(
     for (uint i = 0; i < payload.len; i++) payload[i] = (char)i;
     char[] inline_root = payload[:payload_size];
     gpu::Vec3u groups = { 1, 1, 1 };
-    char* ring_base = (char*)gpu::get_span_mapping(device, ring.span)!!.ptr;
-    gpu::GpuAddress ring_address = gpu::get_span_address(device, ring.span)!!;
+    char* ring_base = (char*)gpu::get_span_mapping(device, ring.span).ptr;
+    gpu::GpuAddress ring_address = gpu::get_span_address(device, ring.span);
     for (uint repetition = 0; repetition < COMMAND_PATH_REPETITIONS; repetition++) {
         gpu::CommandList inline_list = gpu::begin_commands(allocator)!!;
         gpu::CommandList ring_list = gpu::begin_commands(allocator)!!;
@@ -637,14 +637,14 @@ fn InlineRootSamples measure_inline_execution(
     )!!;
     defer free_bench_span(device, &records)!!;
 
-    float* input_values = (float*)gpu::get_span_mapping(device, input.span)!!.ptr;
+    float* input_values = (float*)gpu::get_span_mapping(device, input.span).ptr;
     for (uint i = 0; i < INLINE_ROOT_COMMANDS; i++) input_values[i] = (float)(i + 1);
     gpu::flush_mapped_span(device, input.span)!!;
-    gpu::GpuAddress input_gpu = gpu::get_span_address(device, input.span)!!;
-    gpu::GpuAddress inline_output_gpu = gpu::get_span_address(device, inline_output.span)!!;
-    gpu::GpuAddress record_output_gpu = gpu::get_span_address(device, record_output.span)!!;
-    ComputeRoot* record_base = (ComputeRoot*)gpu::get_span_mapping(device, records.span)!!.ptr;
-    gpu::GpuAddress records_gpu = gpu::get_span_address(device, records.span)!!;
+    gpu::GpuAddress input_gpu = gpu::get_span_address(device, input.span);
+    gpu::GpuAddress inline_output_gpu = gpu::get_span_address(device, inline_output.span);
+    gpu::GpuAddress record_output_gpu = gpu::get_span_address(device, record_output.span);
+    ComputeRoot* record_base = (ComputeRoot*)gpu::get_span_mapping(device, records.span).ptr;
+    gpu::GpuAddress records_gpu = gpu::get_span_address(device, records.span);
     gpu::Vec3u groups = { 1, 1, 1 };
     gpu::Barrier to_host = {
         .before = { .compute = true },
@@ -700,8 +700,8 @@ fn InlineRootSamples measure_inline_execution(
     }
     gpu::invalidate_mapped_span(device, inline_output.span)!!;
     gpu::invalidate_mapped_span(device, record_output.span)!!;
-    float* inline_values = (float*)gpu::get_span_mapping(device, inline_output.span)!!.ptr;
-    float* record_values = (float*)gpu::get_span_mapping(device, record_output.span)!!.ptr;
+    float* inline_values = (float*)gpu::get_span_mapping(device, inline_output.span).ptr;
+    float* record_values = (float*)gpu::get_span_mapping(device, record_output.span).ptr;
     for (uint i = 0; i < INLINE_ROOT_COMMANDS; i++) {
         float expected = (float)(i + 1) * 2.0f;
         assert(inline_values[i] == expected);

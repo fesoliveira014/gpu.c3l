@@ -60,7 +60,7 @@ gpu::flush_mapped_span(device, staging.span)!;
 gpu::AllocationDesc private_desc = staging_desc;
 private_desc.memory_class = gpu::MemoryClass.GPU_PRIVATE;
 gpu::GpuAllocation buffer = gpu::allocate_memory(device, &private_desc)!;
-gpu::GpuSpan buffer_span = gpu::get_allocation_span(device, buffer)!;
+gpu::GpuSpan buffer_span = gpu::get_allocation_span(device, buffer);
 
 gpu::BufferCopyDesc copy = { .src = staging.span, .dst = buffer_span };
 gpu::cmd_copy_buffer(commands, &copy)!;
@@ -136,7 +136,7 @@ usz offset = 0;
 for (uint mip = 0; mip < MIP_COUNT; mip++) {
     usz mip_bytes = gpu::texture_mip_bytes(&bc_desc, mip)!;
     gpu::BufferTextureCopyDesc upload = {
-        .src     = staging_span.checked_subspan(offset, mip_bytes)!,
+        .src     = staging_span.subspan(offset, mip_bytes),
         .texture = albedo,
         .mip     = mip,
     };
@@ -525,7 +525,7 @@ gpu::AllocationDesc readback_desc = {
 };
 gpu::GpuAllocation readback = gpu::allocate_memory(device, &readback_desc)!;
 defer (void)gpu::free_allocation(device, &readback);
-gpu::GpuSpan readback_span = gpu::get_allocation_span(device, readback)!;
+gpu::GpuSpan readback_span = gpu::get_allocation_span(device, readback);
 
 gpu::CommandList commands = gpu::begin_commands(allocator)!;
 defer (void)gpu::discard_commands(&commands);
@@ -556,7 +556,7 @@ gpu::CompletionPoint done = gpu::submit(allocator.queue, &submit)!;
 
 gpu::wait_completion(done)!;
 gpu::invalidate_mapped_span(device, readback_span)!;
-mem::copy(out.ptr, gpu::get_span_mapping(device, readback_span)!.ptr, out.len);
+mem::copy(out.ptr, gpu::get_span_mapping(device, readback_span).ptr, out.len);
 ```
 
 `get_span_mapping` never waits and `invalidate_mapped_span` never orders.
@@ -576,7 +576,7 @@ struct PendingReadback {
 fn bool? try_consume(gpu::Device* device, PendingReadback* pending) {
     if (!gpu::poll_completion(pending.completion)!) return false;
     gpu::invalidate_mapped_span(device, pending.span)!;
-    char[] bytes = gpu::get_span_mapping(device, pending.span)!;
+    char[] bytes = gpu::get_span_mapping(device, pending.span);
     // consume bytes ...
     gpu::free_allocation(device, &pending.allocation)!;
     return true;

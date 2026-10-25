@@ -103,8 +103,8 @@ fn void? run_compute(
     gpu::MappedGpuSpan root,
 ) {
     DoublerRoot* record = (DoublerRoot*)root.bytes.ptr;
-    record.input_gpu  = gpu::get_span_address(device, input_span)!;
-    record.output_gpu = gpu::get_span_address(device, output_span)!;
+    record.input_gpu  = gpu::get_span_address(device, input_span);
+    record.output_gpu = gpu::get_span_address(device, output_span);
     record.count      = COUNT;
     gpu::flush_mapped_span(device, root.span)!;
 

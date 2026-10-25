@@ -348,7 +348,7 @@ fn void stencil_aspect_samples_through_the_heap() @test {
     defer free_owned_span(&device, &roots)!!;
     FetchStencilRoot* root = (FetchStencilRoot*)test_span_mapping(&device, roots.span).ptr;
     root[0] = { .out_gpu = test_span_address(&device, output.span), .texture_index = stencil_view.index, .x = DP_RT / 2, .y = DP_RT / 2 };
-    root[1] = { .out_gpu = test_span_address(&device, output.span.checked_subspan(4, 4)!!), .texture_index = stencil_view.index, .x = 0, .y = 0 };
+    root[1] = { .out_gpu = test_span_address(&device, output.span.subspan(4, 4)), .texture_index = stencil_view.index, .x = 0, .y = 0 };
     gpu::flush_mapped_span(&device, roots.span)!!;
 
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -395,7 +395,7 @@ fn void stencil_aspect_samples_through_the_heap() @test {
     for (uint i = 0; i < 2; i++) {
         gpu::cmd_dispatch(
             commands: &cmd,
-            root:     test_span_address(&device, roots.span.checked_subspan(i * FetchStencilRoot::size, FetchStencilRoot::size)!!),
+            root:     test_span_address(&device, roots.span.subspan(i * FetchStencilRoot::size, FetchStencilRoot::size)),
             groups:   { 1, 1, 1 },
         )!!;
     }

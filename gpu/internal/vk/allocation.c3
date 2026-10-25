@@ -293,7 +293,7 @@ fn BufferUsage allocation_buffer_usage(
     return usage;
 }
 
-fn vma::AllocationCreateInfo? memory_class_to_vma(
+fn vma::AllocationCreateInfo memory_class_to_vma(
     gpu::MemoryClass memory_class,
 ) {
     vk::MemoryPropertyFlags host_visible =
@@ -320,11 +320,11 @@ fn vma::AllocationCreateInfo? memory_class_to_vma(
                 .required_flags = host_visible,
             };
         default:
-            return gpu::INVALID_ARGUMENT~;
+            unreachable("memory class must be a buffer class");
     }
 }
 
-fn vk::BufferCreateInfo? allocation_buffer_create_info(
+fn vk::BufferCreateInfo allocation_buffer_create_info(
     gpu::AllocationDesc* desc,
     uint[] queue_families,
     bool acceleration_structures_enabled = false,
@@ -345,7 +345,7 @@ fn uint? texture_memory_type_bits(gpu::AllocationDesc* desc) {
     foreach (&requirements : desc.texture_requirements) {
         memory_type_bits &= texture_compatibility_value(requirements.compatibility);
     }
-    if (memory_type_bits == 0) return gpu::INVALID_ARGUMENT~;
+    if (memory_type_bits == 0) return gpu::UNSUPPORTED_FEATURE~;
     return memory_type_bits;
 }
 
@@ -447,9 +447,9 @@ fn gpu::GpuAllocation? allocate_memory_for_state_with_ops(
         families[:family_count],
         state.acceleration_structures_enabled,
         state.ray_tracing_pipelines_enabled,
-    )!;
+    );
     vma::AllocationCreateInfo allocation_info =
-        memory_class_to_vma(desc.memory_class)!;
+        memory_class_to_vma(desc.memory_class);
 
     vk::Buffer buffer;
     vma::Allocation allocation;
@@ -581,12 +581,12 @@ fn gpu::AllocationInfo allocation_info_for_state(
     };
 }
 
-fn gpu::GpuSpan? allocation_span_for_state(
+fn gpu::GpuSpan allocation_span_for_state(
     VkDeviceState* state,
     gpu::GpuAllocation allocation,
 ) {
     AllocationSlot* slot = state.allocations.get(allocation);
-    if (slot.texture_memory) return gpu::INVALID_ARGUMENT~;
+    assert(!slot.texture_memory, "allocation must not be a TEXTURE allocation");
     return {
         .owner      = allocation.owner,
         .index      = allocation.index,
@@ -631,9 +631,10 @@ fn NonCoherentRange? normalize_mapped_memory_range(
     usz allocation_size,
     usz atom_size,
 ) {
-    if (size == 0 || !gpu::internal::range_fits(allocation_size, offset, size)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        size > 0 && gpu::internal::range_fits(allocation_size, offset, size),
+        "mapped range must fit the native allocation"
+    );
     if (!is_pow2(atom_size)) return gpu::BACKEND_ERROR~;
 
     usz mask = atom_size - 1;
@@ -651,7 +652,7 @@ fn NonCoherentRange? normalize_mapped_memory_range(
     };
 }
 
-fn AllocationSlot*? resolve_mapped_allocation_span(
+fn AllocationSlot* resolve_mapped_allocation_span(
     VkDeviceState* state,
     gpu::GpuSpan* span,
 ) {
@@ -663,12 +664,12 @@ fn AllocationSlot*? resolve_mapped_allocation_span(
         .generation = span.generation,
     };
     AllocationSlot* slot = state.allocations.get(allocation);
-    if (slot.texture_memory) return gpu::INVALID_ARGUMENT~;
-    if (span.size == 0
-        || !gpu::internal::range_fits(slot.backing.size, span.offset, span.size)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (slot.backing.cpu_base == null) return gpu::INVALID_ARGUMENT~;
+    assert(!slot.texture_memory, "span must not reference a TEXTURE allocation");
+    assert(
+        gpu::internal::range_fits(slot.backing.size, span.offset, span.size),
+        "span must lie within its allocation"
+    );
+    assert(slot.backing.cpu_base != null, "span's allocation must be host-mapped");
     return slot;
 }
 
@@ -698,7 +699,7 @@ fn void? flush_mapped_span_for_state_with_ops(
     gpu::GpuSpan span,
     AllocationNativeOps* ops,
 ) {
-    AllocationSlot* slot = resolve_mapped_allocation_span(state, &span)!;
+    AllocationSlot* slot = resolve_mapped_allocation_span(state, &span);
     if (slot.coherent) return;
     NonCoherentRange range = mapped_allocation_range(state, slot, &span)!;
     check_device_result(state, ops.flush_allocation(
@@ -715,7 +716,7 @@ fn void? invalidate_mapped_span_for_state_with_ops(
     gpu::GpuSpan span,
     AllocationNativeOps* ops,
 ) {
-    AllocationSlot* slot = resolve_mapped_allocation_span(state, &span)!;
+    AllocationSlot* slot = resolve_mapped_allocation_span(state, &span);
     if (slot.coherent) return;
     NonCoherentRange range = mapped_allocation_range(state, slot, &span)!;
     check_device_result(state, ops.invalidate_allocation(
@@ -766,7 +767,7 @@ fn gpu::AllocationInfo vk_get_allocation_info(
     return allocation_info_for_state(state, allocation);
 }
 
-fn gpu::GpuSpan? vk_get_allocation_span(
+fn gpu::GpuSpan vk_get_allocation_span(
     VkDeviceState* state,
     gpu::GpuAllocation allocation,
 ) {

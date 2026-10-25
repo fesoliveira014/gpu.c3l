@@ -66,7 +66,7 @@ fn OwnedSpan? allocate_owned_span(
     };
     gpu::GpuAllocation allocation = gpu::allocate_memory(device, &desc)!;
     defer catch (void)gpu::free_allocation(device, &allocation);
-    gpu::GpuSpan span = gpu::get_allocation_span(device, allocation)!;
+    gpu::GpuSpan span = gpu::get_allocation_span(device, allocation);
     return { .allocation = allocation, .span = span };
 }
 
@@ -77,11 +77,11 @@ fn void? free_owned_span(gpu::Device* device, OwnedSpan* owned) {
 }
 
 fn char[] test_span_mapping(gpu::Device* device, gpu::GpuSpan span) {
-    return gpu::get_span_mapping(device, span)!!;
+    return gpu::get_span_mapping(device, span);
 }
 
 fn gpu::GpuAddress test_span_address(gpu::Device* device, gpu::GpuSpan span) {
-    return gpu::get_span_address(device, span)!!;
+    return gpu::get_span_address(device, span);
 }
 
 <* Discard a recording token unless another copy already consumed it. *>
@@ -204,7 +204,7 @@ fn void? upload_test_texture_data(
         debug_name:   "test_texture_upload",
     )!;
     defer (void)free_owned_span(device, &upload);
-    char[] mapping = gpu::get_span_mapping(device, upload.span)!;
+    char[] mapping = gpu::get_span_mapping(device, upload.span);
     mapping[..] = data[..];
     gpu::flush_mapped_span(device, upload.span)!;
 
@@ -325,6 +325,6 @@ fn void? readback_test_texture_data(
     gpu::wait_completion(completion)!;
 
     gpu::invalidate_mapped_span(device, readback.span)!;
-    char[] mapping = gpu::get_span_mapping(device, readback.span)!;
+    char[] mapping = gpu::get_span_mapping(device, readback.span);
     out_data[..] = mapping[..];
 }

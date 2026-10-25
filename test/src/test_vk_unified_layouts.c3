@@ -197,7 +197,7 @@ fn void unified_storage_write_then_sampled_read() @test {
     bind_test_compute_pipeline(&cmd, sample_pipe);
     gpu::cmd_dispatch(
         commands: &cmd,
-        root:     test_span_address(&device, roots.span.checked_subspan(WriteRoot::size, SampleRoot::size)!!),
+        root:     test_span_address(&device, roots.span.subspan(WriteRoot::size, SampleRoot::size)),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
     gpu::Barrier to_host = { .before = { .compute }, .after = { .host } };

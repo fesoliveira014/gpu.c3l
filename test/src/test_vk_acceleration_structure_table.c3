@@ -974,16 +974,6 @@ fn void acceleration_structure_dynamic_multi_geometry_lowers_once() @test {
 
     inputs[0].triangles.transform = acceleration_structure_test_span(
         transform_buffer,
-        12 * float::size - 1,
-    );
-    assert(@catch(prepare_acceleration_structure_build(
-        &record,
-        &build,
-        false,
-    )) == gpu::INVALID_ARGUMENT,
-        "triangle transforms require the complete 3-by-4 float matrix");
-    inputs[0].triangles.transform = acceleration_structure_test_span(
-        transform_buffer,
         12 * float::size,
     );
 
@@ -1272,37 +1262,6 @@ fn void acceleration_structure_indirect_tlas_is_fixed_and_transactional() @test 
     )) == gpu::UNSUPPORTED_FEATURE);
     state.ray_tracing_support.acceleration_structure_indirect_build = true;
 
-    ranges.size = gpu::AccelerationStructureIndirectBuildRange::size - 1;
-    assert(@catch(record_acceleration_structure_indirect_build_with_ops(
-        record:           &record,
-        desc:             &build,
-        ranges:           ranges,
-        update:           false,
-        ops:              &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    ranges = acceleration_structure_test_span(
-        ranges_buffer,
-        gpu::AccelerationStructureIndirectBuildRange::size,
-    );
-    ranges.owner++;
-    ranges = acceleration_structure_test_span(ranges_buffer, 32);
-    ranges.offset = usz::max - 7;
-    assert(@catch(record_acceleration_structure_indirect_build_with_ops(
-        record:           &record,
-        desc:             &build,
-        ranges:           ranges,
-        update:           false,
-        ops:              &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    ranges = acceleration_structure_test_span(ranges_buffer, 32);
-    ranges.offset = 1;
-    assert(@catch(record_acceleration_structure_indirect_build_with_ops(
-        record:           &record,
-        desc:             &build,
-        ranges:           ranges,
-        update:           false,
-        ops:              &ops,
-    )) == gpu::INVALID_ARGUMENT);
     ranges = acceleration_structure_test_span(
         ranges_buffer,
         gpu::AccelerationStructureIndirectBuildRange::size,

@@ -84,7 +84,7 @@ fn void explicit_transition_copy_and_sample_submit() @test {
         debug_name:   "texture_transition_upload",
     )!!;
     defer free_owned_span(&device, &upload)!!;
-    char[] mapping = gpu::get_span_mapping(&device, upload.span)!!;
+    char[] mapping = gpu::get_span_mapping(&device, upload.span);
     for (uint i = 0; i < mapping.len; i++) mapping[i] = (char)i;
     gpu::flush_mapped_span(&device, upload.span)!!;
 

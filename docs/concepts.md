@@ -115,9 +115,9 @@ Contract: [Object model](architecture.md#object-model),
 
 GPU memory comes from `allocate_memory`, which returns a `GpuAllocation`: the
 owning token you free later. The bytes inside are addressed through a
-`GpuSpan`, a non-owning byte range with a bounds check. `get_allocation_span`
-gives the span that covers the whole allocation; `checked_subspan` carves a
-smaller one.
+`GpuSpan`, a non-owning byte range. `get_allocation_span` gives the span that
+covers the whole allocation; `subspan` carves a smaller one that must lie
+inside its parent.
 
 Every allocation declares a **memory class**, which decides where the memory
 lives and whether the CPU can see it:
@@ -156,7 +156,7 @@ fn void? memory_spans_and_mapping(gpu::Device* device) {
     for (usz i = 0; i < staging.bytes.len; i++) staging.bytes[i] = (char)i;
     gpu::flush_mapped_span(device, staging.span)!;
 
-    gpu::GpuSpan first_half = staging.span.checked_subspan(0, 512)!;
+    gpu::GpuSpan first_half = staging.span.subspan(0, 512);
     gpu::AllocationDesc private_desc = {
         .size         = 512,
         .memory_class = gpu::MemoryClass.GPU_PRIVATE,
@@ -165,7 +165,7 @@ fn void? memory_spans_and_mapping(gpu::Device* device) {
     };
     gpu::GpuAllocation private_allocation = gpu::allocate_memory(device, &private_desc)!;
     defer (void)gpu::free_allocation(device, &private_allocation);
-    gpu::GpuSpan destination = gpu::get_allocation_span(device, private_allocation)!;
+    gpu::GpuSpan destination = gpu::get_allocation_span(device, private_allocation);
     assert(first_half.size == destination.size);
 }
 ```
@@ -236,8 +236,8 @@ fn void? root_pointers(
     defer (void)gpu::free_allocation(device, &root_allocation);
 
     Params* params = (Params*)root.bytes.ptr;
-    params.input_gpu  = gpu::get_span_address(device, input)!;
-    params.output_gpu = gpu::get_span_address(device, output)!;
+    params.input_gpu  = gpu::get_span_address(device, input);
+    params.output_gpu = gpu::get_span_address(device, output);
     params.count      = count;
     gpu::flush_mapped_span(device, root.span)!;
 

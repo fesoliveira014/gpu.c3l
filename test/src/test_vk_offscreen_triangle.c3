@@ -645,7 +645,7 @@ fn void dynamic_viewport_scissor_pixels() @test {
         };
         gpu::cmd_texture_barrier(&cmd, &to_src)!!;
 
-        gpu::GpuSpan region = readback_all.checked_subspan(RT_BYTES * i, RT_BYTES)!!;
+        gpu::GpuSpan region = readback_all.subspan(RT_BYTES * i, RT_BYTES);
         gpu::TextureBufferCopyDesc copy = { .texture = targets[i], .dst = region };
         gpu::cmd_copy_texture_to_buffer(&cmd, &copy)!!;
         gpu::Barrier host_read = {

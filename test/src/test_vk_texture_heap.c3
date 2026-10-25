@@ -597,20 +597,20 @@ fn void bindless_cube_upload_and_sample() @test {
     )!!;
     gpu::cmd_texture_barrier(&commands, &to_dst)!!;
     gpu::BufferTextureCopyDesc mip0_copy = {
-        .src         = staging.span.checked_subspan(
+        .src         = staging.span.subspan(
             0,
             HEAP_CUBE_FACES * HEAP_CUBE_MIP0_BYTES,
-        )!!,
+        ),
         .texture     = cube,
         .mip         = 0,
         .layer_count = HEAP_CUBE_FACES,
     };
     gpu::cmd_copy_buffer_to_texture(&commands, &mip0_copy)!!;
     gpu::BufferTextureCopyDesc mip1_copy = {
-        .src         = staging.span.checked_subspan(
+        .src         = staging.span.subspan(
             HEAP_CUBE_FACES * HEAP_CUBE_MIP0_BYTES,
             HEAP_CUBE_FACES * HEAP_CUBE_MIP1_BYTES,
-        )!!,
+        ),
         .texture     = cube,
         .mip         = 1,
         .layer_count = HEAP_CUBE_FACES,
@@ -1110,9 +1110,9 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
         debug_name:   "update_roots",
     )!!;
     defer free_owned_span(&device, &roots)!!;
-    gpu::GpuSpan large_root_span = roots.span.checked_subspan(0, WriteRoot::size)!!;
-    gpu::GpuSpan small_root_span = roots.span.checked_subspan(WriteRoot::size, WriteRoot::size)!!;
-    gpu::GpuSpan sample_root_span = roots.span.checked_subspan(WriteRoot::size * 2, SampleRoot::size)!!;
+    gpu::GpuSpan large_root_span = roots.span.subspan(0, WriteRoot::size);
+    gpu::GpuSpan small_root_span = roots.span.subspan(WriteRoot::size, WriteRoot::size);
+    gpu::GpuSpan sample_root_span = roots.span.subspan(WriteRoot::size * 2, SampleRoot::size);
     WriteRoot* large_root = (WriteRoot*)test_span_mapping(&device, large_root_span).ptr;
     *large_root = { .texture_index = large_write.index, .width = TEX_SIZE, .height = TEX_SIZE };
     WriteRoot* small_root = (WriteRoot*)test_span_mapping(&device, small_root_span).ptr;
@@ -1333,7 +1333,7 @@ fn void reserved_row_addressing_samples_correct_texture() @test {
     gpu::GpuAddress output_address = test_span_address(&device, output.span);
     gpu::GpuSpan[3] root_spans;
     for (uint i = 0; i < 3; i++) {
-        root_spans[i] = roots.span.checked_subspan(i * SampleRoot::size, SampleRoot::size)!!;
+        root_spans[i] = roots.span.subspan(i * SampleRoot::size, SampleRoot::size);
         SampleRoot* root = (SampleRoot*)test_span_mapping(&device, root_spans[i]).ptr;
         gpu::TextureIndex texture_index = { .value = range.base.value + check_offsets[i] };
         *root = {
@@ -1511,7 +1511,7 @@ fn void row_addressed_render_samples_shader_computed_index() @test {
     defer free_owned_span(&device, &roots)!!;
     gpu::GpuSpan[3] root_spans;
     for (uint i = 0; i < 3; i++) {
-        root_spans[i] = roots.span.checked_subspan(i * RowSampleRoot::size, RowSampleRoot::size)!!;
+        root_spans[i] = roots.span.subspan(i * RowSampleRoot::size, RowSampleRoot::size);
         RowSampleRoot* root = (RowSampleRoot*)test_span_mapping(&device, root_spans[i]).ptr;
         *root = {
             .base             = range.base,

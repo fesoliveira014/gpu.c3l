@@ -407,11 +407,11 @@ fn void record_val_texture_transition(
 }
 
 fn gpu::GpuAddress val_span_address(gpu::Device* device, gpu::GpuSpan span) {
-    return gpu::get_span_address(device, span)!!;
+    return gpu::get_span_address(device, span);
 }
 
 fn void write_val_triangle_verts(gpu::Device* device, gpu::GpuSpan* span) {
-    char[] mapping = gpu::get_span_mapping(device, *span)!!;
+    char[] mapping = gpu::get_span_mapping(device, *span);
     float* verts = (float*)mapping.ptr;
     float[12] vertex_data = {
         -0.8f, -0.8f, 0.1f, 0.1f,
@@ -806,7 +806,7 @@ fn void valid_copy_fill_and_draw_succeed() @test {
     )!!;
     defer free_owned_span(&device, &frag_owned)!!;
     gpu::GpuSpan frag_span = frag_owned.span;
-    char[] frag_mapping = gpu::get_span_mapping(&device, frag_span)!!;
+    char[] frag_mapping = gpu::get_span_mapping(&device, frag_span);
     FragRoot* frag_root = (FragRoot*)frag_mapping.ptr;
     frag_root.texture_index = ctx.tex_index;
     frag_root.sampler_index = ctx.smp_index;
@@ -858,40 +858,6 @@ fn void valid_copy_fill_and_draw_succeed() @test {
 // Backing-range faults: subspan builds escaping spans without faulting;
 // the fault lands at the consuming command.
 
-fn void dispatch_indirect_args_span_beyond_buffer_faults() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    ValComputeCtx ctx = make_val_compute_ctx(&device);
-    defer destroy_val_compute_ctx(&device, &ctx);
-
-    OwnedSpan args_buffer = allocate_owned_span(
-        device:       &device,
-        size:         16,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "dispatch_indirect_args",
-    )!!;
-    defer free_owned_span(&device, &args_buffer)!!;
-    gpu::GpuSpan full_span = args_buffer.span;
-    gpu::GpuSpan escaped = full_span.unchecked_subspan(8, gpu::DispatchIndirectCommand::size);
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-    bind_test_compute_pipeline(&cmd, ctx.pipeline);
-    fault beyond = @catch(gpu::cmd_dispatch_indirect(
-        commands: &cmd,
-        root:     (gpu::GpuAddress)1,
-        args:     escaped,
-    ));
-    assert(beyond == gpu::INVALID_ARGUMENT, "dispatch indirect args beyond the backing buffer faults INVALID_ARGUMENT");
-
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
-    defer discard_test_executable(&cmd_executable)!!;
-}
-
 fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
@@ -907,7 +873,7 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
     )!!;
     defer free_owned_span(&device, &args_buffer)!!;
     gpu::GpuSpan full_span = args_buffer.span;
-    gpu::GpuSpan boundary = full_span.checked_subspan(4, gpu::DispatchIndirectCommand::size)!!;
+    gpu::GpuSpan boundary = full_span.subspan(4, gpu::DispatchIndirectCommand::size);
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -922,75 +888,6 @@ fn void dispatch_indirect_args_span_boundary_exact_succeeds() @test {
 
     gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
 
-    defer discard_test_executable(&cmd_executable)!!;
-}
-
-fn void draw_indexed_indirect_count_span_beyond_buffer_faults() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    if (!gpu::get_device_caps(&device).draw_indirect_count) return;
-    ValDrawCtx ctx = make_val_draw_ctx(&device);
-    defer destroy_val_draw_ctx(&device, &ctx);
-    gpu::TextureHandle target = make_val_target(&device);
-    defer gpu::destroy_texture(&device, target)!!;
-    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
-        &device,
-        target,
-    )!!;
-    defer destroy_test_attachment_view(&device, &target_view)!!;
-
-    OwnedSpan args_buffer = allocate_owned_span(
-        device:       &device,
-        size:         gpu::DrawIndexedIndirectCommand::size * 2,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "draw_indirect_args",
-    )!!;
-    defer free_owned_span(&device, &args_buffer)!!;
-    gpu::GpuSpan args_span = args_buffer.span;
-
-    OwnedSpan count_buffer = allocate_owned_span(
-        device:       &device,
-        size:         8,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "draw_indirect_count",
-    )!!;
-    defer free_owned_span(&device, &count_buffer)!!;
-    gpu::GpuSpan full_count_span = count_buffer.span;
-    gpu::GpuSpan escaped_count = full_count_span.unchecked_subspan(8, 4);
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-    record_val_target_to_attach(&cmd, target);
-    gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
-    gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
-    gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
-    gpu::ColorTargetState[1] color_targets = {
-        gpu::color_blend_disabled(),
-    };
-    graphics_state.color.targets = color_targets[..];
-
-    gpu::GpuSpan index_span_stub = {};
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
-    gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
-    fault beyond = @catch(gpu::cmd_draw_indexed_indirect_count(
-        commands:       &cmd,
-        vertex_root:    (gpu::GpuAddress)1,
-        fragment_root:  (gpu::GpuAddress)1,
-        args:           args_span,
-        count_span:     escaped_count,
-        max_draw_count: 1,
-        index_span:     index_span_stub,
-    ));
-    assert(beyond == gpu::INVALID_ARGUMENT, "indirect count span beyond the backing buffer faults INVALID_ARGUMENT");
-
-    gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
     defer discard_test_executable(&cmd_executable)!!;
 }
 
@@ -1210,152 +1107,6 @@ fn void generated_work_commands_require_capability() @test {
     defer discard_test_executable(&executable)!!;
 }
 
-fn void generated_dispatch_checks_bounds_and_reservations() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    ValComputeCtx compute = make_val_compute_ctx(&device);
-    defer destroy_val_compute_ctx(&device, &compute);
-
-    OwnedSpan records = allocate_owned_span(
-        device:       &device,
-        size:         gpu::GeneratedDispatchRecord::size + 8,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "generated_dispatch_records",
-    )!!;
-    defer free_owned_span(&device, &records)!!;
-    OwnedSpan count = allocate_owned_span(
-        device:       &device,
-        size:         8,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "generated_dispatch_count",
-    )!!;
-    defer free_owned_span(&device, &count)!!;
-
-    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
-    bool original_enabled = state.generated_work.enabled;
-    uint original_limit = state.caps.max_generated_work_count;
-    state.generated_work.enabled = true;
-    state.caps.max_generated_work_count = 1;
-    defer {
-        state.generated_work.enabled = original_enabled;
-        state.caps.max_generated_work_count = original_limit;
-    }
-
-    gpu::GpuSpan valid_records = records.span.checked_subspan(
-        0,
-        gpu::GeneratedDispatchRecord::size,
-    )!!;
-    gpu::GpuSpan misaligned_records = records.span.checked_subspan(
-        4,
-        gpu::GeneratedDispatchRecord::size,
-    )!!;
-    gpu::GpuSpan short_records = records.span.checked_subspan(
-        0,
-        gpu::GeneratedDispatchRecord::size - 1,
-    )!!;
-    gpu::GpuSpan valid_count = count.span.checked_subspan(0, 4)!!;
-    gpu::GpuSpan misaligned_count = count.span.checked_subspan(2, 4)!!;
-    gpu::GpuSpan short_count = count.span.checked_subspan(0, 2)!!;
-
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&commands)!!;
-    bind_test_compute_pipeline(&commands, compute.pipeline);
-
-    gpu::cmd_dispatch_generated(
-        commands:          &commands,
-        records:           {},
-        count_span:        {},
-        max_dispatch_count: 0,
-    )!!;
-    fault over_limit = @catch(gpu::cmd_dispatch_generated(
-        commands:          &commands,
-        records:           valid_records,
-        count_span:        valid_count,
-        max_dispatch_count: 2,
-    ));
-    assert(over_limit == gpu::INVALID_ARGUMENT,
-        "generated dispatch rejects counts above the selected-device limit");
-    fault record_size = @catch(gpu::cmd_dispatch_generated(
-        commands:          &commands,
-        records:           short_records,
-        count_span:        valid_count,
-        max_dispatch_count: 1,
-    ));
-    assert(record_size == gpu::INVALID_ARGUMENT,
-        "generated record span must hold the declared maximum count");
-    fault count_size = @catch(gpu::cmd_dispatch_generated(
-        commands:          &commands,
-        records:           valid_records,
-        count_span:        short_count,
-        max_dispatch_count: 1,
-    ));
-    assert(count_size == gpu::INVALID_ARGUMENT,
-        "generated count span must hold one uint");
-
-    gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
-    defer discard_test_executable(&executable)!!;
-}
-
-fn void draw_indexed_index_span_beyond_buffer_faults() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-    ValDrawCtx ctx = make_val_draw_ctx(&device);
-    defer destroy_val_draw_ctx(&device, &ctx);
-    gpu::TextureHandle target = make_val_target(&device);
-    defer gpu::destroy_texture(&device, target)!!;
-    gpu::AttachmentViewHandle target_view = create_test_attachment_view(
-        &device,
-        target,
-    )!!;
-    defer destroy_test_attachment_view(&device, &target_view)!!;
-
-    OwnedSpan index_buffer = allocate_owned_span(
-        device:       &device,
-        size:         16,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "indexed_draw_data",
-    )!!;
-    defer free_owned_span(&device, &index_buffer)!!;
-    gpu::GpuSpan full_index_span = index_buffer.span;
-    gpu::GpuSpan escaped = full_index_span.unchecked_subspan(16, 4);
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-    record_val_target_to_attach(&cmd, target);
-    gpu::ColorTargetDesc[1] colors = {{ .view = target_view, .load_op = gpu::LoadOp.CLEAR, .store_op = gpu::StoreOp.STORE }};
-    gpu::RenderPassDesc pass = { .colors = colors[..], .width = VAL_RT, .height = VAL_RT };
-    gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
-    gpu::ColorTargetState[1] color_targets = {
-        gpu::color_blend_disabled(),
-    };
-    graphics_state.color.targets = color_targets[..];
-    gpu::cmd_begin_render_pass(&cmd, &pass)!!;
-    gpu::cmd_bind_pipeline(&cmd, ctx.graphics)!!;
-    gpu::cmd_set_graphics_state(&cmd, &graphics_state)!!;
-    fault beyond = @catch(gpu::cmd_draw_indexed(
-        commands:       &cmd,
-        vertex_root:    (gpu::GpuAddress)1,
-        fragment_root:  (gpu::GpuAddress)1,
-        index_span:     escaped,
-        index_count:    1,
-        instance_count: 1,
-    ));
-    assert(beyond == gpu::INVALID_ARGUMENT, "index span beyond the backing buffer faults INVALID_ARGUMENT");
-
-    gpu::cmd_end_render_pass(&cmd)!!;
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-    defer discard_test_executable(&cmd_executable)!!;
-}
-
 fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
@@ -1378,7 +1129,7 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     )!!;
     defer free_owned_span(&device, &index_buffer)!!;
     gpu::GpuSpan full_index_span = index_buffer.span;
-    gpu::GpuSpan boundary = full_index_span.checked_subspan(12, 4)!!;
+    gpu::GpuSpan boundary = full_index_span.subspan(12, 4);
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -1410,102 +1161,6 @@ fn void draw_indexed_index_span_boundary_exact_succeeds() @test {
     defer discard_test_executable(&cmd_executable)!!;
 }
 
-fn void copy_buffer_to_texture_span_beyond_buffer_faults() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc tex_desc = {
-        .access    = { .graphics, .compute, .transfer },
-        .width     = 4,
-        .height    = 4,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .transfer_dst },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-
-    OwnedSpan src_buffer = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "texture_copy_src",
-    )!!;
-    defer free_owned_span(&device, &src_buffer)!!;
-    gpu::GpuSpan full_span = src_buffer.span;
-    gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-    record_val_texture_transition(
-        commands: &cmd,
-        texture:  texture,
-        after:    {
-            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
-            .stages = { .transfer },
-            .access = { .write },
-        },
-    );
-
-    gpu::BufferTextureCopyDesc up = { .src = escaped, .texture = texture, .width = 4, .height = 4 };
-    fault beyond = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &up));
-    assert(beyond == gpu::INVALID_ARGUMENT, "buffer-to-texture copy span beyond the backing buffer faults INVALID_ARGUMENT");
-
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
-    defer discard_test_executable(&cmd_executable)!!;
-}
-
-fn void copy_texture_to_buffer_span_beyond_buffer_faults() @test {
-    gpu::Device device = make_val_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc tex_desc = {
-        .access    = { .graphics, .compute, .transfer },
-        .width     = 4,
-        .height    = 4,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .transfer_src },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-
-    OwnedSpan dst_buffer = allocate_owned_span(
-        device:       &device,
-        size:         64,
-        memory_class: gpu::MemoryClass.GPU_PRIVATE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "texture_copy_dst",
-    )!!;
-    defer free_owned_span(&device, &dst_buffer)!!;
-    gpu::GpuSpan full_span = dst_buffer.span;
-    gpu::GpuSpan escaped = full_span.unchecked_subspan(32, 64);
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-    record_val_texture_transition(
-        commands: &cmd,
-        texture:  texture,
-        after:    {
-            .layout = gpu::TextureLayout.TRANSFER_SOURCE,
-            .stages = { .transfer },
-            .access = { .read },
-        },
-    );
-
-    gpu::TextureBufferCopyDesc down = { .texture = texture, .dst = escaped, .width = 4, .height = 4 };
-    fault beyond = @catch(gpu::cmd_copy_texture_to_buffer(&cmd, &down));
-    assert(beyond == gpu::INVALID_ARGUMENT, "texture-to-buffer copy span beyond the backing buffer faults INVALID_ARGUMENT");
-
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
-    defer discard_test_executable(&cmd_executable)!!;
-}
-
 fn void texture_copy_span_boundary_exact_succeeds() @test {
     gpu::Device device = make_val_device();
     defer destroy_test_device(&device)!!;
@@ -1529,7 +1184,7 @@ fn void texture_copy_span_boundary_exact_succeeds() @test {
     )!!;
     defer free_owned_span(&device, &src_buffer)!!;
     gpu::GpuSpan full_span = src_buffer.span;
-    gpu::GpuSpan boundary = full_span.checked_subspan(32, 64)!!;
+    gpu::GpuSpan boundary = full_span.subspan(32, 64);
     gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;

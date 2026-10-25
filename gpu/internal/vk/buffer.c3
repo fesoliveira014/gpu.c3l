@@ -61,10 +61,10 @@ fn vk::BufferUsageFlags buffer_usage_to_vk(BufferUsage usage) @private {
     return (vk::BufferUsageFlags)flags;
 }
 
-fn vk::BufferCreateInfo? make_buffer_create_info(BufferDesc* desc, uint[] queue_families) @private {
-    if (desc.size == 0) return gpu::INVALID_ARGUMENT~;
+fn vk::BufferCreateInfo make_buffer_create_info(BufferDesc* desc, uint[] queue_families) @private {
+    assert(desc.size > 0, "buffer size must be greater than 0");
     vk::BufferUsageFlags usage = buffer_usage_to_vk(desc.usage);
-    if ((uint)usage == 0) return gpu::INVALID_ARGUMENT~;
+    assert((uint)usage != 0, "buffer usage must not be empty");
     vk::BufferCreateInfo info = vk::buffer_create_info()
         .set_size((vk::DeviceSize)desc.size)
         .set_usage(usage);
@@ -76,15 +76,15 @@ fn vk::BufferCreateInfo? make_buffer_create_info(BufferDesc* desc, uint[] queue_
     return info;
 }
 
-fn char[]? vk_get_span_mapping(VkDeviceState* state, gpu::GpuSpan span) {
-    ResolvedSpan resolved = resolve_span(state, &span)!;
+fn char[] vk_get_span_mapping(VkDeviceState* state, gpu::GpuSpan span) {
+    ResolvedSpan resolved = resolve_span(state, &span);
     return resolved_span_mapping(&resolved);
 }
 
-fn gpu::GpuAddress? vk_get_span_address(
+fn gpu::GpuAddress vk_get_span_address(
     VkDeviceState* state,
     gpu::GpuSpan span,
 ) {
-    ResolvedSpan resolved = resolve_span(state, &span)!;
+    ResolvedSpan resolved = resolve_span(state, &span);
     return resolved_span_address(&resolved);
 }

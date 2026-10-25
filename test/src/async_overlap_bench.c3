@@ -253,7 +253,7 @@ fn int main() {
     };
     gpu::GpuAllocation data = gpu::allocate_memory(&device, &data_desc)!!;
     defer gpu::free_allocation(&device, &data)!!;
-    gpu::GpuSpan data_span = gpu::get_allocation_span(&device, data)!!;
+    gpu::GpuSpan data_span = gpu::get_allocation_span(&device, data);
 
     gpu::AllocationDesc comp_root_desc = {
         .size         = OverlapComputeRoot::size,
@@ -270,12 +270,12 @@ fn int main() {
     gpu::GpuSpan comp_root_span = gpu::get_allocation_span(
         &device,
         comp_root_allocation,
-    )!!;
+    );
     OverlapComputeRoot* comp_root = (OverlapComputeRoot*)gpu::get_span_mapping(
         &device,
         comp_root_span,
-    )!!.ptr;
-    comp_root.data_gpu = gpu::get_span_address(&device, data_span)!!;
+    ).ptr;
+    comp_root.data_gpu = gpu::get_span_address(&device, data_span);
     comp_root.elem_count = DISPATCH_GROUPS * OVERLAP_WORKGROUP;
 
     gpu::TextureDesc rt_desc = {
@@ -351,7 +351,7 @@ fn int main() {
         gpu::ExecutableCommandList comp_cmd = record_compute(
             allocator:     &compute_allocator,
             pipeline:      comp_pipeline,
-            root_gpu:      gpu::get_span_address(&device, comp_root_span)!!,
+            root_gpu:      gpu::get_span_address(&device, comp_root_span),
             pool:          comp_pool,
             timestamps_ok: timestamps_ok,
         );
@@ -386,7 +386,7 @@ fn int main() {
         )!!;
         defer gpu_test::free_owned_span(&device, &frag_owned)!!;
         gpu::GpuSpan frag_span = frag_owned.span;
-        OverlapFragRoot* frag_root = (OverlapFragRoot*)gpu::get_span_mapping(&device, frag_span)!!.ptr;
+        OverlapFragRoot* frag_root = (OverlapFragRoot*)gpu::get_span_mapping(&device, frag_span).ptr;
         frag_root.iters = frag_iters;
         OwnedSpan vertex_owned = gpu_test::allocate_owned_span(
             device:       &device,
@@ -397,7 +397,7 @@ fn int main() {
         )!!;
         defer gpu_test::free_owned_span(&device, &vertex_owned)!!;
         gpu::GpuSpan vertex_span = vertex_owned.span;
-        float* verts = (float*)gpu::get_span_mapping(&device, vertex_span)!!.ptr;
+        float* verts = (float*)gpu::get_span_mapping(&device, vertex_span).ptr;
         float[12] fullscreen_triangle = {
             -1.0f, -1.0f, 0.0f, 0.0f,
              3.0f, -1.0f, 2.0f, 0.0f,
@@ -410,8 +410,8 @@ fn int main() {
             allocator:     &graphics_allocator,
             pipeline:      gfx_pipeline,
             view:          rt_view,
-            vertex_root:   gpu::get_span_address(&device, vertex_span)!!,
-            fragment_root: gpu::get_span_address(&device, frag_span)!!,
+            vertex_root:   gpu::get_span_address(&device, vertex_span),
+            fragment_root: gpu::get_span_address(&device, frag_span),
             pool:          gfx_pool,
             timestamps_ok: timestamps_ok,
         );
@@ -461,7 +461,7 @@ fn int main() {
         )!!;
         defer gpu_test::free_owned_span(&device, &frag_owned)!!;
         gpu::GpuSpan frag_span = frag_owned.span;
-        OverlapFragRoot* frag_root = (OverlapFragRoot*)gpu::get_span_mapping(&device, frag_span)!!.ptr;
+        OverlapFragRoot* frag_root = (OverlapFragRoot*)gpu::get_span_mapping(&device, frag_span).ptr;
         frag_root.iters = frag_iters;
         OwnedSpan vertex_owned = gpu_test::allocate_owned_span(
             device:       &device,
@@ -472,7 +472,7 @@ fn int main() {
         )!!;
         defer gpu_test::free_owned_span(&device, &vertex_owned)!!;
         gpu::GpuSpan vertex_span = vertex_owned.span;
-        float* verts = (float*)gpu::get_span_mapping(&device, vertex_span)!!.ptr;
+        float* verts = (float*)gpu::get_span_mapping(&device, vertex_span).ptr;
         float[12] fullscreen_triangle = {
             -1.0f, -1.0f, 0.0f, 0.0f,
              3.0f, -1.0f, 2.0f, 0.0f,
@@ -487,7 +487,7 @@ fn int main() {
         gpu::ExecutableCommandList a_compute = record_compute(
             allocator:     &compute_allocator,
             pipeline:      comp_pipeline,
-            root_gpu:      gpu::get_span_address(&device, comp_root_span)!!,
+            root_gpu:      gpu::get_span_address(&device, comp_root_span),
             pool:          comp_pool,
             timestamps_ok: timestamps_ok,
         );
@@ -505,8 +505,8 @@ fn int main() {
             allocator:     &graphics_allocator,
             pipeline:      gfx_pipeline,
             view:          rt_view,
-            vertex_root:   gpu::get_span_address(&device, vertex_span)!!,
-            fragment_root: gpu::get_span_address(&device, frag_span)!!,
+            vertex_root:   gpu::get_span_address(&device, vertex_span),
+            fragment_root: gpu::get_span_address(&device, frag_span),
             pool:          gfx_pool,
             timestamps_ok: timestamps_ok,
         );
@@ -537,7 +537,7 @@ fn int main() {
         gpu::ExecutableCommandList b_compute = record_compute(
             allocator:     &compute_allocator,
             pipeline:      comp_pipeline,
-            root_gpu:      gpu::get_span_address(&device, comp_root_span)!!,
+            root_gpu:      gpu::get_span_address(&device, comp_root_span),
             pool:          comp_pool,
             timestamps_ok: timestamps_ok,
         );
@@ -555,8 +555,8 @@ fn int main() {
             allocator:     &graphics_allocator,
             pipeline:      gfx_pipeline,
             view:          rt_view,
-            vertex_root:   gpu::get_span_address(&device, vertex_span)!!,
-            fragment_root: gpu::get_span_address(&device, frag_span)!!,
+            vertex_root:   gpu::get_span_address(&device, vertex_span),
+            fragment_root: gpu::get_span_address(&device, frag_span),
             pool:          gfx_pool,
             timestamps_ok: timestamps_ok,
         );
