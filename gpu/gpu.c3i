@@ -853,7 +853,7 @@ enum Format : int {
 
 <* Aspect of a depth-stencil texture selected by a sampled view or a copy.
    AUTO is color for color formats, depth for depth-only formats, stencil for
-   S8_UINT, and INVALID_ARGUMENT for combined formats. *>
+   S8_UINT; AUTO must not be used with combined formats. *>
 enum TextureAspect : int {
     AUTO,
     DEPTH,

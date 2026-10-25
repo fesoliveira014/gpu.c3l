@@ -125,8 +125,8 @@ independent; width, height, depth and layer count are shared. Both
 textures must be 3D or both not; a 3D copy uses layer zero. For
 block-compressed formats offsets are block multiples, and the extent is a
 block multiple or reaches the mip edge on each side, so a 1x1 tail mip copies
-whole. A region inside one texture must not overlap itself, and any
-violation returns `INVALID_ARGUMENT`.
+whole. A region inside one texture must not overlap itself. These rules, and the
+aspect rules of the format, are contracts: a violation panics in safe builds.
 
 ## Compute
 

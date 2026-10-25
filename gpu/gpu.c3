@@ -876,6 +876,10 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
 
 <* Create a texture in caller-owned texture memory.
    The texture borrows the placement allocation, which must outlive it.
+   `offset` must be a multiple of the texture's required alignment, and the
+   allocation must be non-dedicated texture memory with enough alignment and
+   access, compatible with the texture, hold the range at `offset`, and not
+   overlap another placed texture; a violation panics in safe builds.
    @param device : "Live device that owns the placement allocation."
    @param desc : "Borrowed texture description."
    @param allocation : "Caller-owned compatible texture-memory allocation."
@@ -911,6 +915,10 @@ fn TextureHandle? create_placed_texture(
 <* Create a texture and independently owned dedicated storage atomically.
    Both descriptors are borrowed only for the call. On success the caller owns
    both returned tokens and destroys the texture before freeing the allocation.
+   `allocation_desc.size` must equal the texture's requirements and its
+   alignment must cover them, and the texture's memory types must intersect
+   those of `allocation_desc.texture_requirements`; a violation panics in safe
+   builds.
    @param device : "Live device that will own both resources."
    @param desc : "Borrowed texture description."
    @param allocation_desc : "Borrowed compatible dedicated-allocation description."
@@ -972,8 +980,9 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
    The texture must carry sampled or storage usage, the view range must lie
    inside the texture, a cube view needs a cube-compatible sampled texture and
    exactly six layers, and a combined depth-stencil texture needs a description
-   that selects one aspect. These rules read texture state, so a violation
-   panics in safe builds.
+   that selects one aspect. A `DEPTH` or `STENCIL` aspect must name an aspect the
+   format has. These rules read texture state, so a violation panics in safe
+   builds.
    @param device : "Live device that owns the texture."
    @param texture : "Texture whose subresources are exposed."
    @param desc : "Borrowed view description; null selects the full default view."
@@ -1094,7 +1103,10 @@ fn TextureView? create_texture_view_at(Device* device, TextureIndex slot, Textur
     return view;
 }
 
-<* Rewrite the descriptor behind a live view without changing its index.
+<* Rewrite the descriptor behind a live view without changing its index. The
+   texture and description follow the rules of `create_texture_view`: sampled or
+   storage usage, a range inside the texture, cube and aspect rules; a violation
+   panics in safe builds.
    The token is rewritten with a new generation; older copies are stale. The
    slot must not be read by executing commands.
    @param device : "Live device that owns the view."
@@ -1360,7 +1372,7 @@ fn AccelerationStructureInstance? make_acceleration_structure_instance(
    structure must be top-level; a violation panics in safe builds.
    @param device : "Live ray-query-enabled device that owns the TLAS."
    @param acceleration_structure : "Live top-level structure to publish."
-   @return "An owning view containing its raw shader index, or a recoverable validation, capacity, or allocation fault." *>
+   @return "An owning view containing its raw shader index, or a recoverable capacity or allocation fault." *>
 fn AccelerationStructureView? create_acceleration_structure_view(
     Device* device,
     AccelerationStructureHandle acceleration_structure,
@@ -1952,6 +1964,8 @@ fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
    Always checked: token phase, required pointer, identities, format support,
    dimension/subresource/extent bounds, byte-size overflow, and safe lowering.
+   `desc.aspect` must be a defined aspect the texture format has, and `AUTO` must
+   not select a combined depth-stencil format; a violation panics in safe builds.
    @param commands : "Live recording token."
    @param desc : "Borrowed source-span and destination-texture region."
    @return "Success, or a recoverable command, validation, bounds, alignment, or support fault."
@@ -1967,6 +1981,8 @@ fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
    Always checked: token phase, required pointer, identities, format support,
    dimension/subresource/extent bounds, byte-size overflow, and safe lowering.
+   `desc.aspect` must be a defined aspect the texture format has, and `AUTO` must
+   not select a combined depth-stencil format; a violation panics in safe builds.
    @param commands : "Live recording token."
    @param desc : "Borrowed source-texture and destination-span region."
    @return "Success, or a recoverable command, validation, bounds, alignment, or support fault."
@@ -1981,13 +1997,15 @@ fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc
    for the source and TRANSFER_DST for the destination, and surrounding
    barriers remain caller-owned.
    Always checked: token phase and identities. The textures must have equal
-   formats and sample counts and the transfer usages, the regions must fit both
-   textures and be block aligned, and regions inside one texture must not
-   overlap. Those rules read texture state, so a violation panics in safe
-   builds.
+   formats and sample counts and the transfer usages; both must be 3D or both
+   not; a 3D copy selects no array layers; `desc.aspect` must be an aspect the
+   format has, and `AUTO` must not select a combined depth-stencil format; the
+   regions must fit both textures and be block aligned; and regions inside one
+   texture must not overlap. Those rules read texture state, so a violation
+   panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed source and destination region."
-   @return "Success, or a recoverable command or support fault."
+   @return "Success, or a recoverable command fault."
    @require desc != null : "desc must not be null"
    @require gpu::internal::texture_aspect_valid(desc.aspect) : "desc.aspect must be a defined TextureAspect" *>
 fn void? cmd_copy_texture(CommandList* commands, TextureCopyDesc* desc) {
