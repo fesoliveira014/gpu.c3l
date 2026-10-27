@@ -419,12 +419,16 @@ fn void ray_tracing_pipeline_rules_reject_each_clause() @test {
     null_callable.callable_shaders = ((ShaderDesc*)null)[:1];
     assert(!gpu::internal::ray_tracing_pipeline_desc_valid(&null_callable), "a null callable slice needs length 0");
 
+    // Runtime lengths: c3c 0.8.5_1 truncates a constant slice length to 32 bits.
+    usz uint_count = uint::max;
+    usz over_uint_count = uint_count + 1;
+
     RayTracingPipelineDesc huge_miss = valid;
-    huge_miss.miss_shaders = (&miss[0])[:(usz)uint::max + 1];
+    huge_miss.miss_shaders = (&miss[0])[:over_uint_count];
     assert(!gpu::internal::ray_tracing_pipeline_desc_valid(&huge_miss), "a slice over uint::max is invalid");
 
     RayTracingPipelineDesc summed = valid;
-    summed.ray_generation_shaders = (&raygen[0])[:uint::max];
+    summed.ray_generation_shaders = (&raygen[0])[:uint_count];
     summed.miss_shaders = (&miss[0])[:2];
     assert(!gpu::internal::ray_tracing_pipeline_desc_valid(&summed), "the summed count must fit uint");
 }
