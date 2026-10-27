@@ -7,11 +7,11 @@ second draws a triangle in an SDL3 window. Each is walked through in
 sections; the complete sources are linked. Terms link to
 [concepts](concepts.md) at their first use.
 
-Targets: C3 0.8.3, `linux-x64` or `windows-x64`, Vulkan 1.3.
+Targets: C3 0.8.5_1, `linux-x64` or `windows-x64`, Vulkan 1.3.
 
 ## Prerequisites
 
-- `c3c --version` reports 0.8.3.
+- `c3c --version` reports 0.8.5_1.
 - A Vulkan 1.3 loader and driver. On a headless Linux box, lavapipe works.
 - `glslc` (Vulkan SDK or shaderc) to compile GLSL to SPIR-V.
 - Git with submodule support and Python 3, if cloning instead of using

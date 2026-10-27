@@ -355,7 +355,7 @@ for measurement guidance.
 
 ## Platform
 
-Targets are `linux-x64` and `windows-x64` on C3 0.8.3. Required at runtime: a
+Targets are `linux-x64` and `windows-x64` on C3 0.8.5_1. Required at runtime: a
 Vulkan 1.3 loader and driver with synchronization2, dynamic rendering,
 timeline semaphores, buffer device address, descriptor indexing, and extended
 dynamic state. The library requires all of them; it does not emulate missing
