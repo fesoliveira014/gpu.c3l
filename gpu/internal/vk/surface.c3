@@ -8,9 +8,7 @@ fn void*? vk_create_win32_surface(
     void* instance,
     void* window,
 ) {
-    if (state == null || instance == null || window == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(state != null, "runtime state must not be null");
     if (state.dispatch.surface.create_win32_surface == null || state.dispatch.surface.destroy_surface == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
@@ -35,9 +33,7 @@ fn void*? vk_create_wayland_surface(
     void* display,
     void* window_surface,
 ) {
-    if (state == null || display == null || window_surface == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(state != null, "runtime state must not be null");
     if (state.dispatch.surface.create_wayland_surface == null || state.dispatch.surface.destroy_surface == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
@@ -62,9 +58,7 @@ fn void*? vk_create_x11_surface(
     void* display,
     ulong window,
 ) {
-    if (state == null || display == null || window == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(state != null, "runtime state must not be null");
     if (state.dispatch.surface.create_xlib_surface == null || state.dispatch.surface.destroy_surface == null) {
         return gpu::UNSUPPORTED_FEATURE~;
     }

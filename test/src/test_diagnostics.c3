@@ -27,7 +27,7 @@ fn void diagnostic_dispatch_delivers_complete_message_once() @test {
         .category             = { .public_contract, .validation },
         .operation            = "allocate_memory",
         .has_fault            = true,
-        .public_fault         = INVALID_ARGUMENT,
+        .public_fault         = UNSUPPORTED_FEATURE,
         .resource             = {
             .kind                = DebugResourceKind.ALLOCATION,
             .has_public_identity = true,
@@ -51,7 +51,7 @@ fn void diagnostic_dispatch_delivers_complete_message_once() @test {
     assert(capture.message.category.validation, "validation category is preserved");
     assert(capture.message.operation.str_view() == "allocate_memory", "operation is preserved");
     assert(capture.message.has_fault, "public fault presence is preserved");
-    assert(capture.message.public_fault == INVALID_ARGUMENT, "public fault is preserved");
+    assert(capture.message.public_fault == UNSUPPORTED_FEATURE, "public fault is preserved");
     assert(capture.message.resource.kind == DebugResourceKind.ALLOCATION, "resource kind is preserved");
     assert(capture.message.resource.has_public_identity, "public identity presence is preserved");
     assert(capture.message.resource.index == 17, "resource index is preserved");

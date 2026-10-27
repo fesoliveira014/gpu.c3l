@@ -121,7 +121,7 @@ fn void record_depth_to_attach(gpu::CommandList* cmd, gpu::TextureHandle depth) 
             .stages = { .depth_output },
             .access = { .read, .write },
         },
-    )!!;
+    );
     gpu::cmd_texture_barrier(cmd, &to_attach)!!;
 }
 
@@ -226,7 +226,7 @@ fn void depth_test_occludes_both_orders() @test {
     gpu::DepthState tested = { .test_enable = true, .write_enable = true, .compare = gpu::CompareOp.LESS };
     gpu::PipelineHandle pipeline = make_depth_pipeline(&device, &ctx);
     defer gpu::destroy_pipeline(&device, pipeline)!!;
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
 
@@ -280,7 +280,7 @@ fn void depth_test_occludes_both_orders() @test {
         };
         gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
         gpu::GraphicsState graphics_state =
-            gpu::render_geometry_state(DP_RT, DP_RT)!!;
+            gpu::render_geometry_state(DP_RT, DP_RT);
         graphics_state.depth = tested;
         gpu::ColorTargetState[1] color_targets = {{
             .write_mask = gpu::COLOR_WRITE_ALL,
@@ -374,7 +374,7 @@ fn void depth_write_toggle_honored() @test {
     defer free_owned_span(&device, &green_owned)!!;
     gpu::GpuSpan green = green_owned.span;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -390,7 +390,7 @@ fn void depth_write_toggle_honored() @test {
     };
     gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = no_write;
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
@@ -472,7 +472,7 @@ fn void depth_state_variants_share_entry() @test {
     defer free_owned_span(&device, &green_owned)!!;
     gpu::GpuSpan green = green_owned.span;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -488,7 +488,7 @@ fn void depth_state_variants_share_entry() @test {
     };
     gpu::RenderPassDesc pass = { .colors = colors[..], .depth = &depth_target, .width = DP_RT, .height = DP_RT };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = tested;
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
@@ -552,7 +552,7 @@ fn void depth_only_pass_renders_footprint() @test {
     defer free_owned_span(&device, &color_owned)!!;
     gpu::GpuSpan color = color_owned.span;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -564,7 +564,7 @@ fn void depth_only_pass_renders_footprint() @test {
     };
     gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = tested;
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
@@ -654,7 +654,7 @@ fn void sampled_depth_matches_readback() @test {
     root.v = 0.5f;
     gpu::flush_mapped_span(&device, root_span)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -666,7 +666,7 @@ fn void sampled_depth_matches_readback() @test {
     };
     gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = tested;
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
@@ -799,7 +799,7 @@ fn void depth_nonzero_mip_layer_isolated() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -812,19 +812,19 @@ fn void depth_nonzero_mip_layer_isolated() @test {
         view:    target_range,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   depth_state,
-    )!!;
+    );
     gpu::TextureBarrier layer_to_depth = gpu::texture_view_transition(
         texture: depth,
         view:    layer_range,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   depth_state,
-    )!!;
+    );
     gpu::TextureBarrier mip_to_depth = gpu::texture_view_transition(
         texture: depth,
         view:    mip_range,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   depth_state,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &target_to_depth)!!;
     gpu::cmd_texture_barrier(&commands, &layer_to_depth)!!;
     gpu::cmd_texture_barrier(&commands, &mip_to_depth)!!;
@@ -867,7 +867,7 @@ fn void depth_nonzero_mip_layer_isolated() @test {
         .height = MIP_SIZE,
     };
     gpu::GraphicsState selected_graphics_state =
-        gpu::render_geometry_state(MIP_SIZE, MIP_SIZE)!!;
+        gpu::render_geometry_state(MIP_SIZE, MIP_SIZE);
     selected_graphics_state.depth = {
         .test_enable  = true,
         .write_enable = true,
@@ -952,36 +952,6 @@ fn void depth_nonzero_mip_layer_isolated() @test {
         "drawing one mip leaves the neighboring mip unchanged");
 }
 
-fn void depth_pass_validation_faults() @test {
-    gpu::Device device = make_depth_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc sampled_only_desc = {
-        .access    = { .graphics, .compute, .transfer },
-        .width     = DP_RT,
-        .height    = DP_RT,
-        .format    = gpu::Format.D32_FLOAT,
-        .usage     = { .sampled },
-    };
-    gpu::TextureHandle sampled_only = gpu::create_texture(&device, &sampled_only_desc)!!;
-    defer gpu::destroy_texture(&device, sampled_only)!!;
-
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
-    defer gpu::destroy_command_allocator(&command_allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-
-    gpu::AttachmentViewDesc no_usage = { .texture = sampled_only };
-    assert(@catch(gpu::create_attachment_view(&device, &no_usage))
-        == gpu::INVALID_ARGUMENT,
-        "attachment creation rejects a texture without attachment usage");
-
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
-    defer discard_test_executable(&cmd_executable)!!;
-}
-
 const char[*] SHADOW_PROBE_SPIRV = $embed("shaders/shadow_probe.comp.spv");
 
 fn void compare_sampler_exact_results() @test {
@@ -1056,7 +1026,7 @@ fn void compare_sampler_exact_results() @test {
     root.ref_hi = NEAR_Z + 0.1f;
     gpu::flush_mapped_span(&device, root_span)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -1068,7 +1038,7 @@ fn void compare_sampler_exact_results() @test {
     };
     gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = tested;
     gpu::cmd_begin_render_pass(&cmd, &pass)!!;
     gpu::cmd_bind_pipeline(&cmd, pipeline)!!;
@@ -1141,8 +1111,8 @@ fn void depth_bias_shifts_stored_depth() @test {
     OwnedSpan readback = make_readback(&device, DP_DEPTH_BYTES * 2);
     defer free_owned_span(&device, &readback)!!;
     gpu::GpuSpan rb = readback.span;
-    gpu::GpuSpan rb_plain = rb.checked_subspan(0, DP_DEPTH_BYTES)!!;
-    gpu::GpuSpan rb_biased = rb.checked_subspan(DP_DEPTH_BYTES, DP_DEPTH_BYTES)!!;
+    gpu::GpuSpan rb_plain = rb.subspan(0, DP_DEPTH_BYTES);
+    gpu::GpuSpan rb_biased = rb.subspan(DP_DEPTH_BYTES, DP_DEPTH_BYTES);
     OwnedSpan verts_owned = write_tri(&device, NEAR_Z);
     defer free_owned_span(&device, &verts_owned)!!;
     gpu::GpuSpan verts = verts_owned.span;
@@ -1150,7 +1120,7 @@ fn void depth_bias_shifts_stored_depth() @test {
     defer free_owned_span(&device, &color_owned)!!;
     gpu::GpuSpan color = color_owned.span;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(&device, command_queue)!!;
     defer gpu::destroy_command_allocator(&command_allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
@@ -1170,7 +1140,7 @@ fn void depth_bias_shifts_stored_depth() @test {
         };
         gpu::RenderPassDesc pass = { .depth = &depth_target, .width = DP_RT, .height = DP_RT };
         gpu::GraphicsState graphics_state =
-            gpu::render_geometry_state(DP_RT, DP_RT)!!;
+            gpu::render_geometry_state(DP_RT, DP_RT);
         graphics_state.depth = tested;
         if (i == 1) {
             graphics_state.raster = {

@@ -2,7 +2,7 @@ module gpu_test;
 
 import gpu;
 
-fn void mapped_gpu_span_checked_slicing_stays_consistent() @test {
+fn void mapped_gpu_span_slicing_stays_consistent() @test {
     char[64] storage;
     MappedGpuSpan mapped = {
         .span = {
@@ -16,9 +16,9 @@ fn void mapped_gpu_span_checked_slicing_stays_consistent() @test {
         .address = (gpu::GpuAddress)0x1000,
     };
 
-    MappedGpuSpan child = mapped.checked_subspan(8, 32)!!;
-    MappedGpuSpan nested = child.checked_subspan(12, 8)!!;
-    MappedGpuSpan exact_end = child.checked_subspan(24, 8)!!;
+    MappedGpuSpan child = mapped.subspan(8, 32);
+    MappedGpuSpan nested = child.subspan(12, 8);
+    MappedGpuSpan exact_end = child.subspan(24, 8);
 
     assert(child.span.offset == 40 && child.span.size == 32,
         "child span advances from the backing span");
@@ -36,41 +36,10 @@ fn void mapped_gpu_span_checked_slicing_stays_consistent() @test {
         "an exact-end child is accepted");
 }
 
-fn void mapped_gpu_span_checked_slicing_propagates_span_faults() @test {
-    char[16] storage;
-    MappedGpuSpan mapped = {
-        .span = {
-            .owner      = 1,
-            .generation = 1,
-            .offset     = usz::max,
-            .size       = storage.len,
-        },
-        .bytes   = storage[..],
-        .address = (gpu::GpuAddress)0x2000,
-    };
-
-    assert(@catch(mapped.checked_subspan(0, 0)) == gpu::INVALID_ARGUMENT,
-        "zero-size child propagates the span fault");
-    assert(@catch(mapped.checked_subspan(12, 5)) == gpu::INVALID_ARGUMENT,
-        "child escaping its immediate parent propagates the span fault");
-    assert(@catch(mapped.checked_subspan(1, 1)) == gpu::INVALID_ARGUMENT,
-        "backing offset overflow propagates the span fault");
-
-    mapped.span.offset = 0;
-    mapped.bytes = storage[0:8];
-    assert(@catch(mapped.checked_subspan(0, 8)) == gpu::INVALID_ARGUMENT,
-        "mismatched byte and span ranges are rejected before slicing");
-
-    mapped.bytes = storage[..];
-    mapped.address = (gpu::GpuAddress)ulong::max;
-    assert(@catch(mapped.checked_subspan(1, 1)) == gpu::INVALID_ARGUMENT,
-        "GPU address overflow is rejected");
-}
-
 fn void gpu_span_allocation_accessor_round_trips_identity() @test {
     GpuAllocation allocation = { .owner = 5, .index = 7, .generation = 3 };
     GpuSpan whole = { .owner = 5, .index = 7, .generation = 3, .offset = 0, .size = 64 };
-    GpuSpan part = whole.checked_subspan(16, 16)!!;
+    GpuSpan part = whole.subspan(16, 16);
     assert(whole.allocation() == allocation, "a whole span names its allocation");
     assert(part.allocation() == allocation, "a subspan names the same allocation");
 }

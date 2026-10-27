@@ -3,7 +3,7 @@ module hello_gpu;
 import gpu;
 import std::io;
 
-faultdef LOST_DEVICE;
+faultdef LOST_DEVICE, WRONG_RESULT;
 
 const char[*] DOUBLER_SPIRV = $embed("../shaders/doubler.comp.spv");
 const uint COUNT = 256;
@@ -29,7 +29,8 @@ fn void? run() {
     gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
     defer (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
-    gpu::Adapter adapter = adapters.get(0)!;
+    if (adapters.count == 0) return gpu::UNSUPPORTED_FEATURE~;
+    gpu::Adapter adapter = adapters.get(0);
     gpu::Device device = gpu::create_device(&adapter)!;
     defer (void)gpu::destroy_device(&device);
 
@@ -90,7 +91,7 @@ fn void? run() {
     gpu::invalidate_mapped_span(&device, output.span)!;
     float* out_data = (float*)output.bytes.ptr;
     for (uint i = 0; i < COUNT; i++) {
-        if (out_data[i] != (float)i * 2.0f) return gpu::INVALID_ARGUMENT~;
+        if (out_data[i] != (float)i * 2.0f) return WRONG_RESULT~;
     }
 }
 
@@ -102,12 +103,12 @@ fn void? run_compute(
     gpu::MappedGpuSpan root,
 ) {
     DoublerRoot* record = (DoublerRoot*)root.bytes.ptr;
-    record.input_gpu  = gpu::get_span_address(device, input_span)!;
-    record.output_gpu = gpu::get_span_address(device, output_span)!;
+    record.input_gpu  = gpu::get_span_address(device, input_span);
+    record.output_gpu = gpu::get_span_address(device, output_span);
     record.count      = COUNT;
     gpu::flush_mapped_span(device, root.span)!;
 
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE)!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(device, queue)!;
     defer (void)gpu::destroy_command_allocator(&allocator);

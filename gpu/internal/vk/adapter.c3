@@ -202,68 +202,73 @@ fn void initialize_adapter(
     };
 }
 
-fn bool? vk_adapter_supports_device_baseline(
+fn bool vk_adapter_supports_device_baseline(
     VkRuntimeState* state,
     uint adapter_index,
 ) {
-    if (state == null || adapter_index >= state.adapters.len) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapters.len,
+        "adapter index must be inside the runtime adapter list"
+    );
     return state.adapters[adapter_index].device_baseline_supported;
 }
 
-fn bool? vk_adapter_supports_ray_queries(
+fn bool vk_adapter_supports_ray_queries(
     VkRuntimeState* state,
     uint adapter_index,
 ) {
-    if (state == null || adapter_index >= state.adapters.len) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapters.len,
+        "adapter index must be inside the runtime adapter list"
+    );
     return ray_query_candidate_supported(
         &state.adapters[adapter_index].ray_tracing,
     );
 }
 
-fn bool? vk_adapter_supports_ray_tracing_pipelines(
+fn bool vk_adapter_supports_ray_tracing_pipelines(
     VkRuntimeState* state,
     uint adapter_index,
 ) {
-    if (state == null || adapter_index >= state.adapters.len) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapters.len,
+        "adapter index must be inside the runtime adapter list"
+    );
     return ray_tracing_pipeline_candidate_supported(
         &state.adapters[adapter_index].ray_tracing,
     );
 }
 
-fn bool? vk_adapter_supports_mesh_shaders(
+fn bool vk_adapter_supports_mesh_shaders(
     VkRuntimeState* state,
     uint adapter_index,
 ) {
-    if (state == null || adapter_index >= state.adapters.len) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapters.len,
+        "adapter index must be inside the runtime adapter list"
+    );
     return state.adapters[adapter_index].mesh_shaders.enabled;
 }
 
-fn bool? vk_adapter_supports_ray_query_heap(
+fn bool vk_adapter_supports_ray_query_heap(
     VkRuntimeState* state,
     uint adapter_index,
     uint heap_capacity,
 ) {
-    if (state == null || adapter_index >= state.adapters.len) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapters.len,
+        "adapter index must be inside the runtime adapter list"
+    );
     RayTracingCandidateSupport* support =
         &state.adapters[adapter_index].ray_tracing;
     uint texture_capacity = resolve_descriptor_capacity(
         state.config.texture_heap_capacity,
         gpu::DEFAULT_TEXTURE_HEAP_CAPACITY,
-    )!;
+    );
     uint sampler_capacity = resolve_descriptor_capacity(
         state.config.sampler_heap_capacity,
         gpu::DEFAULT_SAMPLER_HEAP_CAPACITY,
-    )!;
+    );
     return acceleration_structure_descriptor_heap_fits_limits(
         heap_capacity,
         texture_capacity,

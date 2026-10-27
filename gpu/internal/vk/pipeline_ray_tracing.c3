@@ -63,59 +63,34 @@ fn RayTracingPipelineShape? normalize_ray_tracing_pipeline_desc(
     VkDeviceState* state,
     gpu::RayTracingPipelineDesc* desc,
 ) {
-    if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    assert(state != null && desc != null, "pipeline normalization needs a device state and a descriptor");
     if (!state.ray_tracing_pipelines_enabled
         || !state.caps.ray_tracing_pipelines.enabled) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
-    if (desc.ray_generation_shaders.len == 0
-        || desc.ray_generation_shaders.ptr == null
-        || (desc.miss_shaders.len > 0 && desc.miss_shaders.ptr == null)
-        || (desc.hit_groups.len > 0 && desc.hit_groups.ptr == null)
-        || (desc.callable_shaders.len > 0
-            && desc.callable_shaders.ptr == null)
-        || desc.ray_generation_shaders.len > uint::max
-        || desc.miss_shaders.len > uint::max
-        || desc.hit_groups.len > uint::max
-        || desc.callable_shaders.len > uint::max) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     uint recursion_depth = desc.max_recursion_depth == 0
         ? 1
         : desc.max_recursion_depth;
-    if (recursion_depth
-        > state.caps.ray_tracing_pipelines.max_recursion_depth) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        recursion_depth <= state.caps.ray_tracing_pipelines.max_recursion_depth,
+        "desc.max_recursion_depth must not exceed DeviceCaps ray_tracing_pipelines.max_recursion_depth"
+    );
     gpu::RayTracingPipelineInfo info =
         ray_tracing_pipeline_info_for_counts(
             (uint)desc.ray_generation_shaders.len,
             (uint)desc.miss_shaders.len,
             (uint)desc.hit_groups.len,
             (uint)desc.callable_shaders.len,
-        )!;
+        );
     info.max_recursion_depth = recursion_depth;
     info.dynamic_stack_size = desc.dynamic_stack_size;
     ulong stage_count = desc.ray_generation_shaders.len
         + desc.miss_shaders.len
         + desc.callable_shaders.len;
     foreach (&group : desc.hit_groups) {
-        switch (group.kind) {
-            case gpu::RayTracingHitGroupKind.TRIANGLES:
-                if (group.intersection_shader != null) {
-                    return gpu::INVALID_ARGUMENT~;
-                }
-            case gpu::RayTracingHitGroupKind.PROCEDURAL:
-                if (group.intersection_shader == null) {
-                    return gpu::INVALID_ARGUMENT~;
-                }
-            default:
-                return gpu::INVALID_ARGUMENT~;
-        }
         if (group.closest_hit_shader != null) stage_count++;
         if (group.any_hit_shader != null) stage_count++;
         if (group.intersection_shader != null) stage_count++;
-        if (stage_count > uint::max) return gpu::INVALID_ARGUMENT~;
     }
     return {
         .info            = info,
@@ -373,7 +348,7 @@ fn gpu::PipelineHandle? create_ray_tracing_pipeline_from_prepared(
                 .entry            = hit,
             })) {
                 foreach (&identity : prepared) {
-                    release_prepared_shader_locked(state, identity)!!;
+                    release_prepared_shader_locked(state, identity);
                 }
                 return handle;
             }
@@ -475,7 +450,7 @@ fn gpu::PipelineHandle? create_ray_tracing_pipeline_from_prepared(
         vk::destroy_pipeline(state.device, pipeline, null);
         state.pipeline_cache.entries[raced].refcount++;
         foreach (&identity : prepared) {
-            release_prepared_shader_locked(state, identity)!!;
+            release_prepared_shader_locked(state, identity);
         }
         entry_index = raced;
     } else if (try index = create_ops.insert_cache_entry(
@@ -632,16 +607,17 @@ fn gpu::PipelineHandle? vk_create_ray_tracing_pipeline(
     );
 }
 
-fn gpu::RayTracingPipelineInfo? vk_get_ray_tracing_pipeline_info(
+fn gpu::RayTracingPipelineInfo vk_get_ray_tracing_pipeline_info(
     VkDeviceState* state,
     gpu::PipelineHandle pipeline,
 ) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     PipelineSlot* slot = state.pipelines.get(pipeline);
-    if (!pipeline_kind_matches(state, slot, PipelineKind.RAY_TRACING)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        pipeline_kind_matches(state, slot, PipelineKind.RAY_TRACING),
+        "pipeline must be a ray-tracing pipeline"
+    );
     return slot.ray_tracing_info;
 }
 
@@ -673,39 +649,45 @@ fn void? vk_get_ray_tracing_shader_group_handles_with_ops(
     char[] out,
     RayTracingGroupHandleOps* ops,
 ) {
-    if (state == null || ops == null || ops.get == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(state != null && ops != null && ops.get != null, "group handle query needs a device state and operations");
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     PipelineSlot* slot = state.pipelines.get(pipeline);
-    if (!pipeline_kind_matches(state, slot, PipelineKind.RAY_TRACING)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        pipeline_kind_matches(state, slot, PipelineKind.RAY_TRACING),
+        "pipeline must be a ray-tracing pipeline"
+    );
     ulong end_group = (ulong)first_group + group_count;
-    if (end_group > slot.ray_tracing_info.total_group_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    ulong required = (ulong)group_count
-        * state.caps.ray_tracing_pipelines.shader_group_handle_size;
-    if (required > usz::max
-        || out.len != (usz)required
-        || (required > 0 && out.ptr == null)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (group_count == 0) return;
-    check_backend_result(
-        state:     state,
-        operation: "get_ray_tracing_shader_group_handles",
-        result:    ops.get(
+    assert(
+        end_group <= slot.ray_tracing_info.total_group_count,
+        "first_group + group_count must not exceed the pipeline's total group count"
+    );
+    ulong handle_size = state.caps.ray_tracing_pipelines.shader_group_handle_size;
+    ulong required = (ulong)group_count * handle_size;
+    ulong fits = handle_size == 0 ? 0 : (ulong)out.len / handle_size;
+    uint copy_count = fits < group_count ? (uint)fits : group_count;
+    vk::Result result = vk::Result.SUCCESS;
+    if (copy_count != 0) {
+        result = ops.get(
             ops.user_data,
             state.device,
             slot.pipeline,
             first_group,
-            group_count,
-            (sz)required,
+            copy_count,
+            (sz)(copy_count * handle_size),
             out.ptr,
-        ),
+        );
+    }
+    // After the copy: unsafe builds assume asserts hold, which would drop the
+    // copy_count bound if this came first.
+    assert(
+        out.len == required && (required == 0 || out.ptr != null),
+        "out.len must equal group_count * shader_group_handle_size"
+    );
+    check_backend_result(
+        state:     state,
+        operation: "get_ray_tracing_shader_group_handles",
+        result:    result,
     )!;
 }
 
@@ -730,7 +712,7 @@ fn void? vk_get_ray_tracing_shader_group_handles(
     );
 }
 
-fn vk::ShaderGroupShaderKHR? lower_ray_tracing_group_shader(
+fn vk::ShaderGroupShaderKHR lower_ray_tracing_group_shader(
     gpu::RayTracingGroupShader shader,
 ) {
     switch (shader) {
@@ -743,7 +725,7 @@ fn vk::ShaderGroupShaderKHR? lower_ray_tracing_group_shader(
         case gpu::RayTracingGroupShader.INTERSECTION:
             return vk::ShaderGroupShaderKHR.INTERSECTION_KHR;
         default:
-            return gpu::INVALID_ARGUMENT~;
+            unreachable("group_shader must be a known RayTracingGroupShader");
     }
 }
 
@@ -827,30 +809,29 @@ fn ulong? vk_get_ray_tracing_shader_group_stack_size_with_ops(
     gpu::RayTracingGroupShader group_shader,
     RayTracingGroupStackSizeOps* ops,
 ) {
-    if (state == null || ops == null || ops.get == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(state != null && ops != null && ops.get != null, "stack size query needs a device state and operations");
     vk::ShaderGroupShaderKHR lowered =
-        lower_ray_tracing_group_shader(group_shader)!;
+        lower_ray_tracing_group_shader(group_shader);
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     PipelineSlot* slot = state.pipelines.get(pipeline);
-    if (!pipeline_kind_matches(state, slot, PipelineKind.RAY_TRACING)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (group >= slot.ray_tracing_info.total_group_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        pipeline_kind_matches(state, slot, PipelineKind.RAY_TRACING),
+        "pipeline must be a ray-tracing pipeline"
+    );
+    assert(
+        group < slot.ray_tracing_info.total_group_count,
+        "group must be less than the pipeline's total group count"
+    );
     PipelineCacheEntry* entry =
         &state.pipeline_cache.entries[slot.entry];
-    if (!ray_tracing_group_shader_present(
+    bool present = ray_tracing_group_shader_present(
         entry,
         &slot.ray_tracing_info,
         group,
         group_shader,
-    )!) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    )!;
+    assert(present, "group_shader must name a shader present in the selected group");
     return (ulong)ops.get(
         ops.user_data,
         state.device,

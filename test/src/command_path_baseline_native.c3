@@ -27,7 +27,7 @@ fn CommandPathNativeContext? command_path_native_context(
     };
 }
 
-fn CommandPathNativeCopy? command_path_native_copy(
+fn CommandPathNativeCopy command_path_native_copy(
     gpu::Device* device,
     gpu::GpuSpan src,
     gpu::GpuSpan dst,
@@ -35,11 +35,12 @@ fn CommandPathNativeCopy? command_path_native_copy(
     VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     if (state == null) abort("gpu: corrupt Device");
-    ResolvedSpan resolved_src = resolve_span(state, &src)!;
-    ResolvedSpan resolved_dst = resolve_span(state, &dst)!;
-    if (resolved_src.size != resolved_dst.size) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    ResolvedSpan resolved_src = resolve_span(state, &src);
+    ResolvedSpan resolved_dst = resolve_span(state, &dst);
+    assert(
+        resolved_src.size == resolved_dst.size,
+        "the direct copy spans must have equal sizes"
+    );
     return {
         .src_buffer = resolved_src.slot.buffer,
         .dst_buffer = resolved_dst.slot.buffer,

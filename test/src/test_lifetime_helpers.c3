@@ -9,11 +9,11 @@ struct OwnedSpan {
     gpu::GpuSpan       span;
 }
 
+<* @require desc != null : "desc must not be null" *>
 fn gpu::Device? create_test_device(
     gpu::RuntimeDesc* desc,
     gpu::DeviceDesc* device_desc = null,
 ) {
-    if (desc == null) return gpu::INVALID_ARGUMENT~;
     gpu::DeviceDesc effective = device_desc == null ? (gpu::DeviceDesc){} : *device_desc;
     $if $feature(UNIFIED_LAYOUTS):
         effective.unified_layouts = true;
@@ -22,7 +22,7 @@ fn gpu::Device? create_test_device(
     defer catch (void)gpu::destroy_runtime(&runtime);
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::Adapter adapter = adapters.get(i);
         gpu::DeviceSupport support =
             gpu::supports_device_desc(&adapter)!;
         if (!support.supported) continue;
@@ -66,7 +66,7 @@ fn OwnedSpan? allocate_owned_span(
     };
     gpu::GpuAllocation allocation = gpu::allocate_memory(device, &desc)!;
     defer catch (void)gpu::free_allocation(device, &allocation);
-    gpu::GpuSpan span = gpu::get_allocation_span(device, allocation)!;
+    gpu::GpuSpan span = gpu::get_allocation_span(device, allocation);
     return { .allocation = allocation, .span = span };
 }
 
@@ -77,11 +77,11 @@ fn void? free_owned_span(gpu::Device* device, OwnedSpan* owned) {
 }
 
 fn char[] test_span_mapping(gpu::Device* device, gpu::GpuSpan span) {
-    return gpu::get_span_mapping(device, span)!!;
+    return gpu::get_span_mapping(device, span);
 }
 
 fn gpu::GpuAddress test_span_address(gpu::Device* device, gpu::GpuSpan span) {
-    return gpu::get_span_address(device, span)!!;
+    return gpu::get_span_address(device, span);
 }
 
 <* Discard a recording token unless another copy already consumed it. *>
@@ -150,11 +150,11 @@ fn gpu::CompletionPoint? submit_test_queue(
     gpu::QueueKind kind,
     gpu::SubmitDesc* desc,
 ) {
-    return gpu::submit(gpu::get_queue(device, kind)!, desc);
+    return gpu::submit(gpu::get_queue(device, kind), desc);
 }
 
 fn void? wait_test_queue(gpu::Device* device, gpu::QueueKind queue) {
-    gpu::Queue target = gpu::get_queue(device, queue)!;
+    gpu::Queue target = gpu::get_queue(device, queue);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         device,
         target,
@@ -204,11 +204,11 @@ fn void? upload_test_texture_data(
         debug_name:   "test_texture_upload",
     )!;
     defer (void)free_owned_span(device, &upload);
-    char[] mapping = gpu::get_span_mapping(device, upload.span)!;
+    char[] mapping = gpu::get_span_mapping(device, upload.span);
     mapping[..] = data[..];
     gpu::flush_mapped_span(device, upload.span)!;
 
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         device,
         queue,
@@ -229,7 +229,7 @@ fn void? upload_test_texture_data(
             .stages = { .transfer },
             .access = { .write },
         },
-    )!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_transfer)!;
     gpu::BufferTextureCopyDesc copy = {
         .src     = upload.span,
@@ -246,7 +246,7 @@ fn void? upload_test_texture_data(
             .access = { .write },
         },
         after:   next_use,
-    )!;
+    );
     gpu::cmd_texture_barrier(&commands, &transition)!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
     defer (void)discard_test_executable(&executable);
@@ -272,7 +272,7 @@ fn void? readback_test_texture_data(
     )!;
     defer (void)free_owned_span(device, &readback);
 
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         device,
         queue,
@@ -293,7 +293,7 @@ fn void? readback_test_texture_data(
             .stages = { .transfer },
             .access = { .read },
         },
-    )!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_transfer)!;
     gpu::TextureBufferCopyDesc copy = {
         .texture = src,
@@ -315,7 +315,7 @@ fn void? readback_test_texture_data(
             .access = { .read },
         },
         after:   from_use,
-    )!;
+    );
     gpu::cmd_texture_barrier(&commands, &restore)!;
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!;
     defer (void)discard_test_executable(&executable);
@@ -325,6 +325,6 @@ fn void? readback_test_texture_data(
     gpu::wait_completion(completion)!;
 
     gpu::invalidate_mapped_span(device, readback.span)!;
-    char[] mapping = gpu::get_span_mapping(device, readback.span)!;
+    char[] mapping = gpu::get_span_mapping(device, readback.span);
     out_data[..] = mapping[..];
 }

@@ -423,21 +423,6 @@ fn void sparse_selection_reports_only_capable_selected_roles() @test {
     assert(!picked.sparse_binding_queues.transfer);
 }
 
-fn void distinct_roles_must_also_be_required() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 2),
-    };
-    gpu::QueueRequest request = {
-        .distinct_roles = { .graphics },
-    };
-
-    fault result =
-        @catch(vk::pick_queue_families_for_request(table[..], request));
-
-    assert(result == gpu::INVALID_ARGUMENT,
-        "a distinct role outside the required set is invalid");
-}
-
 fn void presentation_selects_a_surface_capable_graphics_queue() @test {
     vk::QueueFamilyProperties[3] table = {
         family(QF_G | QF_C | QF_T, 1),
@@ -548,20 +533,6 @@ fn void single_queue_presentation_rejects_private_fallback() @test {
         "single-queue presentation does not add a private queue");
 }
 
-fn void presentation_support_must_cover_every_queue_family() @test {
-    vk::QueueFamilyProperties[1] table = {
-        family(QF_G | QF_C | QF_T, 1),
-    };
-
-    fault result = @catch(vk::pick_queue_families_for_surface_request(
-        table[..],
-        {},
-        gpu::internal::default_queue_request(),
-    ));
-
-    assert(result == gpu::INVALID_ARGUMENT);
-}
-
 fn void presentation_requires_a_capable_queue_family() @test {
     vk::QueueFamilyProperties[1] table = {
         family(QF_G | QF_C | QF_T, 1),
@@ -575,25 +546,6 @@ fn void presentation_requires_a_capable_queue_family() @test {
     ));
 
     assert(result == gpu::UNSUPPORTED_FEATURE);
-}
-
-fn void presentation_without_graphics_is_rejected() @test {
-    vk::QueueFamilyProperties[2] table = {
-        family(QF_C, 1),
-        family(0, 1),
-    };
-    bool[2] presentation_support = { false, true };
-    gpu::QueueRequest request = {
-        .required = { .compute },
-    };
-
-    fault result = @catch(vk::pick_queue_families_for_surface_request(
-        table[..],
-        presentation_support[..],
-        request,
-    ));
-
-    assert(result == gpu::INVALID_ARGUMENT);
 }
 
 fn void presentation_queue_selection_requires_instance_dispatch() @test {
@@ -921,11 +873,11 @@ fn void allocator_pool_ownership_is_exact() @test {
     gpu::Device device = make_queue_test_device();
     defer destroy_test_device(&device)!!;
     gpu::Queue graphics =
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::Queue compute =
-        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::Queue transfer =
-        gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+        gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
     gpu::CommandAllocator graphics_allocator =
         gpu::create_command_allocator(&device, graphics)!!;
     defer gpu::destroy_command_allocator(&graphics_allocator)!!;
@@ -969,16 +921,16 @@ fn void cross_queue_timeline_chain_validates() @test {
     };
 
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::Adapter adapter = adapters.get(i);
         if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
         gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
         defer gpu::destroy_device(&device)!!;
         gpu::Queue compute =
-            gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+            gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
         gpu::Queue graphics =
-            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
         assert(compute.id != graphics.id,
             "the timeline chain crosses distinct compute and graphics queues");
 
@@ -1017,7 +969,7 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
     };
 
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!!;
+        gpu::Adapter adapter = adapters.get(i);
         if (!gpu::supports_device_desc(&adapter, &device_desc)!!.supported) {
             continue;
         }
@@ -1025,11 +977,11 @@ fn void distinct_transfer_compute_graphics_completion_chain() @test {
         gpu::Device device = gpu::create_device(&adapter, &device_desc)!!;
         defer gpu::destroy_device(&device)!!;
         gpu::Queue graphics =
-            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+            gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
         gpu::Queue compute =
-            gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+            gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
         gpu::Queue transfer =
-            gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+            gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
 
         assert(graphics.id != compute.id
                 && graphics.id != transfer.id

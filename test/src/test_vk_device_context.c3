@@ -44,7 +44,7 @@ fn void device_context_submits_and_reads_back_before_teardown() @test {
     defer {
         if (allocation.is_valid()) gpu::free_allocation(&context.device, &allocation)!!;
     }
-    gpu::GpuSpan span = gpu::get_allocation_span(&context.device, allocation)!!;
+    gpu::GpuSpan span = gpu::get_allocation_span(&context.device, allocation);
 
     gpu::CommandList commands = gpu::begin_commands(&context.command_allocator)!!;
     defer (void)gpu::discard_commands(&commands);
@@ -59,7 +59,7 @@ fn void device_context_submits_and_reads_back_before_teardown() @test {
     gpu::wait_completion(completion)!!;
 
     gpu::invalidate_mapped_span(&context.device, span)!!;
-    uint* values = (uint*)gpu::get_span_mapping(&context.device, span)!!.ptr;
+    uint* values = (uint*)gpu::get_span_mapping(&context.device, span).ptr;
     for (uint index = 0; index < CONTEXT_FILL_COUNT; index++) {
         assert(values[index] == CONTEXT_FILL_VALUE);
     }

@@ -159,7 +159,7 @@ fn DynamicStateFixture make_dynamic_state_fixture_before_pass(
     gpu::Queue queue = gpu::get_queue(
         &fixture.device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     fixture.allocator = gpu::create_command_allocator(
         &fixture.device,
         queue,
@@ -185,7 +185,7 @@ fn DynamicStateFixture make_dynamic_state_fixture(
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT);
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -358,7 +358,7 @@ fn void texture_create_info_and_default_view_preserve_dimension() @test {
         "zero depth preserves two-dimensional native lowering");
 }
 
-fn void texture_copy_regions_preserve_dimension_and_safe_span_bounds() @test {
+fn void texture_copy_regions_preserve_dimension_and_defaults() @test {
     vk::ResolvedSpan span = {
         .size = 4096,
     };
@@ -382,7 +382,7 @@ fn void texture_copy_regions_preserve_dimension_and_safe_span_bounds() @test {
         width:             0,
         height:            0,
         depth:             0,
-    )!!;
+    );
     assert(two_d.image_offset.x == 3
         && two_d.image_offset.y == 1
         && two_d.image_offset.z == 0
@@ -406,41 +406,9 @@ fn void texture_copy_regions_preserve_dimension_and_safe_span_bounds() @test {
         width:             1,
         height:            1,
         depth:             1,
-    )!!;
+    );
     assert(two_d.image_extent.depth == 1,
         "explicit depth one preserves two-dimensional copies");
-
-    fault two_d_z = @catch(vk::resolve_texture_copy_region(
-        resolved:          &span,
-        slot:              &two_dimensional,
-        row_length_texels: 0,
-        mip:               0,
-        base_layer:        0,
-        layer_count:       0,
-        x:                 0,
-        y:                 0,
-        z:                 1,
-        width:             1,
-        height:            1,
-        depth:             1,
-    ));
-    fault two_d_depth = @catch(vk::resolve_texture_copy_region(
-        resolved:          &span,
-        slot:              &two_dimensional,
-        row_length_texels: 0,
-        mip:               0,
-        base_layer:        0,
-        layer_count:       0,
-        x:                 0,
-        y:                 0,
-        z:                 0,
-        width:             1,
-        height:            1,
-        depth:             2,
-    ));
-    assert(two_d_z == gpu::INVALID_ARGUMENT
-        && two_d_depth == gpu::INVALID_ARGUMENT,
-        "two-dimensional copies reject volume coordinates");
 
     vk::TextureSlot three_dimensional = {
         .format       = gpu::Format.RGBA8_UNORM,
@@ -463,7 +431,7 @@ fn void texture_copy_regions_preserve_dimension_and_safe_span_bounds() @test {
         width:             0,
         height:            0,
         depth:             0,
-    )!!;
+    );
     assert(three_d.image_offset.x == 1
         && three_d.image_offset.y == 0
         && three_d.image_offset.z == 1
@@ -474,125 +442,6 @@ fn void texture_copy_regions_preserve_dimension_and_safe_span_bounds() @test {
         && three_d.image_subresource.layer_count == 1,
         "three-dimensional zero extents select the remaining mip volume");
 
-    fault three_d_layer = @catch(vk::resolve_texture_copy_region(
-        resolved:          &span,
-        slot:              &three_dimensional,
-        row_length_texels: 0,
-        mip:               0,
-        base_layer:        1,
-        layer_count:       1,
-        x:                 0,
-        y:                 0,
-        z:                 0,
-        width:             1,
-        height:            1,
-        depth:             1,
-    ));
-    fault three_d_layers = @catch(vk::resolve_texture_copy_region(
-        resolved:          &span,
-        slot:              &three_dimensional,
-        row_length_texels: 0,
-        mip:               0,
-        base_layer:        0,
-        layer_count:       2,
-        x:                 0,
-        y:                 0,
-        z:                 0,
-        width:             1,
-        height:            1,
-        depth:             1,
-    ));
-    fault three_d_z = @catch(vk::resolve_texture_copy_region(
-        resolved:          &span,
-        slot:              &three_dimensional,
-        row_length_texels: 0,
-        mip:               1,
-        base_layer:        0,
-        layer_count:       1,
-        x:                 0,
-        y:                 0,
-        z:                 5,
-        width:             1,
-        height:            1,
-        depth:             1,
-    ));
-    fault three_d_depth = @catch(vk::resolve_texture_copy_region(
-        resolved:          &span,
-        slot:              &three_dimensional,
-        row_length_texels: 0,
-        mip:               1,
-        base_layer:        0,
-        layer_count:       1,
-        x:                 0,
-        y:                 0,
-        z:                 1,
-        width:             1,
-        height:            1,
-        depth:             4,
-    ));
-    assert(three_d_layer == gpu::INVALID_ARGUMENT
-        && three_d_layers == gpu::INVALID_ARGUMENT
-        && three_d_z == gpu::INVALID_ARGUMENT
-        && three_d_depth == gpu::INVALID_ARGUMENT,
-        "three-dimensional copies reject array layers and out-of-range depth");
-
-    span.size = 95;
-    fault short_padded_span = @catch(vk::resolve_texture_copy_region(
-        resolved:          &span,
-        slot:              &three_dimensional,
-        row_length_texels: 4,
-        mip:               1,
-        base_layer:        0,
-        layer_count:       1,
-        x:                 1,
-        y:                 0,
-        z:                 1,
-        width:             3,
-        height:            2,
-        depth:             3,
-    ));
-    span.size = 4096;
-    fault short_row = @catch(vk::resolve_texture_copy_region(
-        resolved:          &span,
-        slot:              &three_dimensional,
-        row_length_texels: 2,
-        mip:               1,
-        base_layer:        0,
-        layer_count:       1,
-        x:                 1,
-        y:                 0,
-        z:                 1,
-        width:             3,
-        height:            2,
-        depth:             3,
-    ));
-    vk::TextureSlot overflow_texture = {
-        .format       = gpu::Format.RGBA8_UNORM,
-        .width        = uint::max,
-        .height       = uint::max,
-        .depth        = 1,
-        .mip_levels   = 1,
-        .array_layers = 1,
-    };
-    span.size = usz::max;
-    fault byte_overflow = @catch(vk::resolve_texture_copy_region(
-        resolved:          &span,
-        slot:              &overflow_texture,
-        row_length_texels: uint::max,
-        mip:               0,
-        base_layer:        0,
-        layer_count:       1,
-        x:                 0,
-        y:                 0,
-        z:                 0,
-        width:             1,
-        height:            uint::max,
-        depth:             1,
-    ));
-    assert(short_padded_span == gpu::INVALID_ARGUMENT
-        && short_row == gpu::INVALID_ARGUMENT
-        && byte_overflow == gpu::INVALID_ARGUMENT,
-        "multi-slice span sizing rejects padding, row, and arithmetic faults");
 }
 
 fn void color_resolve_mode_matches_numeric_format() @test {
@@ -862,13 +711,13 @@ fn void preserves_graphics_binding_across_render_passes() @test {
         .height = VAL_RT,
     };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT);
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
     graphics_state.color.targets = color_targets[..];
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -912,7 +761,7 @@ fn void graphics_alias_updates_logical_handle() @test {
         gpu::Format.RGBA8_UNORM,
     );
     defer gpu::destroy_pipeline(&device, alias_pipeline)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -944,7 +793,7 @@ fn void mesh_state_replays_topology_on_graphics_bind() @test {
     defer destroy_test_device(&device)!!;
     ValDrawCtx draw = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &draw);
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
@@ -952,7 +801,7 @@ fn void mesh_state_replays_topology_on_graphics_bind() @test {
     gpu::cmd_bind_pipeline(&commands, draw.graphics)!!;
     vk::CommandRecord* record = vk::resolve_command(&commands);
     record.logical_pipeline.kind = vk::PipelineKind.MESH;
-    gpu::GraphicsState state = gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
+    gpu::GraphicsState state = gpu::render_geometry_state(VAL_RT, VAL_RT);
     state.raster.topology = gpu::PrimitiveTopology.LINES;
     gpu::cmd_set_graphics_state(&commands, &state)!!;
     assert(record.graphics_state_initialized && !record.raster_topology_emitted);
@@ -973,7 +822,7 @@ fn void alternating_bind_points_preserve_native_caches() @test {
     defer destroy_val_compute_ctx(&device, &compute);
     ValDrawCtx draw = make_val_draw_ctx(&device);
     defer destroy_val_draw_ctx(&device, &draw);
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -1023,7 +872,7 @@ fn void distinct_pipelines_on_one_bind_point_emit_distinct_binds() @test {
     defer destroy_val_compute_ctx(&device, &compute);
     gpu::PipelineHandle other = review_distinct_compute_pipeline(&device);
     defer gpu::destroy_pipeline(&device, other)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -1071,7 +920,7 @@ fn void command_buffer_reuse_resets_graphics_and_descriptor_state() @test {
         .width  = VAL_RT,
         .height = VAL_RT,
     };
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity = 1,
     };
@@ -1082,7 +931,7 @@ fn void command_buffer_reuse_resets_graphics_and_descriptor_state() @test {
     )!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::GraphicsState graphics =
-        gpu::render_geometry_state(VAL_RT, VAL_RT)!!;
+        gpu::render_geometry_state(VAL_RT, VAL_RT);
     gpu::ColorTargetState[1] color_targets = {
         gpu::color_blend_disabled(),
     };
@@ -1162,7 +1011,7 @@ fn void graphics_state_lowering_is_exact() @test {
         },
     };
     vk::LoweredGraphicsState lowered =
-        vk::lower_graphics_state(&graphics)!!;
+        vk::lower_graphics_state(&graphics);
     assert(native_viewport_matches(&lowered.viewport, &graphics.viewport)
         && native_scissor_matches(&lowered.scissor, &graphics.scissor),
         "viewport and scissor lowering preserve every supplied value");
@@ -1263,7 +1112,7 @@ fn void dynamic_color_lowering_preserves_heterogeneous_targets() @test {
     gpu::ColorWriteMask green_blue = { .green, .blue };
     targets[1].write_mask = green_blue;
     gpu::ColorState color = { .targets = targets[..] };
-    vk::LoweredColorState lowered = vk::lower_color_state(&color)!!;
+    vk::LoweredColorState lowered = vk::lower_color_state(&color);
     assert(lowered.count == 2
         && lowered.blend_enables[0] == vk::FALSE
         && lowered.blend_enables[1] == vk::TRUE,
@@ -1303,7 +1152,7 @@ fn void dynamic_color_lowering_preserves_heterogeneous_targets() @test {
 
 fn void zero_target_color_lowering_is_empty() @test {
     gpu::ColorState color;
-    vk::LoweredColorState lowered = vk::lower_color_state(&color)!!;
+    vk::LoweredColorState lowered = vk::lower_color_state(&color);
     assert(lowered.count == 0,
         "a depth-only dynamic color domain lowers to no targets");
 }

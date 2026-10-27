@@ -70,7 +70,7 @@ fn double record_complete_packet_matrix(
         .height = 1,
     };
     gpu::GraphicsState graphics =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
@@ -105,7 +105,7 @@ fn int main() {
     gpu::Queue graphics_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         graphics_queue,

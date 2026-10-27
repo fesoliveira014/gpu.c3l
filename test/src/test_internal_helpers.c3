@@ -59,7 +59,7 @@ fn void completion_points_pack_queue_identity_and_sequence() @test {
         .roles  = { .transfer },
     };
 
-    CompletionPoint point = gpu::internal::make_completion_point(queue, 42)!!;
+    CompletionPoint point = gpu::internal::make_completion_point(queue, 42);
 
     assert(CompletionPoint::size <= ulong::size * 2,
         "a completion point fits in two machine words");
@@ -82,8 +82,6 @@ fn void completion_points_reject_reserved_values() @test {
 
     assert(!COMPLETION_POINT_INVALID.is_valid(),
         "the zero completion point is invalid");
-    assert(@catch(gpu::internal::make_completion_point(queue, 0)) == INVALID_ARGUMENT,
-        "sequence zero remains reserved");
 }
 
 fn void completion_sequences_are_monotonic_and_stop_before_wrap() @test {
@@ -117,8 +115,8 @@ fn void completion_points_poll_and_wait_without_consumption() @test {
         state:  &fixture.state,
         caps:   {},
     )!!;
-    Queue queue = get_queue(&device, QueueKind.GRAPHICS)!!;
-    CompletionPoint point = gpu::internal::make_completion_point(queue, 7)!!;
+    Queue queue = get_queue(&device, QueueKind.GRAPHICS);
+    CompletionPoint point = gpu::internal::make_completion_point(queue, 7);
     CompletionPoint original = point;
 
     assert(!poll_completion(point)!!,
@@ -155,7 +153,7 @@ fn void completion_point_creation_allocates_no_public_object() @test {
         state:  &fixture.state,
         caps:   {},
     )!!;
-    Queue queue = get_queue(&device, QueueKind.GRAPHICS)!!;
+    Queue queue = get_queue(&device, QueueKind.GRAPHICS);
     gpu::internal::DeviceSlot* slot = &gpu::internal::device_slots[device.index];
     ulong children_before = slot.live_children.load(AtomicOrdering.ACQUIRE);
     ulong sequence;

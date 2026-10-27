@@ -21,10 +21,7 @@ struct CommandRecord @public {
     char[]                           inline_root;
 }
 
-fn void? set_inline_root(CommandRecord* record, char[] inline_root) {
-    if (inline_root.len % 4 != 0 || inline_root.len > gpu::INLINE_ROOT_CAPACITY) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+fn void set_inline_root(CommandRecord* record, char[] inline_root) {
     record.inline_root = inline_root;
 }
 
@@ -97,10 +94,11 @@ fn gpu::GpuAddress? vk_get_acceleration_structure_address(
         || state.acceleration_structure != acceleration_structure) {
         abort("gpu: stale AccelerationStructureHandle");
     }
-    if (state.acceleration_structure_kind
-        != gpu::AccelerationStructureKind.BOTTOM_LEVEL) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state.acceleration_structure_kind
+            == gpu::AccelerationStructureKind.BOTTOM_LEVEL,
+        "acceleration structure must be bottom-level"
+    );
     return state.acceleration_structure_address;
 }
 
@@ -453,7 +451,7 @@ fn gpu::CompletionPoint? vk_submit(
     gpu::CompletionPoint point = gpu::internal::make_completion_point(
         queue,
         state.completion_sequence,
-    )!;
+    );
     if (state.lose_during_submit) {
         gpu::internal::mark_device_lost(&queue.device);
     }
@@ -613,7 +611,7 @@ fn gpu::SamplerIndex? vk_intern_sampler(
     VkDeviceState* state,
     gpu::SamplerDesc* desc,
 ) {
-    if (state == null || desc == null) return gpu::INVALID_ARGUMENT~;
+    assert(state != null && desc != null, "sampler intern needs a device state and description");
     lock_stub_samplers(state);
     defer unlock_stub_samplers(state);
     state.sampler_intern_attempts++;
@@ -670,13 +668,13 @@ fn gpu::PipelineHandle? vk_create_ray_tracing_pipeline(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn gpu::RayTracingPipelineInfo? vk_get_ray_tracing_pipeline_info(
+fn gpu::RayTracingPipelineInfo vk_get_ray_tracing_pipeline_info(
     VkDeviceState* state,
     gpu::PipelineHandle pipeline,
 ) {
     (void)state;
     (void)pipeline;
-    return gpu::UNSUPPORTED_FEATURE~;
+    return {};
 }
 
 fn void? vk_get_ray_tracing_shader_group_handles(
@@ -784,45 +782,49 @@ fn gpu::AdapterInfo vk_get_adapter_info(VkRuntimeState* state, uint index) {
     };
 }
 
-fn bool? vk_adapter_supports_device_baseline(
+fn bool vk_adapter_supports_device_baseline(
     VkRuntimeState* state,
     uint adapter_index,
 ) {
-    if (state == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapter_count,
+        "adapter index must be inside the runtime adapter list"
+    );
     return configured_device_baseline_support
         && !(adapter_index < configured_adapter_unsupported.len
             && configured_adapter_unsupported[adapter_index]);
 }
 
-fn bool? vk_adapter_supports_ray_queries(
+fn bool vk_adapter_supports_ray_queries(
     VkRuntimeState* state,
     uint adapter_index,
 ) {
-    if (state == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapter_count,
+        "adapter index must be inside the runtime adapter list"
+    );
     return configured_ray_query_support;
 }
 
-fn bool? vk_adapter_supports_ray_tracing_pipelines(
+fn bool vk_adapter_supports_ray_tracing_pipelines(
     VkRuntimeState* state,
     uint adapter_index,
 ) {
-    if (state == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapter_count,
+        "adapter index must be inside the runtime adapter list"
+    );
     return configured_ray_tracing_pipeline_support;
 }
 
-fn bool? vk_adapter_supports_mesh_shaders(
+fn bool vk_adapter_supports_mesh_shaders(
     VkRuntimeState* state,
     uint adapter_index,
 ) {
-    if (state == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapter_count,
+        "adapter index must be inside the runtime adapter list"
+    );
     return true;
 }
 
@@ -833,14 +835,15 @@ fn bool ray_tracing_queue_request_compatible(gpu::QueueRequest* request) {
     return normalized.required.graphics || normalized.required.compute;
 }
 
-fn bool? vk_adapter_supports_ray_query_heap(
+fn bool vk_adapter_supports_ray_query_heap(
     VkRuntimeState* state,
     uint adapter_index,
     uint heap_capacity,
 ) {
-    if (state == null || adapter_index >= state.adapter_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && adapter_index < state.adapter_count,
+        "adapter index must be inside the runtime adapter list"
+    );
     return heap_capacity > 0
         && heap_capacity <= configured_ray_query_heap_limit;
 }
@@ -871,9 +874,7 @@ fn void*? vk_create_win32_surface(
     void* instance,
     void* window,
 ) {
-    if (state == null || instance == null || window == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(state != null, "runtime state must not be null");
     surface_creates++;
     return mem::new(char);
 }
@@ -895,9 +896,7 @@ fn void*? vk_create_x11_surface(
     void* display,
     ulong window,
 ) {
-    if (state == null || display == null || window == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(state != null, "runtime state must not be null");
     surface_creates++;
     return mem::new(char);
 }
@@ -1361,16 +1360,17 @@ fn gpu::AllocationInfo vk_get_allocation_info(
     };
 }
 
-fn gpu::GpuSpan? vk_get_allocation_span(
+fn gpu::GpuSpan vk_get_allocation_span(
     VkDeviceState* state,
     gpu::GpuAllocation allocation,
 ) {
     if (!state.allocation_live || allocation != state.allocation) {
         abort("gpu: stale GpuAllocation");
     }
-    if (state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state.allocation_desc.memory_class != gpu::MemoryClass.TEXTURE,
+        "allocation must not be a TEXTURE allocation"
+    );
     return {
         .owner      = allocation.owner,
         .index      = allocation.index,
@@ -1379,29 +1379,34 @@ fn gpu::GpuSpan? vk_get_allocation_span(
     };
 }
 
-fn char[]? vk_get_span_mapping(VkDeviceState* state, gpu::GpuSpan span) {
+fn char[] vk_get_span_mapping(VkDeviceState* state, gpu::GpuSpan span) {
     if (!state.allocation_live || span.owner != state.allocation.owner
         || span.index != state.allocation.index
         || span.generation != state.allocation.generation) {
         abort("gpu: stale GpuSpan");
     }
-    if (span.size == 0
-        || state.allocation_desc.memory_class == gpu::MemoryClass.GPU_PRIVATE
-        || state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (state.mapping_unavailable) return gpu::BACKEND_ERROR~;
-    if (!gpu::internal::range_fits(
-        state.allocation_desc.size,
-        span.offset,
-        span.size,
-    )) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(span.size > 0, "span.size must be greater than 0");
+    assert(
+        state.allocation_desc.memory_class != gpu::MemoryClass.TEXTURE,
+        "span must not reference a TEXTURE allocation"
+    );
+    assert(
+        gpu::internal::range_fits(
+            state.allocation_desc.size,
+            span.offset,
+            span.size,
+        ),
+        "span must lie within its allocation"
+    );
+    assert(
+        state.allocation_desc.memory_class != gpu::MemoryClass.GPU_PRIVATE,
+        "span's allocation must be host-mapped"
+    );
+    if (state.mapping_unavailable) return state.allocation_mapping[0:0];
     return state.allocation_mapping[span.offset:span.size];
 }
 
-fn gpu::GpuAddress? vk_get_span_address(
+fn gpu::GpuAddress vk_get_span_address(
     VkDeviceState* state,
     gpu::GpuSpan span,
 ) {
@@ -1410,27 +1415,31 @@ fn gpu::GpuAddress? vk_get_span_address(
         || span.generation != state.allocation.generation) {
         abort("gpu: stale GpuSpan");
     }
-    if (span.size == 0
-        || state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE
-        || !gpu::internal::range_fits(
+    assert(span.size > 0, "span.size must be greater than 0");
+    assert(
+        state.allocation_desc.memory_class != gpu::MemoryClass.TEXTURE,
+        "span must not reference a TEXTURE allocation"
+    );
+    assert(
+        gpu::internal::range_fits(
             state.allocation_desc.size,
             span.offset,
             span.size,
-        )) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+        ),
+        "span must lie within its allocation"
+    );
     return (gpu::GpuAddress)(0x1000 + span.offset);
 }
 
 fn void? vk_flush_mapped_span(VkDeviceState* state, gpu::GpuSpan span) {
     state.allocation_visibility_entries++;
-    (void)vk_get_span_mapping(state, span)!;
+    (void)vk_get_span_mapping(state, span);
     state.allocation_flush_calls++;
 }
 
 fn void? vk_invalidate_mapped_span(VkDeviceState* state, gpu::GpuSpan span) {
     state.allocation_visibility_entries++;
-    (void)vk_get_span_mapping(state, span)!;
+    (void)vk_get_span_mapping(state, span);
     state.allocation_invalidate_calls++;
 }
 
@@ -1471,9 +1480,6 @@ fn gpu::TextureRequirements? vk_get_texture_requirements(
     gpu::TextureDesc* desc,
 ) {
     state.texture_requirements_calls++;
-    if (!gpu::internal::texture_desc_valid(desc)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     return {
         .size      = 64,
         .alignment = 64,
@@ -1496,13 +1502,13 @@ fn gpu::TextureHandle? vk_create_sparse_texture(
     return gpu::UNSUPPORTED_FEATURE~;
 }
 
-fn gpu::SparseTextureRequirements? vk_get_sparse_texture_requirements(
+fn gpu::SparseTextureRequirements vk_get_sparse_texture_requirements(
     VkDeviceState* state,
     gpu::TextureHandle texture,
 ) {
     (void)state;
     (void)texture;
-    return gpu::INVALID_ARGUMENT~;
+    unreachable("texture must be a sparse texture");
 }
 
 fn gpu::CompletionPoint? vk_bind_sparse_texture_memory(
@@ -1513,7 +1519,7 @@ fn gpu::CompletionPoint? vk_bind_sparse_texture_memory(
     (void)state;
     (void)queue;
     (void)desc;
-    return gpu::INVALID_ARGUMENT~;
+    return gpu::UNSUPPORTED_FEATURE~;
 }
 
 fn gpu::TextureHandle? vk_create_texture(
@@ -1521,9 +1527,6 @@ fn gpu::TextureHandle? vk_create_texture(
     gpu::TextureDesc* desc,
 ) {
     state.texture_create_attempts++;
-    if (!gpu::internal::texture_desc_valid(desc)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     if (state.texture_out_of_memory) return gpu::OUT_OF_DEVICE_MEMORY~;
     if (state.texture_live) return gpu::INVALID_RESOURCE_STATE~;
     state.texture = {
@@ -1544,13 +1547,14 @@ fn gpu::TextureHandle? vk_create_placed_texture(
     state.texture_placed_calls++;
     gpu::TextureRequirements requirements =
         vk_get_texture_requirements(state, desc)!;
-    if (!state.allocation_live
-        || state.allocation != placement
-        || state.allocation_desc.memory_class != gpu::MemoryClass.TEXTURE
-        || state.allocation_desc.size < requirements.size
-        || offset > state.allocation_desc.size - requirements.size) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state.allocation_live
+            && state.allocation == placement
+            && state.allocation_desc.memory_class == gpu::MemoryClass.TEXTURE
+            && state.allocation_desc.size >= requirements.size
+            && offset <= state.allocation_desc.size - requirements.size,
+        "placement must be memory-compatible, fit the allocation, and not overlap another placed texture"
+    );
     gpu::TextureHandle texture = vk_create_texture(state, desc)!;
     state.allocation_has_texture_placement = true;
     return texture;
@@ -1598,7 +1602,6 @@ fn gpu::SwapchainHandle? vk_create_swapchain(
     gpu::SwapchainDesc* desc,
 ) {
     swapchain_create_attempts++;
-    if (state == null || surface == null || desc == null) return gpu::INVALID_ARGUMENT~;
     if (state.swapchain_live) return gpu::INVALID_RESOURCE_STATE~;
     if (configured_swapchain_create_failure) return gpu::BACKEND_ERROR~;
 
@@ -1747,7 +1750,7 @@ fn gpu::Device? create_vk_device(
     gpu::Runtime* retained_runtime,
 ) {
     gpu::DeviceDesc normalized =
-        gpu::internal::normalize_device_desc(device_desc)!;
+        gpu::internal::normalize_device_desc(device_desc);
     VkDeviceState* state = mem::new(VkDeviceState);
     state.free_on_destroy = true;
     state.resource_owner = gpu::internal::allocate_device_resource_owner()!;

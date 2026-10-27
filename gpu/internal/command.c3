@@ -2,11 +2,63 @@ module gpu::internal @private;
 
 import gpu;
 
-fn usz? indirect_argument_bytes(usz argument_size, uint count) @private {
+fn usz indirect_argument_bytes(usz argument_size, uint count) @private {
     if (count == 0) return 0;
     usz size_count = (usz)count;
-    if (argument_size > usz::max / size_count) return gpu::INVALID_ARGUMENT~;
+    assert(
+        argument_size <= usz::max / size_count,
+        "indirect argument byte size must fit in usz"
+    );
     return argument_size * size_count;
+}
+
+<* True when the allocator description's command-buffer capacity, after the
+   zero default, times its geometry capacity fits uint. *>
+fn bool command_allocator_geometry_capacity_fits(gpu::CommandAllocatorDesc* desc) @private {
+    uint geometries = desc.max_acceleration_structure_geometries_per_build;
+    if (geometries == 0) return true;
+    uint capacity = desc.command_buffer_capacity == 0
+        ? gpu::DEFAULT_COMMAND_ALLOCATOR_CAPACITY
+        : desc.command_buffer_capacity;
+    return capacity <= uint::max / geometries;
+}
+
+<* True when the span is nonempty and holds at least `bytes` bytes. *>
+fn bool span_holds_bytes(gpu::GpuSpan span, usz bytes) @private {
+    return span.size > 0 && span.size >= bytes;
+}
+
+<* True when the span is nonempty and holds `count` records of `record_size`
+   bytes without the product overflowing. A zero count needs only a nonempty
+   span. *>
+fn bool span_holds_records(gpu::GpuSpan span, usz record_size, uint count) @private {
+    if (span.size == 0) return false;
+    if (count == 0) return true;
+    usz records = (usz)count;
+    return record_size <= usz::max / records && record_size * records <= span.size;
+}
+
+<* True when the index span holds `count` indices of the index type. *>
+fn bool index_span_holds_indices(
+    gpu::GpuSpan span,
+    gpu::IndexType index_type,
+    uint count,
+) @private {
+    usz index_bytes = index_type == gpu::IndexType.U16 ? 2 : 4;
+    return span_holds_records(span, index_bytes, count);
+}
+
+<* True when generated-work spans can hold `max_count` records and the count.
+   Nothing is read for a zero maximum. *>
+fn bool generated_spans_hold(
+    gpu::GpuSpan records,
+    gpu::GpuSpan count_span,
+    usz record_size,
+    uint max_count,
+) @private {
+    if (max_count == 0) return true;
+    return span_holds_records(records, record_size, max_count)
+        && span_holds_bytes(count_span, uint::size);
 }
 
 <* Look up a command token's record without terminating: null unless the

@@ -23,7 +23,8 @@ sequenceDiagram
 ## Surfaces
 
 One `create_surface` per platform module. Native handles are borrowed;
-keep the window alive until `destroy_surface`.
+keep the window alive until `destroy_surface`. Each handle must be non-null,
+and the X11 window must be nonzero; a safe build panics otherwise.
 
 ```c3
 gpu::Surface surface = gpu::surface::x11::create_surface(
@@ -65,7 +66,7 @@ gpu::SwapchainInfo info = gpu::get_swapchain_info(&device, swapchain);
 gpu::PresentModeSupport modes = gpu::get_present_mode_support(&device, swapchain)!;
 ```
 
-The device must have been created with this exact surface. `SwapchainInfo`
+`desc` is not null; a violation panics in safe builds. The device must have been created with this exact surface. `SwapchainInfo`
 reports the actual format, extent, image count, mode, `usage`, and `dormant`.
 Build pipelines against `info.format`. `info.usage` is the usage of every
 swapchain image: `color_attach` always, and `transfer_src` when the surface
@@ -121,6 +122,11 @@ value and ignored, and the library places the acquire and present
 transitions around the application's lists in that submit. `present` takes
 that submit's completion point and consumes the image on success. `WAIT_TIMEOUT` from `present` leaves the image
 intact.
+
+`image` is not null; a violation panics in safe builds. A stale or
+already-presented image returns `INVALID_RESOURCE_STATE`. An image whose index
+or texture does not match the current acquisition, or a completion point other
+than the one that submit returned, terminates instead of returning a fault.
 
 ## Resize and destroy
 

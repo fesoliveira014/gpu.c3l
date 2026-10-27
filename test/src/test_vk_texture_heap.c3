@@ -127,7 +127,7 @@ fn void bindless_texture_write_then_sample() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -140,7 +140,7 @@ fn void bindless_texture_write_then_sample() @test {
         texture: texture,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   gpu::storage_at({ .compute }, { .write }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &to_general)!!;
 
     const uint GROUPS = (TEX_SIZE + 7) / 8;
@@ -155,7 +155,7 @@ fn void bindless_texture_write_then_sample() @test {
         texture: texture,
         before:  gpu::storage_at({ .compute }, { .write }),
         after:   gpu::storage_at({ .compute }, { .read }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &write_to_sample)!!;
 
     bind_test_compute_pipeline(&cmd, sample_pipe);
@@ -216,7 +216,7 @@ fn void bindless_texture_write_then_sample() @test {
         texture: reused_texture,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   gpu::storage_at({ .compute }, { .write }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&reused_cmd, &reused_to_general)!!;
     const uint REUSED_GROUPS = (REUSED_TEX_SIZE + 7) / 8;
     bind_test_compute_pipeline(&reused_cmd, write_pipe);
@@ -229,7 +229,7 @@ fn void bindless_texture_write_then_sample() @test {
         texture: reused_texture,
         before:  gpu::storage_at({ .compute }, { .write }),
         after:   gpu::storage_at({ .compute }, { .read }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&reused_cmd, &reused_write_to_sample)!!;
     bind_test_compute_pipeline(&reused_cmd, sample_pipe);
     gpu::cmd_dispatch(
@@ -344,7 +344,7 @@ fn void bindless_volume_write_load_and_sample() @test {
     defer gpu::destroy_pipeline(&device, sample_pipeline)!!;
 
     gpu::Queue queue =
-        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -357,13 +357,13 @@ fn void bindless_volume_write_load_and_sample() @test {
         texture: image,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   storage_read_write,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &image_to_storage)!!;
     gpu::TextureBarrier volume_to_storage = gpu::texture_transition(
         texture: volume,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   storage_read_write,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &volume_to_storage)!!;
 
     bind_test_compute_pipeline(&commands, write_pipeline);
@@ -377,13 +377,13 @@ fn void bindless_volume_write_load_and_sample() @test {
         texture: image,
         before:  storage_read_write,
         after:   gpu::sampled_at({ .compute }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &image_to_sample)!!;
     gpu::TextureBarrier volume_to_sample = gpu::texture_transition(
         texture: volume,
         before:  storage_read_write,
         after:   gpu::sampled_at({ .compute }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &volume_to_sample)!!;
 
     bind_test_compute_pipeline(&commands, sample_pipeline);
@@ -483,20 +483,6 @@ fn void bindless_cube_upload_and_sample() @test {
         gpu::create_texture_view(&device, cube, &face_view_desc)!!;
     defer gpu::destroy_texture_view(&device, face_view);
 
-    gpu::TextureDesc plain_desc = cube_desc;
-    plain_desc.cube_compatible = false;
-    plain_desc.debug_name = "heap_cube_plain_array";
-    gpu::TextureHandle plain = gpu::create_texture(&device, &plain_desc)!!;
-    defer gpu::destroy_texture(&device, plain)!!;
-    gpu::TextureView? rejected_plain =
-        gpu::create_texture_view(&device, plain, &cube_view_desc);
-    assert(@catch(rejected_plain) == gpu::INVALID_ARGUMENT,
-        "cube views require a cube-compatible texture");
-    gpu::TextureViewDesc short_cube = { .cube = true, .layer_count = 3 };
-    gpu::TextureView? rejected_short =
-        gpu::create_texture_view(&device, cube, &short_cube);
-    assert(@catch(rejected_short) == gpu::INVALID_ARGUMENT,
-        "cube views cover exactly six layers");
 
     gpu::SamplerDesc nearest_desc = {
         .min_filter = gpu::Filter.NEAREST,
@@ -578,7 +564,7 @@ fn void bindless_cube_upload_and_sample() @test {
         gpu::create_compute_pipeline(&device, &sample_desc)!!;
     defer gpu::destroy_pipeline(&device, sample_pipeline)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -594,23 +580,23 @@ fn void bindless_cube_upload_and_sample() @test {
         texture: cube,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   transfer_write,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_dst)!!;
     gpu::BufferTextureCopyDesc mip0_copy = {
-        .src         = staging.span.checked_subspan(
+        .src         = staging.span.subspan(
             0,
             HEAP_CUBE_FACES * HEAP_CUBE_MIP0_BYTES,
-        )!!,
+        ),
         .texture     = cube,
         .mip         = 0,
         .layer_count = HEAP_CUBE_FACES,
     };
     gpu::cmd_copy_buffer_to_texture(&commands, &mip0_copy)!!;
     gpu::BufferTextureCopyDesc mip1_copy = {
-        .src         = staging.span.checked_subspan(
+        .src         = staging.span.subspan(
             HEAP_CUBE_FACES * HEAP_CUBE_MIP0_BYTES,
             HEAP_CUBE_FACES * HEAP_CUBE_MIP1_BYTES,
-        )!!,
+        ),
         .texture     = cube,
         .mip         = 1,
         .layer_count = HEAP_CUBE_FACES,
@@ -620,7 +606,7 @@ fn void bindless_cube_upload_and_sample() @test {
         texture: cube,
         before:  transfer_write,
         after:   gpu::sampled_at({ .compute }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_sample)!!;
 
     bind_test_compute_pipeline(&commands, sample_pipeline);
@@ -809,7 +795,7 @@ fn void storage_write_then_fragment_sample() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -821,7 +807,7 @@ fn void storage_write_then_fragment_sample() @test {
         texture: sampled_texture,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   gpu::storage_at({ .compute }, { .write }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_storage)!!;
     bind_test_compute_pipeline(&commands, write_pipeline);
     const uint GROUPS = (TEX_SIZE + HEAP_TILE - 1) / HEAP_TILE;
@@ -835,7 +821,7 @@ fn void storage_write_then_fragment_sample() @test {
         texture: sampled_texture,
         before:  gpu::storage_at({ .compute }, { .write }),
         after:   gpu::sampled_at({ .fragment_shader }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &write_to_fragment)!!;
 
     gpu::TextureBarrier target_to_attachment = gpu::texture_transition(
@@ -846,7 +832,7 @@ fn void storage_write_then_fragment_sample() @test {
             .stages = { .color_output },
             .access = { .read, .write },
         },
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &target_to_attachment)!!;
     gpu::ColorTargetDesc[1] colors = {{
         .view     = target_view,
@@ -860,7 +846,7 @@ fn void storage_write_then_fragment_sample() @test {
         .height = STORAGE_GRAPHICS_TARGET_SIZE,
     };
     gpu::GraphicsState graphics =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
@@ -889,7 +875,7 @@ fn void storage_write_then_fragment_sample() @test {
             .stages = { .transfer },
             .access = { .read },
         },
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &target_to_transfer)!!;
     gpu::GpuSpan readback_span = readback.span;
     gpu::TextureBufferCopyDesc copy = {
@@ -976,17 +962,14 @@ fn void anisotropic_sampler_caps_honest() @test {
         aniso.max_anisotropy = caps.max_sampler_anisotropy;
         gpu::SamplerIndex smp = gpu::intern_sampler(&device, &aniso)!!;
 
-        aniso.max_anisotropy = caps.max_sampler_anisotropy + 1.0f;
-        fault over_limit = @catch(gpu::intern_sampler(&device, &aniso));
-        assert(over_limit == gpu::INVALID_ARGUMENT,
-            "anisotropy above the reported limit faults INVALID_ARGUMENT");
+        assert(smp.is_valid(), "the exact anisotropy limit is accepted");
     } else {
         fault err = @catch(gpu::intern_sampler(&device, &aniso));
         assert(err == gpu::UNSUPPORTED_FEATURE, "expected UNSUPPORTED_FEATURE, got %s", err);
     }
 }
 
-fn void anisotropy_range_validated() @test {
+fn void anisotropy_limit_is_accepted() @test {
     gpu::RuntimeDesc device_desc = {
         .enable_vulkan_validation = true,
         .application_name  = "gpu_aniso_range_test",
@@ -996,31 +979,6 @@ fn void anisotropy_range_validated() @test {
     gpu::DeviceCaps caps = gpu::get_device_caps(&device);
     if (caps.max_sampler_anisotropy <= 0) return;
 
-    float[3] bad = { 0.0f, -1.0f, 0.5f };
-    foreach (value : bad) {
-        gpu::SamplerDesc desc = {
-            .min_filter        = gpu::Filter.LINEAR,
-            .mag_filter        = gpu::Filter.LINEAR,
-            .anisotropy_enable = true,
-            .max_anisotropy    = value,
-        };
-        fault f = @catch(gpu::intern_sampler(&device, &desc));
-        assert(f == gpu::INVALID_ARGUMENT, "max_anisotropy < 1 faults INVALID_ARGUMENT");
-    }
-
-    float[3] non_finite = { float::nan, float::inf, -float::inf };
-    foreach (value : non_finite) {
-        gpu::SamplerDesc desc = {
-            .min_filter        = gpu::Filter.LINEAR,
-            .mag_filter        = gpu::Filter.LINEAR,
-            .anisotropy_enable = true,
-            .max_anisotropy    = value,
-        };
-        fault f = @catch(gpu::intern_sampler(&device, &desc));
-        assert(f == gpu::INVALID_ARGUMENT,
-            "non-finite max_anisotropy faults INVALID_ARGUMENT");
-    }
-
     gpu::SamplerDesc exact = {
         .min_filter        = gpu::Filter.LINEAR,
         .mag_filter        = gpu::Filter.LINEAR,
@@ -1029,12 +987,6 @@ fn void anisotropy_range_validated() @test {
     };
     assert(gpu::intern_sampler(&device, &exact)!!.is_valid(),
         "the exact anisotropy limit is accepted");
-
-    gpu::SamplerDesc over_limit = exact;
-    over_limit.max_anisotropy = caps.max_sampler_anisotropy + 1.0f;
-    fault over_limit_fault = @catch(gpu::intern_sampler(&device, &over_limit));
-    assert(over_limit_fault == gpu::INVALID_ARGUMENT,
-        "max_anisotropy above the reported limit faults INVALID_ARGUMENT");
 }
 
 fn void updated_view_samples_new_texture_at_same_index() @test {
@@ -1110,9 +1062,9 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
         debug_name:   "update_roots",
     )!!;
     defer free_owned_span(&device, &roots)!!;
-    gpu::GpuSpan large_root_span = roots.span.checked_subspan(0, WriteRoot::size)!!;
-    gpu::GpuSpan small_root_span = roots.span.checked_subspan(WriteRoot::size, WriteRoot::size)!!;
-    gpu::GpuSpan sample_root_span = roots.span.checked_subspan(WriteRoot::size * 2, SampleRoot::size)!!;
+    gpu::GpuSpan large_root_span = roots.span.subspan(0, WriteRoot::size);
+    gpu::GpuSpan small_root_span = roots.span.subspan(WriteRoot::size, WriteRoot::size);
+    gpu::GpuSpan sample_root_span = roots.span.subspan(WriteRoot::size * 2, SampleRoot::size);
     WriteRoot* large_root = (WriteRoot*)test_span_mapping(&device, large_root_span).ptr;
     *large_root = { .texture_index = large_write.index, .width = TEX_SIZE, .height = TEX_SIZE };
     WriteRoot* small_root = (WriteRoot*)test_span_mapping(&device, small_root_span).ptr;
@@ -1127,7 +1079,7 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
     };
     gpu::flush_mapped_span(&device, roots.span)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -1140,7 +1092,7 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
             texture: targets[i],
             before:  { .layout = gpu::TextureLayout.UNDEFINED },
             after:   gpu::storage_at({ .compute }, { .write }),
-        )!!;
+        );
         gpu::cmd_texture_barrier(&cmd, &to_write)!!;
         bind_test_compute_pipeline(&cmd, write_pipe);
         uint groups = (sizes[i] + 7) / 8;
@@ -1153,7 +1105,7 @@ fn void updated_view_samples_new_texture_at_same_index() @test {
             texture: targets[i],
             before:  gpu::storage_at({ .compute }, { .write }),
             after:   gpu::storage_at({ .compute }, { .read }),
-        )!!;
+        );
         gpu::cmd_texture_barrier(&cmd, &to_read)!!;
     }
     bind_test_compute_pipeline(&cmd, sample_pipe);
@@ -1333,7 +1285,7 @@ fn void reserved_row_addressing_samples_correct_texture() @test {
     gpu::GpuAddress output_address = test_span_address(&device, output.span);
     gpu::GpuSpan[3] root_spans;
     for (uint i = 0; i < 3; i++) {
-        root_spans[i] = roots.span.checked_subspan(i * SampleRoot::size, SampleRoot::size)!!;
+        root_spans[i] = roots.span.subspan(i * SampleRoot::size, SampleRoot::size);
         SampleRoot* root = (SampleRoot*)test_span_mapping(&device, root_spans[i]).ptr;
         gpu::TextureIndex texture_index = { .value = range.base.value + check_offsets[i] };
         *root = {
@@ -1346,7 +1298,7 @@ fn void reserved_row_addressing_samples_correct_texture() @test {
     }
     gpu::flush_mapped_span(&device, roots.span)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -1511,7 +1463,7 @@ fn void row_addressed_render_samples_shader_computed_index() @test {
     defer free_owned_span(&device, &roots)!!;
     gpu::GpuSpan[3] root_spans;
     for (uint i = 0; i < 3; i++) {
-        root_spans[i] = roots.span.checked_subspan(i * RowSampleRoot::size, RowSampleRoot::size)!!;
+        root_spans[i] = roots.span.subspan(i * RowSampleRoot::size, RowSampleRoot::size);
         RowSampleRoot* root = (RowSampleRoot*)test_span_mapping(&device, root_spans[i]).ptr;
         *root = {
             .base             = range.base,
@@ -1544,7 +1496,7 @@ fn void row_addressed_render_samples_shader_computed_index() @test {
     };
     gpu::TextureState target_state = { .layout = gpu::TextureLayout.UNDEFINED };
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
 
@@ -1556,7 +1508,7 @@ fn void row_addressed_render_samples_shader_computed_index() @test {
             texture: target,
             before:  target_state,
             after:   attach_state,
-        )!!;
+        );
         gpu::cmd_texture_barrier(&cmd, &to_attach)!!;
 
         gpu::ColorTargetDesc[1] colors = {{
@@ -1571,7 +1523,7 @@ fn void row_addressed_render_samples_shader_computed_index() @test {
             .height = STORAGE_GRAPHICS_TARGET_SIZE,
         };
         gpu::GraphicsState graphics_state =
-            gpu::render_geometry_state(pass.width, pass.height)!!;
+            gpu::render_geometry_state(pass.width, pass.height);
         gpu::ColorTargetState[1] color_targets = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
         graphics_state.color = { .targets = color_targets[..] };
         gpu::cmd_begin_render_pass(&cmd, &pass)!!;
@@ -1590,7 +1542,7 @@ fn void row_addressed_render_samples_shader_computed_index() @test {
             texture: target,
             before:  attach_state,
             after:   transfer_src_state,
-        )!!;
+        );
         gpu::cmd_texture_barrier(&cmd, &to_src)!!;
         gpu::GpuSpan readback_span = readback.span;
         gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = readback_span };

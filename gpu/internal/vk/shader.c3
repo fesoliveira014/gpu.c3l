@@ -119,7 +119,7 @@ fn ShaderId? retain_shader_identity_locked(
     VkDeviceState* state,
     ShaderIdentityInput* input,
 ) {
-    if (input == null) return gpu::INVALID_ARGUMENT~;
+    assert(input != null, "shader identity input must be present");
     ShaderStore* store = &state.shader_store;
     uint bucket = shader_store_bucket(
         input.hash,
@@ -172,20 +172,18 @@ fn ShaderId? retain_shader_identity_locked(
     return (ShaderId)index;
 }
 
-fn void? release_shader_identity_locked(
+fn void release_shader_identity_locked(
     VkDeviceState* state,
     ShaderId id,
 ) {
     uint index = (uint)id;
-    if (index >= state.shader_store.next_new) return gpu::INVALID_ARGUMENT~;
+    assert(index < state.shader_store.next_new, "shader id must be inside the shader store");
     ShaderStoreEntry* entry = &state.shader_store.entries[index];
-    if (!entry.used || entry.refcount == 0) return gpu::INVALID_ARGUMENT~;
+    assert(entry.used && entry.refcount > 0, "shader store entry must be live");
     entry.refcount--;
     if (entry.refcount > 0) return;
-    if (!unlink_shader_store_entry(&state.shader_store, index)) {
-        entry.refcount++;
-        return gpu::INVALID_ARGUMENT~;
-    }
+    bool unlinked = unlink_shader_store_entry(&state.shader_store, index);
+    assert(unlinked, "shader store entry must be linked in its bucket");
     alloc::free(state.host_allocator, entry.spirv_words.ptr);
     *entry = { .next_free = state.shader_store.free_head };
     state.shader_store.free_head = index + 1;
@@ -201,12 +199,12 @@ fn PreparedShaderIdentity? prepare_shader_identity_locked(
     };
 }
 
-fn void? release_prepared_shader_locked(
+fn void release_prepared_shader_locked(
     VkDeviceState* state,
     PreparedShaderIdentity* prepared,
 ) {
     if (!prepared.retained) return;
-    release_shader_identity_locked(state, prepared.id)!;
+    release_shader_identity_locked(state, prepared.id);
     prepared.retained = false;
 }
 
@@ -221,7 +219,7 @@ fn void release_prepared_shaders(
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     foreach (&identity : prepared) {
-        release_prepared_shader_locked(state, identity)!!;
+        release_prepared_shader_locked(state, identity);
     }
 }
 
@@ -282,11 +280,11 @@ fn bool shader_store_index_consistent(VkDeviceState* state) {
     return linked == shader_store_live_count(state);
 }
 
-fn void? create_shader_store(VkDeviceState* state, uint pipeline_capacity) {
-    if (pipeline_capacity == 0
-        || pipeline_capacity > SHADER_STORE_MAX_PIPELINE_CAPACITY) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+fn void create_shader_store(VkDeviceState* state, uint pipeline_capacity) {
+    assert(
+        pipeline_capacity > 0 && pipeline_capacity <= SHADER_STORE_MAX_PIPELINE_CAPACITY,
+        "pipeline capacity must be within the shader store limit"
+    );
     uint entry_capacity = pipeline_capacity * 3;
     state.shader_store.entries = mem::new_array(
         ShaderStoreEntry,
@@ -667,14 +665,14 @@ fn void? check_root_push_abi(
     ) != RootAbiMismatch.NONE) return gpu::SHADER_INVALID~;
 }
 
-fn void? copy_entry_point(char* dst, ZString source) @private {
+fn void copy_entry_point(char* dst, ZString source) @private {
     usz i = 0;
     while (i < gpu::internal::SHADER_ENTRY_POINT_CAP - 1
         && source[i] != 0) {
         dst[i] = source[i];
         i++;
     }
-    if (i == 0 || source[i] != 0) return gpu::INVALID_ARGUMENT~;
+    assert(i > 0 && source[i] == 0, "shader entry_point must be between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long");
     dst[i] = 0;
 }
 
@@ -728,16 +726,7 @@ fn void? normalize_shader_input(
     ZString rejected_field,
     ShaderIdentityInput* out_input,
 ) {
-    if (desc == null) {
-        return report_shader_contract_failure(
-            state:          state,
-            operation:      operation,
-            public_fault:   gpu::INVALID_ARGUMENT,
-            debug_name:     null,
-            rejected_field: rejected_field,
-            invariant:      "shader descriptor must be present",
-        )~;
-    }
+    assert(desc != null, "shader descriptor must be present");
     if (desc.spirv.ptr == null
         || desc.spirv.len < gpu::internal::SPIRV_HEADER_SIZE
         || desc.spirv.len % uint::size != 0) {
@@ -771,19 +760,7 @@ fn void? normalize_shader_input(
     };
     ZString entry_point =
         desc.entry_point == null ? "main" : desc.entry_point;
-    if (catch entry_fault = copy_entry_point(
-        &out_input.entry_point[0],
-        entry_point,
-    )) {
-        return report_shader_contract_failure(
-            state:          state,
-            operation:      operation,
-            public_fault:   entry_fault,
-            debug_name:     desc.debug_name,
-            rejected_field: rejected_field,
-            invariant:      "entry point must be nonempty and fit the backend name capacity",
-        )~;
-    }
+    copy_entry_point(&out_input.entry_point[0], entry_point);
 }
 
 <* Fault UNSUPPORTED_FEATURE when the module declares an optional-feature

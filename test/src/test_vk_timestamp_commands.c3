@@ -119,7 +119,7 @@ fn TimestampCommandFixture? create_timestamp_command_fixture(
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
     gpu::Device device;
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::Adapter adapter = adapters.get(i);
         gpu::DeviceSupport support =
             gpu::supports_device_desc(&adapter)!;
         if (!support.supported) continue;
@@ -158,10 +158,10 @@ fn TimestampCommandFixture? create_timestamp_command_fixture(
         gpu::allocate_memory(&device, &allocation_desc)!;
     defer catch (void)gpu::free_allocation(&device, &allocation);
     gpu::GpuSpan destination =
-        gpu::get_allocation_span(&device, allocation)!;
+        gpu::get_allocation_span(&device, allocation);
 
     gpu::Queue queue =
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity          = 1,
     };
@@ -401,55 +401,6 @@ fn void timestamp_transfer_stage_accepts_implicit_graphics_support() @test {
             vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT);
 }
 
-fn void timestamp_range_validation_prevents_native_emission() @test {
-    TimestampCommandFixture fixture =
-        create_timestamp_command_fixture(
-        )!!;
-    defer destroy_timestamp_command_fixture(&fixture)!!;
-    TimestampCommandProbe probe;
-    TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
-
-    assert(@catch(vk_cmd_reset_timestamps_with(
-        record: fixture.record,
-        pool:   fixture.pool,
-        first:  0,
-        count:  0,
-        ops:    &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk_cmd_reset_timestamps_with(
-        record: fixture.record,
-        pool:   fixture.pool,
-        first:  uint::max,
-        count:  2,
-        ops:    &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk_cmd_reset_timestamps_with(
-        record: fixture.record,
-        pool:   fixture.pool,
-        first:  TIMESTAMP_COMMAND_POOL_CAPACITY,
-        count:  1,
-        ops:    &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk_cmd_write_timestamp_with(
-        record: fixture.record,
-        pool:   fixture.pool,
-        index:  TIMESTAMP_COMMAND_POOL_CAPACITY,
-        stage:  { .compute },
-        ops:    &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk_cmd_resolve_timestamps_with(
-        record:      fixture.record,
-        pool:        fixture.pool,
-        first:       0,
-        count:       0,
-        destination: fixture.destination,
-        ops:         &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(probe.reset_calls == 0
-        && probe.write_calls == 0
-        && probe.resolve_calls == 0);
-}
-
 fn void timestamp_render_phase_allows_only_writes() @test {
     TimestampCommandFixture fixture =
         create_timestamp_command_fixture(
@@ -508,31 +459,6 @@ fn void timestamp_render_phase_allows_only_writes() @test {
     assert(probe.reset_calls == 0
         && probe.resolve_calls == 0
         && probe.write_calls == 2);
-}
-
-fn void timestamp_destination_bounds_are_transactional() @test {
-    TimestampCommandFixture fixture =
-        create_timestamp_command_fixture(
-        )!!;
-    defer destroy_timestamp_command_fixture(&fixture)!!;
-    TimestampCommandProbe probe;
-    TimestampCommandNativeOps ops = timestamp_probe_ops(&probe);
-    AllocationSlot* allocation_slot =
-        fixture.state.allocations.get(fixture.allocation);
-    gpu::GpuSpan destination = fixture.destination;
-
-    destination = fixture.destination;
-    destination.size = ulong::size;
-    assert(@catch(vk_cmd_resolve_timestamps_with(
-        record:      fixture.record,
-        pool:        fixture.pool,
-        first:       0,
-        count:       2,
-        destination: destination,
-        ops:         &ops,
-    )) == gpu::INVALID_ARGUMENT);
-
-    assert(probe.resolve_calls == 0);
 }
 
 fn void timestamp_commands_emit_once() @test {

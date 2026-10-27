@@ -25,6 +25,7 @@
     "../../gpu/internal/sampler.c3",
     "../../gpu/internal/texture.c3",
     "../../gpu/internal/pipeline.c3",
+    "../../gpu/internal/sparse.c3",
     "../../gpu/internal/command.c3",
     "../../gpu/internal/render_pass.c3",
     "../../gpu/internal/sync.c3",
@@ -49,6 +50,7 @@
       "type": "test",
       "sources": [
         "../src/test_internal_helpers.c3",
+        "../src/test_argument_rules.c3",
         "../src/test_vk_internal_helpers.c3",
         "../src/test_handles.c3",
         "../src/test_acceleration_structure_values.c3",
@@ -82,6 +84,14 @@
       "type": "test",
       "sources": [
         "../src/test_shader_abi_layout.c3"
+      ]
+    },
+    // Run by scripts/test_contract_probe.py: each case breaks one contract
+    // and must panic in a default or -O1 build. Keep the default safety.
+    "contract_probe": {
+      "type": "executable",
+      "sources": [
+        "contract_probe.c3"
       ]
     },
     "command_wrapper_bench": {

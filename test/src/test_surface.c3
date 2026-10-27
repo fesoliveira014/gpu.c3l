@@ -90,42 +90,12 @@ fn void surface_publication_failure_is_transactional() @test {
     gpu::destroy_runtime(&runtime)!!;
 }
 
-fn void invalid_platform_handles_fault_before_backend_work() @test {
-    gpu::internal::vk::stub_reset_surface_counts();
-    RuntimeDesc desc = runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
-    defer gpu::destroy_runtime(&runtime)!!;
-
-    assert(
-        @catch(gpu::surface::win32::create_surface(
-            &runtime,
-            (gpu::surface::win32::InstanceHandle)null,
-            (gpu::surface::win32::WindowHandle)(void*)1,
-        )) == gpu::INVALID_ARGUMENT
-    );
-    assert(
-        @catch(gpu::surface::wayland::create_surface(
-            &runtime,
-            (gpu::surface::wayland::DisplayHandle)null,
-            (gpu::surface::wayland::SurfaceHandle)(void*)1,
-        )) == gpu::INVALID_ARGUMENT
-    );
-    assert(
-        @catch(gpu::surface::x11::create_surface(
-            &runtime,
-            (gpu::surface::x11::DisplayHandle)(void*)1,
-            (gpu::surface::x11::WindowHandle)0,
-        )) == gpu::INVALID_ARGUMENT
-    );
-    assert(gpu::internal::vk::stub_surface_create_count() == 0);
-}
-
 fn void presentation_support_reports_backend_support() @test {
     gpu::internal::vk::stub_set_presentation_support(true);
     RuntimeDesc desc = runtime_desc();
     Runtime first = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&first);
-    Adapter first_adapter = gpu::enumerate_adapters(&first).get(0)!!;
+    Adapter first_adapter = gpu::enumerate_adapters(&first).get(0);
 
     assert(gpu::supports_presentation(&first_adapter, &surface)!!);
 
@@ -141,7 +111,7 @@ fn void presentation_desc_is_immutable_and_surface_bound() @test {
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
-    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0);
     DeviceDesc device_desc = { .surface = surface };
     DeviceDesc original = device_desc;
 
@@ -150,7 +120,7 @@ fn void presentation_desc_is_immutable_and_surface_bound() @test {
 
     Device device = gpu::create_device(&adapter, &device_desc)!!;
     QueueRoles queues = gpu::get_device_caps(&device).queues;
-    Queue graphics = gpu::get_queue(&device, QueueKind.GRAPHICS)!!;
+    Queue graphics = gpu::get_queue(&device, QueueKind.GRAPHICS);
     assert(queues.graphics, "a supported presentation descriptor admits graphics");
     assert(graphics.roles.graphics, "the admitted graphics queue supports graphics");
     gpu::destroy_device(&device)!!;
@@ -159,38 +129,6 @@ fn void presentation_desc_is_immutable_and_surface_bound() @test {
     DeviceSupport unsupported = gpu::supports_device_desc(&adapter, &device_desc)!!;
     assert(!unsupported.supported);
     assert(unsupported.unmet_requirement == "presentation");
-
-    gpu::destroy_surface(&surface)!!;
-    gpu::destroy_runtime(&runtime)!!;
-}
-
-fn void presentation_desc_requires_graphics() @test {
-    gpu::internal::vk::stub_set_presentation_support(true);
-    gpu::internal::vk::stub_reset_device_counts();
-    RuntimeDesc desc = runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
-    Surface surface = create_test_surface(&runtime);
-    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
-    DeviceDesc invalid = {
-        .surface = surface,
-        .queues  = { .required = { .compute } },
-    };
-
-    assert(
-        @catch(gpu::supports_device_desc(&adapter, &invalid))
-            == gpu::INVALID_ARGUMENT
-    );
-    assert(
-        @catch(gpu::create_device(&adapter, &invalid)) == gpu::INVALID_ARGUMENT
-    );
-    assert(
-        gpu::internal::vk::stub_device_support_query_count() == 0,
-        "invalid presentation descriptors bypass support queries"
-    );
-    assert(
-        gpu::internal::vk::stub_device_temporary_create_count() == 0,
-        "invalid presentation descriptors allocate no device state"
-    );
 
     gpu::destroy_surface(&surface)!!;
     gpu::destroy_runtime(&runtime)!!;
@@ -214,7 +152,7 @@ fn void swapchains_borrow_runtime_owned_surfaces() @test {
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
-    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0);
     DeviceDesc device_desc = { .surface = surface };
     Device device = gpu::create_device(&adapter, &device_desc)!!;
     SwapchainDesc swapchain_desc = {
@@ -239,7 +177,7 @@ fn void non_presenting_devices_reject_swapchains_before_backend_work() @test {
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
-    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0);
     Device device = gpu::create_device(&adapter)!!;
     SwapchainDesc swapchain_desc = {
         .width  = 640,
@@ -274,8 +212,8 @@ fn void presentation_devices_accept_only_the_requested_surface() @test {
     Surface first_surface = create_test_surface(&runtime);
     Surface second_surface = create_test_surface(&runtime);
     AdapterList adapters = gpu::enumerate_adapters(&runtime);
-    Adapter first_adapter = adapters.get(0)!!;
-    Adapter second_adapter = adapters.get(1)!!;
+    Adapter first_adapter = adapters.get(0);
+    Adapter second_adapter = adapters.get(1);
     DeviceDesc first_desc = { .surface = first_surface };
     DeviceDesc second_desc = { .surface = second_surface };
     Device first = gpu::create_device(&first_adapter, &first_desc)!!;
@@ -324,7 +262,7 @@ fn void swapchain_wait_returns_immediately_without_pending_presentations() @test
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
-    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0);
     DeviceDesc device_desc = { .surface = surface };
     Device device = gpu::create_device(&adapter, &device_desc)!!;
     SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
@@ -355,7 +293,7 @@ fn void swapchain_wait_timeout_preserves_pending_state_and_supports_retry() @tes
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
-    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0);
     DeviceDesc device_desc = { .surface = surface };
     Device device = gpu::create_device(&adapter, &device_desc)!!;
     SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
@@ -399,7 +337,7 @@ fn void swapchain_wait_default_uses_infinite_timeout() @test {
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
-    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0);
     DeviceDesc device_desc = { .surface = surface };
     Device device = gpu::create_device(&adapter, &device_desc)!!;
     SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
@@ -434,7 +372,7 @@ fn void swapchain_wait_backend_failure_preserves_handle() @test {
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
-    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0);
     DeviceDesc device_desc = { .surface = surface };
     Device device = gpu::create_device(&adapter, &device_desc)!!;
     SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };
@@ -487,7 +425,7 @@ fn void swapchain_wait_success_is_idempotent() @test {
     RuntimeDesc desc = runtime_desc();
     Runtime runtime = gpu::create_runtime(&desc)!!;
     Surface surface = create_test_surface(&runtime);
-    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0);
     DeviceDesc device_desc = { .surface = surface };
     Device device = gpu::create_device(&adapter, &device_desc)!!;
     SwapchainDesc swapchain_desc = { .width = 640, .height = 480 };

@@ -304,7 +304,7 @@ fn int main() {
         resource_owner: state.state.resource_owner,
     )!!;
     defer destroy_device(&device)!!;
-    Queue queue = get_queue(&device, QueueKind.GRAPHICS)!!;
+    Queue queue = get_queue(&device, QueueKind.GRAPHICS);
     CommandAllocator allocator = create_command_allocator(&device, queue)!!;
     defer destroy_command_allocator(&allocator)!!;
     CommandList commands = begin_commands(&allocator)!!;

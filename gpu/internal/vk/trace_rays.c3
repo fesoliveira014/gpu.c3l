@@ -93,19 +93,12 @@ fn bool trace_span_is_canonical_empty(gpu::GpuSpan span) {
         && span.size == 0;
 }
 
-fn vk::StridedDeviceAddressRegionKHR? lower_trace_region(
+fn vk::StridedDeviceAddressRegionKHR lower_trace_region(
     VkDeviceState* state,
     gpu::RayTracingShaderBindingTableRegion* region,
 ) {
-    if (trace_span_is_canonical_empty(region.span)) {
-        if (region.stride != 0) return gpu::INVALID_ARGUMENT~;
-        return {};
-    }
-    if (region.span.size == 0) return gpu::INVALID_ARGUMENT~;
-    ResolvedSpan resolved = resolve_span(state, &region.span)!;
-    if ((ulong)resolved.address == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    if (trace_span_is_canonical_empty(region.span)) return {};
+    ResolvedSpan resolved = resolve_span(state, &region.span);
     return {
         .device_address = (vk::DeviceAddress)(ulong)resolved.address,
         .stride         = (vk::DeviceSize)region.stride,
@@ -118,7 +111,10 @@ fn PreparedTraceRaysState? lower_trace_rays_state(
     gpu::GpuAddress root,
     gpu::RayTracingShaderBindingTable* table,
 ) {
-    if (record == null || table == null) return gpu::INVALID_ARGUMENT~;
+    assert(
+        record != null && table != null,
+        "command record and shader binding table must not be null"
+    );
     if (record.device_state == null
         || !record.device_state.ray_tracing_pipelines_enabled) {
         return gpu::UNSUPPORTED_FEATURE~;
@@ -128,19 +124,19 @@ fn PreparedTraceRaysState? lower_trace_rays_state(
         .ray_generation      = lower_trace_region(
             record.device_state,
             &table.ray_generation,
-        )!,
+        ),
         .miss                = lower_trace_region(
             record.device_state,
             &table.miss,
-        )!,
+        ),
         .hit                 = lower_trace_region(
             record.device_state,
             &table.hit,
-        )!,
+        ),
         .callable            = lower_trace_region(
             record.device_state,
             &table.callable,
-        )!,
+        ),
         .root                = root,
     };
 }
@@ -151,7 +147,10 @@ fn PreparedTraceRays? lower_trace_rays(
     gpu::RayTracingShaderBindingTable* table,
     gpu::Vec3u dimensions,
 ) {
-    if (record == null || table == null) return gpu::INVALID_ARGUMENT~;
+    assert(
+        record != null && table != null,
+        "command record and shader binding table must not be null"
+    );
     if (record.device_state == null
         || !record.device_state.ray_tracing_pipelines_enabled) {
         return gpu::UNSUPPORTED_FEATURE~;
@@ -162,7 +161,7 @@ fn PreparedTraceRays? lower_trace_rays(
     };
 }
 
-fn ResolvedSpan? lower_trace_rays_indirect_args(
+fn ResolvedSpan lower_trace_rays_indirect_args(
     VkDeviceState* state,
     gpu::GpuSpan* args,
 ) {
@@ -170,7 +169,7 @@ fn ResolvedSpan? lower_trace_rays_indirect_args(
         state,
         args,
         gpu::TraceRaysIndirectCommand::size,
-    )!;
+    );
     return resolved;
 }
 
@@ -180,7 +179,7 @@ fn PreparedTraceRaysIndirect? lower_trace_rays_indirect(
     gpu::RayTracingShaderBindingTable* table,
     gpu::GpuSpan args,
 ) {
-    if (record == null) return gpu::INVALID_ARGUMENT~;
+    assert(record != null, "command record must not be null");
     VkDeviceState* state = record.device_state;
     if (state == null
         || !state.caps.ray_tracing_pipelines.indirect_dispatch) {
@@ -188,11 +187,11 @@ fn PreparedTraceRaysIndirect? lower_trace_rays_indirect(
     }
     return {
         .state     = lower_trace_rays_state(record, root, table)!,
-        .args      = lower_trace_rays_indirect_args(state, &args)!,
+        .args      = lower_trace_rays_indirect_args(state, &args),
     };
 }
 
-fn ResolvedSpan? lower_trace_rays_indirect2_args(
+fn ResolvedSpan lower_trace_rays_indirect2_args(
     VkDeviceState* state,
     gpu::GpuSpan* args,
 ) {
@@ -200,7 +199,7 @@ fn ResolvedSpan? lower_trace_rays_indirect2_args(
         state,
         args,
         gpu::TraceRaysIndirectCommand2::size,
-    )!;
+    );
     return resolved;
 }
 
@@ -209,7 +208,7 @@ fn PreparedTraceRaysIndirect2? lower_trace_rays_indirect2(
     gpu::GpuAddress root,
     gpu::GpuSpan args,
 ) {
-    if (record == null) return gpu::INVALID_ARGUMENT~;
+    assert(record != null, "command record must not be null");
     VkDeviceState* state = record.device_state;
     if (state == null
         || !state.caps.ray_tracing_pipelines.indirect2_dispatch) {
@@ -218,7 +217,7 @@ fn PreparedTraceRaysIndirect2? lower_trace_rays_indirect2(
     return {
         .pipeline  = borrow_bound_pipeline(record)!,
         .root      = root,
-        .args      = lower_trace_rays_indirect2_args(state, &args)!,
+        .args      = lower_trace_rays_indirect2_args(state, &args),
     };
 }
 
@@ -330,15 +329,19 @@ fn RayTracingStackSizeOps ray_tracing_stack_size_ops_real(
     };
 }
 
-fn void? vk_cmd_set_ray_tracing_pipeline_stack_size_with_ops(
+fn void vk_cmd_set_ray_tracing_pipeline_stack_size_with_ops(
     CommandRecord* record,
     ulong pipeline_stack_size,
     RayTracingStackSizeOps* ops,
 ) {
-    if (record == null || ops == null || ops.set == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (pipeline_stack_size > uint::max) return gpu::INVALID_ARGUMENT~;
+    assert(
+        record != null && ops != null && ops.set != null,
+        "stack size command inputs must not be null"
+    );
+    assert(
+        pipeline_stack_size <= uint::max,
+        "pipeline_stack_size must fit uint"
+    );
     ops.set(
         ops.user_data,
         record.command_buffer,
@@ -441,9 +444,10 @@ fn void? vk_cmd_trace_rays_with_ops(
     gpu::Vec3u dimensions,
     TraceRaysOps* ops,
 ) {
-    if (ops == null || ops.push_root == null || ops.trace == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        ops != null && ops.push_root != null && ops.trace != null,
+        "trace ops must not be null"
+    );
     PreparedTraceRays trace = lower_trace_rays(
         record:     record,
         root:       root,
@@ -480,10 +484,10 @@ fn void? vk_cmd_trace_rays_indirect_with_ops(
     gpu::GpuSpan args,
     TraceRaysOps* ops,
 ) {
-    if (ops == null || ops.push_root == null
-        || ops.trace_indirect == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        ops != null && ops.push_root != null && ops.trace_indirect != null,
+        "trace ops must not be null"
+    );
     PreparedTraceRaysIndirect trace = lower_trace_rays_indirect(
         record: record,
         root:   root,
@@ -519,10 +523,10 @@ fn void? vk_cmd_trace_rays_indirect2_with_ops(
     gpu::GpuSpan args,
     TraceRaysOps* ops,
 ) {
-    if (ops == null || ops.push_root == null
-        || ops.trace_indirect2 == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        ops != null && ops.push_root != null && ops.trace_indirect2 != null,
+        "trace ops must not be null"
+    );
     PreparedTraceRaysIndirect2 trace = lower_trace_rays_indirect2(
         record: record,
         root:   root,

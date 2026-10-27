@@ -66,56 +66,6 @@ fn gpu::Device? create_timestamp_read_device(ZString application_name) {
     return create_test_device(&desc);
 }
 
-fn void host_timestamp_reads_reject_ranges_outside_the_pool() @test {
-    gpu::Device device =
-        create_timestamp_read_device("gpu_timestamp_read_range_test")!!;
-    defer destroy_test_device(&device)!!;
-    gpu::DeviceCaps caps = gpu::get_device_caps(&device);
-    if (!caps.timestamps.queues.compute) return;
-
-    gpu::TimestampPoolDesc pool_desc = {
-        .capacity   = TIMESTAMP_QUERY_COUNT,
-        .debug_name = "read_range_pool",
-    };
-    gpu::TimestampPoolHandle pool =
-        gpu::create_timestamp_pool(&device, &pool_desc)!!;
-    defer gpu::destroy_timestamp_pool(&device, pool);
-
-    // Wider than the pool so the public wrapper's out.len check cannot fire
-    // first; each rejection below has to come from the backend range check.
-    ulong[TIMESTAMP_QUERY_COUNT + 1] out;
-    assert(
-        @catch(gpu::read_timestamps(
-            device: &device,
-            pool:   pool,
-            first:  0,
-            count:  TIMESTAMP_QUERY_COUNT + 1,
-            out:    out[..],
-        )) == gpu::INVALID_ARGUMENT,
-        "a count past the pool capacity is rejected"
-    );
-    assert(
-        @catch(gpu::read_timestamps(
-            device: &device,
-            pool:   pool,
-            first:  TIMESTAMP_QUERY_COUNT,
-            count:  1,
-            out:    out[..],
-        )) == gpu::INVALID_ARGUMENT,
-        "a first index at the pool capacity is rejected"
-    );
-    assert(
-        @catch(gpu::read_timestamps(
-            device: &device,
-            pool:   pool,
-            first:  0,
-            count:  TIMESTAMP_QUERY_COUNT,
-            out:    out[:1],
-        )) == gpu::INVALID_ARGUMENT,
-        "an output shorter than the requested count is rejected"
-    );
-}
-
 fn void host_timestamp_read_of_unwritten_slots_faults_device_busy() @test {
     gpu::Device device =
         create_timestamp_read_device("gpu_timestamp_read_busy_test")!!;
@@ -132,7 +82,7 @@ fn void host_timestamp_read_of_unwritten_slots_faults_device_busy() @test {
     defer gpu::destroy_timestamp_pool(&device, pool);
 
     gpu::Queue queue =
-        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -186,7 +136,7 @@ fn void host_timestamp_read_after_loss_succeeds() @test {
     defer gpu::destroy_timestamp_pool(&device, pool);
 
     gpu::Queue queue =
-        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -259,7 +209,7 @@ fn void run_timestamp_query_measurement(
     defer gpu::destroy_pipeline(&device, pipeline)!!;
 
     gpu::Queue queue =
-        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;

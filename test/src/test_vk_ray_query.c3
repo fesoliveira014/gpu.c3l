@@ -39,7 +39,7 @@ fn gpu::Device? create_ray_query_test_device(
         .enable_ray_queries = true,
     };
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::Adapter adapter = adapters.get(i);
         gpu::DeviceSupport support =
             gpu::supports_device_desc(&adapter, &device_desc)!;
         if (!support.supported) continue;
@@ -145,13 +145,6 @@ fn void lavapipe_acceleration_structure_storage_models_are_explicit() @test {
             allocation,
             0,
         )!!;
-    assert(@catch(gpu::create_placed_acceleration_structure(
-        &device,
-        &desc,
-        allocation,
-        0,
-    )) == gpu::INVALID_ARGUMENT,
-        "overlapping placed acceleration structures publish nothing");
     assert(@catch(gpu::free_allocation(&device, &allocation))
         == gpu::RESOURCE_IN_USE && allocation.is_valid(),
         "a live placed structure retains caller-owned storage without freeing it");
@@ -190,7 +183,7 @@ fn OwnedSpan? allocate_ray_query_span(
     defer catch (void)gpu::free_allocation(device, &allocation);
     return {
         .allocation = allocation,
-        .span = gpu::get_allocation_span(device, allocation)!,
+        .span = gpu::get_allocation_span(device, allocation),
     };
 }
 
@@ -214,7 +207,7 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
         destroy_test_device(&device)!!;
         runtime = {};
     }
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
 
     OwnedSpan vertices = allocate_ray_query_span(
         device:       &device,
@@ -350,10 +343,10 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
         {
             .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
             .triangles = {
-                .vertices = vertices.span.checked_subspan(
+                .vertices = vertices.span.subspan(
                     0,
                     9 * float::size,
-                )!!,
+                ),
                 .vertex_stride = 3 * float::size,
                 .vertex_count = 3,
                 .primitive_count = 1,
@@ -362,10 +355,10 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
         {
             .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
             .triangles = {
-                .vertices = vertices.span.checked_subspan(
+                .vertices = vertices.span.subspan(
                     9 * float::size,
                     9 * float::size,
-                )!!,
+                ),
                 .vertex_stride = 3 * float::size,
                 .vertex_count = 3,
                 .indices = indices_u16.span,
@@ -375,10 +368,10 @@ fn void lavapipe_triangle_blas_tlas_query_round_trip() @test {
         {
             .kind = gpu::AccelerationStructureGeometryKind.TRIANGLES,
             .triangles = {
-                .vertices = vertices.span.checked_subspan(
+                .vertices = vertices.span.subspan(
                     18 * float::size,
                     9 * float::size,
-                )!!,
+                ),
                 .vertex_stride = 3 * float::size,
                 .vertex_count = 3,
                 .indices = indices_u32.span,
@@ -623,7 +616,7 @@ fn void lavapipe_aabb_candidates_require_explicit_confirmation() @test {
         destroy_test_device(&device)!!;
         runtime = {};
     }
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     OwnedSpan aabbs = allocate_ray_query_span(
         device:       &device,
         size:         6 * float::size,

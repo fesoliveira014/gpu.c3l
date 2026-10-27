@@ -178,9 +178,14 @@ result that is zero, foreign, or stale terminates the process. Callback
 faults propagate unchanged. Device creation is attempted
 once and remains authoritative; a creation fault does not trigger reselection.
 
-A null description, supplied `device.surface`, user data without its callback,
-or inconsistent command queue policy returns `INVALID_ARGUMENT`. Nested API
-validation, allocation, capacity, and device faults also propagate.
+`create_device_context` rules: the description is not null, `device.surface`
+is unset (zero), each user data pointer comes with its callback,
+`command_queue` is a required role, and the required roles include graphics
+when `create_surface` is set.
+A call that breaks a rule panics in a safe build (`-O0`, `-O1`, or
+`--safe=yes`); other builds do not check it. The nested runtime and device
+descriptions follow their own rules. Nested allocation, capacity, support,
+and device faults propagate.
 
 Creation performs no submissions, acquisitions, waits, or background work. If a
 stage fails, it attempts reverse cleanup of acquired objects, discards secondary

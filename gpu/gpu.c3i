@@ -196,9 +196,6 @@ faultdef
     // Runtime failure: a valid capability, layer, presentation path, feature,
     // or exact semantic capacity is unavailable.
     UNSUPPORTED_FEATURE,
-    // Always checked for required host-safety, safe-lowering, and cold-path
-    // configuration causes.
-    INVALID_ARGUMENT,
     // Always checked lifecycle/safe-snapshot cause, or runtime backend result:
     // a transition is incompatible with authoritative state, command execution
     // lacks a usable pipeline snapshot, or native surface ownership conflicts.
@@ -853,7 +850,7 @@ enum Format : int {
 
 <* Aspect of a depth-stencil texture selected by a sampled view or a copy.
    AUTO is color for color formats, depth for depth-only formats, stencil for
-   S8_UINT, and INVALID_ARGUMENT for combined formats. *>
+   S8_UINT; AUTO must not be used with combined formats. *>
 enum TextureAspect : int {
     AUTO,
     DEPTH,
@@ -941,6 +938,19 @@ struct TextureRequirements {
 }
 
 const uint MAX_SPARSE_TEXTURE_ASPECTS = 2;
+
+<* Largest command-list count in one `SubmitDesc`. *>
+const uint MAX_SUBMIT_COMMAND_LISTS = 1024;
+<* Largest completion-wait count in one `SubmitDesc`. *>
+const uint MAX_SUBMIT_COMPLETION_WAITS = 1024;
+<* Largest tile-bind count in one sparse bind batch. *>
+const usz MAX_SPARSE_TILE_BINDS = 1024;
+<* Largest opaque-bind count in one sparse bind batch. *>
+const usz MAX_SPARSE_OPAQUE_BINDS = 1024;
+<* Largest wait count in one sparse bind batch. *>
+const usz MAX_SPARSE_BIND_WAITS = 1024;
+<* Longest shader entry-point name in bytes, excluding the terminator. *>
+const usz MAX_SHADER_ENTRY_POINT_BYTES = 63;
 
 enum SparseTextureAspect : int {
     COLOR,
@@ -1066,7 +1076,7 @@ struct SamplerDesc {
     // Requires caps.max_sampler_anisotropy > 0.
     bool        anisotropy_enable;
     // Ignored when anisotropy_enable is false. When enabled, must be finite
-    // and >= 1; above caps.max_sampler_anisotropy faults INVALID_ARGUMENT.
+    // and >= 1, and must not exceed caps.max_sampler_anisotropy.
     float       max_anisotropy;
     // With `compare`, enables depth-compare (shadow) sampling. The compare
     // value is ignored when compare_enable is false.
@@ -1186,7 +1196,8 @@ const ColorWriteMask COLOR_WRITE_ALL = {
 };
 
 <* Borrowed SPIR-V input for one pipeline stage. A null entry point selects
-   `main`; the enclosing field determines the role. Storage is call-scoped. *>
+   `main`; a name is 1 to `MAX_SHADER_ENTRY_POINT_BYTES` bytes long. The
+   enclosing field determines the role. Storage is call-scoped. *>
 struct ShaderDesc {
     char[]  spirv;
     ZString entry_point;
@@ -1574,8 +1585,8 @@ struct GeneratedWorkReservationDesc {
     uint              concurrent_lists;
 }
 
-<* Byte-range copy for cmd_copy_buffer; src and dst must have equal size and
-   must not overlap. *>
+<* Byte-range copy for cmd_copy_buffer; src must not be larger than dst and
+   the ranges must not overlap. *>
 struct BufferCopyDesc {
     GpuSpan src;
     GpuSpan dst;
@@ -1815,8 +1826,10 @@ struct TextureBarrier {
 }
 
 <* Work submitted to an explicit queue. Every wait names its first destination
-   stages. Non-zero readiness requires a graphics-capable queue and an explicit
-   supported destination stage, and is consumed only by successful submission. *>
+   stages. Non-zero readiness requires a graphics-capable queue and, without
+   unified layouts, an explicit supported destination stage in
+   `readiness_before`, which unified layouts ignore. Readiness is consumed only
+   by successful submission. *>
 struct SubmitDesc {
     ExecutableCommandList[] command_lists;
     CompletionWait[]        completion_waits;

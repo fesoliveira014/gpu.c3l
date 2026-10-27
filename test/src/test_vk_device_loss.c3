@@ -101,7 +101,7 @@ fn void healthy_device_is_not_lost() @test {
 fn void observed_loss_is_sticky() @test {
     gpu::Device device = loss_test_device();
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::ExecutableCommandList[1] lists = { record_loss_test_commands(&allocator) };
@@ -128,7 +128,7 @@ fn void peer_device_unaffected() @test {
 
     assert(gpu::is_device_lost(&lost), "the marked device is lost");
     assert(!gpu::is_device_lost(&peer), "a peer device stays healthy");
-    gpu::Queue queue = gpu::get_queue(&peer, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&peer, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&peer, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::ExecutableCommandList[1] lists = { record_loss_test_commands(&allocator) };
@@ -139,7 +139,7 @@ fn void peer_device_unaffected() @test {
 fn void wait_returns_after_loss() @test {
     gpu::Device device = loss_test_device();
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CompletionPoint point = submit_never_completing(&device, queue, &allocator);
@@ -153,7 +153,7 @@ fn void wait_returns_after_loss() @test {
 fn void pending_units_recycle_after_loss() @test {
     gpu::Device device = loss_test_device();
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc allocator_desc = { .command_buffer_capacity = 2 };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue, &allocator_desc)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -170,7 +170,7 @@ fn void pending_units_recycle_after_loss() @test {
 fn void frame_loop_without_presentation_after_loss() @test {
     gpu::Device device = loss_test_device();
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::internal::mark_device_lost(&device);
@@ -201,7 +201,7 @@ fn void creation_after_loss_proceeds() @test {
 
 fn void normal_teardown_after_loss() @test {
     gpu::Device device = loss_test_device();
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     gpu::AllocationDesc allocation_desc = {
         .size         = 256,

@@ -113,7 +113,7 @@ fn void u16v_draw(
     gpu::Queue queue = gpu::get_queue(
         device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         device,
         queue,
@@ -146,7 +146,7 @@ fn void u16v_draw(
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..], .width = U16V_RT, .height = U16V_RT };
     gpu::GraphicsState graphics =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
@@ -266,8 +266,8 @@ fn void compute_written_indices_draw_through_index_input() @test {
     QuadInputs inputs = u16v_quad_inputs(&device, { .graphics });
     defer free_quad_inputs(&device, &inputs);
 
-    gpu::GpuSpan rb_cpu = inputs.readback.span.checked_subspan(0, U16V_BYTES)!!;
-    gpu::GpuSpan rb_gpu = inputs.readback.span.checked_subspan(U16V_BYTES, U16V_BYTES)!!;
+    gpu::GpuSpan rb_cpu = inputs.readback.span.subspan(0, U16V_BYTES);
+    gpu::GpuSpan rb_gpu = inputs.readback.span.subspan(U16V_BYTES, U16V_BYTES);
     u16v_draw(
         device:     &device,
         pipeline:   pipeline,
@@ -301,7 +301,7 @@ fn void compute_queue_indices_wait_on_index_input() @test {
     QuadInputs inputs = u16v_quad_inputs(&device, { .graphics, .compute });
     defer free_quad_inputs(&device, &inputs);
 
-    gpu::Queue compute_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue compute_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(&device, compute_queue)!!;
     defer gpu::destroy_command_allocator(&compute_allocator)!!;
     gpu::CommandList compute = gpu::begin_commands(&compute_allocator)!!;
@@ -314,8 +314,8 @@ fn void compute_queue_indices_wait_on_index_input() @test {
     gpu::SubmitDesc compute_submit = { .command_lists = compute_lists[..] };
     gpu::CompletionPoint written = submit_test_queue(&device, gpu::QueueKind.COMPUTE, &compute_submit)!!;
 
-    gpu::GpuSpan rb_cpu = inputs.readback.span.checked_subspan(0, U16V_BYTES)!!;
-    gpu::GpuSpan rb_gpu = inputs.readback.span.checked_subspan(U16V_BYTES, U16V_BYTES)!!;
+    gpu::GpuSpan rb_cpu = inputs.readback.span.subspan(0, U16V_BYTES);
+    gpu::GpuSpan rb_gpu = inputs.readback.span.subspan(U16V_BYTES, U16V_BYTES);
     u16v_draw(
         device:     &device,
         pipeline:   pipeline,
@@ -408,16 +408,16 @@ fn void u16_and_u32_indexed_draws_match() @test {
     )!!;
     defer free_owned_span(&device, &readback)!!;
     gpu::GpuSpan rb_all = readback.span;
-    gpu::GpuSpan rb_u16 = rb_all.checked_subspan(0, U16V_BYTES)!!;
-    gpu::GpuSpan rb_u32 = rb_all.checked_subspan(U16V_BYTES, U16V_BYTES)!!;
-    gpu::GpuSpan rb_u16_off = rb_all.checked_subspan(U16V_BYTES * 2, U16V_BYTES)!!;
-    gpu::GpuSpan rb_u32_off = rb_all.checked_subspan(U16V_BYTES * 3, U16V_BYTES)!!;
+    gpu::GpuSpan rb_u16 = rb_all.subspan(0, U16V_BYTES);
+    gpu::GpuSpan rb_u32 = rb_all.subspan(U16V_BYTES, U16V_BYTES);
+    gpu::GpuSpan rb_u16_off = rb_all.subspan(U16V_BYTES * 2, U16V_BYTES);
+    gpu::GpuSpan rb_u32_off = rb_all.subspan(U16V_BYTES * 3, U16V_BYTES);
     u16v_draw(
         device:     &device,
         pipeline:   pipeline,
         verts:      test_span_address(&device, vspan),
         color:      test_span_address(&device, cspan),
-        index_span: span16.checked_subspan(0, U16V_INDEX_COUNT * 2)!!,
+        index_span: span16.subspan(0, U16V_INDEX_COUNT * 2),
         index_type: gpu::IndexType.U16,
         rb_span:    &rb_u16,
     );
@@ -426,7 +426,7 @@ fn void u16_and_u32_indexed_draws_match() @test {
         pipeline:   pipeline,
         verts:      test_span_address(&device, vspan),
         color:      test_span_address(&device, cspan),
-        index_span: span32.checked_subspan(0, U16V_INDEX_COUNT * 4)!!,
+        index_span: span32.subspan(0, U16V_INDEX_COUNT * 4),
         index_type: gpu::IndexType.U32,
         rb_span:    &rb_u32,
     );
@@ -435,7 +435,7 @@ fn void u16_and_u32_indexed_draws_match() @test {
         pipeline:   pipeline,
         verts:      test_span_address(&device, vspan),
         color:      test_span_address(&device, cspan),
-        index_span: span16_off.checked_subspan(U16V_OFFSET_ELEMENTS * 2, U16V_INDEX_COUNT * 2)!!,
+        index_span: span16_off.subspan(U16V_OFFSET_ELEMENTS * 2, U16V_INDEX_COUNT * 2),
         index_type: gpu::IndexType.U16,
         rb_span:    &rb_u16_off,
     );
@@ -444,7 +444,7 @@ fn void u16_and_u32_indexed_draws_match() @test {
         pipeline:   pipeline,
         verts:      test_span_address(&device, vspan),
         color:      test_span_address(&device, cspan),
-        index_span: span32_off.checked_subspan(U16V_OFFSET_ELEMENTS * 4, U16V_INDEX_COUNT * 4)!!,
+        index_span: span32_off.subspan(U16V_OFFSET_ELEMENTS * 4, U16V_INDEX_COUNT * 4),
         index_type: gpu::IndexType.U32,
         rb_span:    &rb_u32_off,
     );

@@ -218,24 +218,6 @@ fn void mapped_memory_range_normalization_is_exact_and_safe() @test {
 
     assert(@catch(vk::normalize_mapped_memory_range(
         offset:          0,
-        size:            0,
-        allocation_size: 150,
-        atom_size:       64,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk::normalize_mapped_memory_range(
-        offset:          149,
-        size:            2,
-        allocation_size: 150,
-        atom_size:       64,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk::normalize_mapped_memory_range(
-        offset:          usz::max,
-        size:            1,
-        allocation_size: usz::max,
-        atom_size:       64,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(@catch(vk::normalize_mapped_memory_range(
-        offset:          0,
         size:            1,
         allocation_size: 150,
         atom_size:       0,
@@ -304,56 +286,6 @@ fn void mapped_visibility_validates_and_skips_coherent_memory() @test {
         &ops,
     )) == gpu::OUT_OF_HOST_MEMORY,
         "visibility failures use the standard backend result mapping");
-}
-
-fn void mapped_visibility_rejects_invalid_spans_before_native_work() @test {
-    MappedVisibilityFixture fixture;
-    gpu::GpuSpan span = init_mapped_visibility_fixture(
-        fixture:      &fixture,
-        logical_size: 150,
-        native_size:  150,
-        coherent:     false,
-        mapped:       true,
-    );
-    vk::AllocationNativeOps ops = mapped_visibility_probe_ops(
-        &fixture.probe,
-    );
-
-    gpu::GpuSpan zero = span;
-    zero.size = 0;
-    assert(@catch(vk::flush_mapped_span_for_state_with_ops(
-        &fixture.state,
-        zero,
-        &ops,
-    )) == gpu::INVALID_ARGUMENT);
-
-    gpu::GpuSpan overflow = span;
-    overflow.offset = 149;
-    overflow.size = 2;
-    assert(@catch(vk::invalidate_mapped_span_for_state_with_ops(
-        &fixture.state,
-        overflow,
-        &ops,
-    )) == gpu::INVALID_ARGUMENT);
-
-    gpu::GpuSpan stale = span;
-    stale.generation++;
-
-    gpu::GpuSpan foreign = span;
-    foreign.owner = gpu::internal::resource_owner_tag(
-        ALLOCATION_TEST_OWNER,
-        gpu::internal::ResourceOwnerKind.TEXTURE,
-    );
-
-    fixture.cells[0].value.backing.cpu_base = null;
-    assert(@catch(vk::flush_mapped_span_for_state_with_ops(
-        &fixture.state,
-        span,
-        &ops,
-    )) == gpu::INVALID_ARGUMENT);
-    assert(fixture.probe.flush_count == 0
-        && fixture.probe.invalidate_count == 0,
-        "invalid, stale, foreign, and unmapped spans perform no native work");
 }
 
 fn void allocation_table_checks_identity_reuse_and_capacity() @test {
@@ -693,7 +625,7 @@ fn void repeated_retirement_and_release_destroy_allocation_once() @test {
         .device = { .generation = 1 },
         .id     = 0,
     };
-    gpu::CompletionPoint completion = gpu::internal::make_completion_point(queue, 1)!!;
+    gpu::CompletionPoint completion = gpu::internal::make_completion_point(queue, 1);
     vk::QueueCompletionState[1] completions = {{ .bound = true }};
     fixture.state.queue_completions = completions[..];
     completions[0].retirement_mutex.init()!!;
@@ -942,20 +874,6 @@ fn void texture_memory_uses_raw_non_addressable_allocation() @test {
         && info.access == desc.access
         && !info.mapped && !info.coherent && info.device_local && !info.addressable,
         "texture allocation info exposes no generic data capabilities");
-    assert(@catch(vk::allocation_span_for_state(
-        &fixture.state,
-        allocation,
-    )) == gpu::INVALID_ARGUMENT,
-        "texture allocation cannot resolve to a generic span");
-    gpu::GpuSpan forged = {
-        .owner      = allocation.owner,
-        .index      = allocation.index,
-        .generation = allocation.generation,
-        .size       = desc.size,
-    };
-    assert(@catch(vk::resolve_span(&fixture.state, &forged))
-        == gpu::INVALID_ARGUMENT,
-        "forged texture spans stop before private-buffer resolution");
 
     vk::free_allocation_for_state_with_ops(
         &fixture.state,
@@ -1056,7 +974,7 @@ fn void allocation_queries_and_immediate_release() @test {
     gpu::GpuSpan span = vk::allocation_span_for_state(
         &fixture.state,
         allocation,
-    )!!;
+    );
     assert(span.owner == allocation.owner
         && span.index == allocation.index
         && span.generation == allocation.generation
@@ -1178,13 +1096,13 @@ fn void native_allocation_classes_map_and_release() @test {
             &device,
             allocation,
         );
-        gpu::GpuSpan span = gpu::get_allocation_span(&device, allocation)!!;
+        gpu::GpuSpan span = gpu::get_allocation_span(&device, allocation);
         assert(info.size == 256
             && info.alignment >= 128
             && (info.alignment & (info.alignment - 1)) == 0,
             "native allocation info preserves logical size and valid alignment");
         assert(info.addressable
-            && (ulong)gpu::get_span_address(&device, span)!! != 0,
+            && (ulong)gpu::get_span_address(&device, span) != 0,
             "every memory class exposes a nonzero GPU address");
 
         vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
@@ -1204,12 +1122,12 @@ fn void native_allocation_classes_map_and_release() @test {
             "device_local reports the selected memory type");
     }
 
-    gpu::GpuSpan write_span = gpu::get_allocation_span(&device, write)!!;
-    char[] write_mapping = gpu::get_span_mapping(&device, write_span)!!;
+    gpu::GpuSpan write_span = gpu::get_allocation_span(&device, write);
+    char[] write_mapping = gpu::get_span_mapping(&device, write_span);
     char[] write_tail = gpu::get_span_mapping(
         &device,
-        write_span.checked_subspan(64, 32)!!,
-    )!!;
+        write_span.subspan(64, 32),
+    );
     write_mapping[0] = 0x2A;
     write_tail[0] = 0x3B;
     assert(write_mapping.len == 256
@@ -1217,23 +1135,19 @@ fn void native_allocation_classes_map_and_release() @test {
         && write_mapping[64] == 0x3B,
         "CPU_WRITE exposes exact writable full and subspan mappings");
 
-    gpu::GpuSpan local_span = gpu::get_allocation_span(&device, local)!!;
-    char[] local_mapping = gpu::get_span_mapping(&device, local_span)!!;
+    gpu::GpuSpan local_span = gpu::get_allocation_span(&device, local);
+    char[] local_mapping = gpu::get_span_mapping(&device, local_span);
     local_mapping[0] = 0x5D;
     assert(local_mapping.len == 256 && local_mapping[0] == 0x5D
         && gpu::get_allocation_info(&device, local).mapped,
         "CPU_WRITE_GPU_LOCAL exposes a writable host mapping");
 
-    gpu::GpuSpan read_span = gpu::get_allocation_span(&device, read)!!;
-    char[] read_mapping = gpu::get_span_mapping(&device, read_span)!!;
+    gpu::GpuSpan read_span = gpu::get_allocation_span(&device, read);
+    char[] read_mapping = gpu::get_span_mapping(&device, read_span);
     read_mapping[0] = 0x4C;
     assert(read_mapping.len == 256 && read_mapping[0] == 0x4C,
         "CPU_READ exposes its exact host mapping without visibility claims");
 
-    gpu::GpuSpan private_span = gpu::get_allocation_span(&device, private)!!;
-    assert(@catch(gpu::get_span_mapping(&device, private_span))
-        == gpu::INVALID_ARGUMENT,
-        "GPU_PRIVATE never exposes a host mapping");
     gpu::MemoryStats live = gpu::get_memory_stats(&device);
     assert(live.live_allocation_count >= baseline.live_allocation_count + 4,
         "independent allocations contribute to VMA allocation statistics");
@@ -1297,17 +1211,17 @@ fn void native_mapped_visibility_round_trip() @test {
     defer (void)gpu::free_allocation(&device, &write);
     gpu::GpuAllocation read = gpu::allocate_memory(&device, &read_desc)!!;
     defer (void)gpu::free_allocation(&device, &read);
-    gpu::GpuSpan write_span = gpu::get_allocation_span(&device, write)!!;
-    gpu::GpuSpan read_span = gpu::get_allocation_span(&device, read)!!;
-    gpu::GpuSpan written = write_span.checked_subspan(3, 127)!!;
-    gpu::GpuSpan copied = read_span.checked_subspan(5, 127)!!;
-    char[] source = gpu::get_span_mapping(&device, written)!!;
+    gpu::GpuSpan write_span = gpu::get_allocation_span(&device, write);
+    gpu::GpuSpan read_span = gpu::get_allocation_span(&device, read);
+    gpu::GpuSpan written = write_span.subspan(3, 127);
+    gpu::GpuSpan copied = read_span.subspan(5, 127);
+    char[] source = gpu::get_span_mapping(&device, written);
     for (usz i = 0; i < source.len; i++) {
         source[i] = (char)((i * 17 + 11) % 97);
     }
     gpu::flush_mapped_span(&device, written)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -1333,7 +1247,7 @@ fn void native_mapped_visibility_round_trip() @test {
     gpu::wait_completion(completion)!!;
 
     gpu::invalidate_mapped_span(&device, copied)!!;
-    char[] destination = gpu::get_span_mapping(&device, copied)!!;
+    char[] destination = gpu::get_span_mapping(&device, copied);
     assert(destination.len == source.len);
     for (usz i = 0; i < source.len; i++) {
         assert(destination[i] == source[i],
@@ -1373,15 +1287,15 @@ fn void native_allocation_spans_support_fill_upload_and_readback() @test {
         &readback_desc,
     )!!;
     defer (void)gpu::free_allocation(&device, &readback);
-    gpu::GpuSpan span = gpu::get_allocation_span(&device, allocation)!!;
-    gpu::GpuSpan upload_span = gpu::get_allocation_span(&device, upload)!!;
+    gpu::GpuSpan span = gpu::get_allocation_span(&device, allocation);
+    gpu::GpuSpan upload_span = gpu::get_allocation_span(&device, upload);
     gpu::GpuSpan readback_span = gpu::get_allocation_span(
         &device,
         readback,
-    )!!;
+    );
 
     char[256] expected;
-    char[] mapped_upload = gpu::get_span_mapping(&device, upload_span)!!;
+    char[] mapped_upload = gpu::get_span_mapping(&device, upload_span);
     for (usz i = 0; i < expected.len; i++) {
         expected[i] = (char)((i * 13 + 7) % 251);
         mapped_upload[i] = expected[i];
@@ -1391,14 +1305,14 @@ fn void native_allocation_spans_support_fill_upload_and_readback() @test {
     const usz FILL_OFFSET = 64;
     const usz FILL_SIZE = 16;
     const char FILL_BYTE = 0x5A;
-    gpu::GpuSpan fill_span = span.checked_subspan(
+    gpu::GpuSpan fill_span = span.subspan(
         FILL_OFFSET,
         FILL_SIZE,
-    )!!;
+    );
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -1440,7 +1354,7 @@ fn void native_allocation_spans_support_fill_upload_and_readback() @test {
     gpu::wait_completion(completion)!!;
 
     gpu::invalidate_mapped_span(&device, readback_span)!!;
-    char[] actual = gpu::get_span_mapping(&device, readback_span)!!;
+    char[] actual = gpu::get_span_mapping(&device, readback_span);
     for (usz i = 0; i < actual.len; i++) {
         char wanted = i >= FILL_OFFSET && i < FILL_OFFSET + FILL_SIZE
             ? FILL_BYTE

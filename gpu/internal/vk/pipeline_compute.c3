@@ -183,11 +183,11 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
                 .generated_dispatch_layout = entry.generated_dispatch_layout,
                 .entry                     = hit,
             })) {
-                release_prepared_shader_locked(state, prepared_shader)!!;
+                release_prepared_shader_locked(state, prepared_shader);
                 return handle;
             }
             entry.refcount--;
-            release_prepared_shader_locked(state, prepared_shader)!!;
+            release_prepared_shader_locked(state, prepared_shader);
             return gpu::SLOT_TABLE_FULL~;
         }
     }
@@ -240,7 +240,7 @@ fn gpu::PipelineHandle? create_compute_pipeline_from_module(
     if (raced != PIPELINE_ENTRY_NONE) {
         vk::destroy_pipeline(state.device, pipeline, null);
         state.pipeline_cache.entries[raced].refcount++;
-        release_prepared_shader_locked(state, prepared_shader)!!;
+        release_prepared_shader_locked(state, prepared_shader);
         entry_index = raced;
     } else if (try idx = create_ops.insert_cache_entry(
         create_ops.user_data,
@@ -321,6 +321,8 @@ fn gpu::PipelineHandle? vk_create_compute_pipeline(
     );
 }
 
+<* @require desc != null : "desc must not be null"
+   @require gpu::internal::shader_entry_point_valid(desc.shader.entry_point) : "desc.shader.entry_point must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long" *>
 fn gpu::PipelineHandle? create_compute_pipeline_with_root_abi_evidence(
     gpu::Device* device,
     gpu::ComputePipelineDesc* desc,
@@ -328,7 +330,6 @@ fn gpu::PipelineHandle? create_compute_pipeline_with_root_abi_evidence(
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return gpu::INVALID_ARGUMENT~;
     ComputePipelineCreateOps create_ops = compute_pipeline_create_ops_real();
     create_ops.shader_module.allow_alternate_root_abi = true;
     gpu::PipelineHandle pipeline = vk_create_compute_pipeline_with_ops(

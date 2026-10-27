@@ -445,7 +445,7 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
     fault returned = vk::report_contract_failure(
         state:               &state,
         operation:           "cmd_barrier",
-        public_fault:        gpu::INVALID_ARGUMENT,
+        public_fault:        gpu::UNSUPPORTED_FEATURE,
         resource_kind:       gpu::DebugResourceKind.NONE,
         has_public_identity: false,
         index:               0,
@@ -456,7 +456,7 @@ fn void contract_failure_helper_preserves_fault_and_dispatches_once() @test {
         backend_text:        null,
     );
 
-    assert(returned == gpu::INVALID_ARGUMENT,
+    assert(returned == gpu::UNSUPPORTED_FEATURE,
         "helper returns the unchanged public fault");
     assert(capture.calls == 1, "helper dispatches exactly once");
     assert(capture.last.has_fault && capture.last.public_fault == returned,
@@ -562,7 +562,7 @@ fn void leak_reporters_count_leaks() @test {
     gpu::PipelineHandle first_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
     gpu::PipelineHandle second_alias = gpu::create_compute_pipeline(&device, &pipe_desc)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc allocator_desc = {
         .debug_name = "leaky_command_allocator",
     };
@@ -849,7 +849,7 @@ fn void labels_record_validation_clean() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,

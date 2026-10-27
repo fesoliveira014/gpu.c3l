@@ -485,18 +485,20 @@ create_acceleration_structure_descriptor_view_with_ops(
     gpu::AccelerationStructureHandle acceleration_structure,
     AccelerationStructureDescriptorOps* ops,
 ) {
-    if (state == null || ops == null || ops.write == null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && ops != null && ops.write != null,
+        "descriptor write ops must be present"
+    );
     if (!state.acceleration_structures_enabled) return gpu::UNSUPPORTED_FEATURE~;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
 
     AccelerationStructureSlot* owner =
         state.acceleration_structures.get(acceleration_structure);
-    if (owner.desc.kind != gpu::AccelerationStructureKind.TOP_LEVEL) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        owner.desc.kind == gpu::AccelerationStructureKind.TOP_LEVEL,
+        "acceleration_structure must be a TOP_LEVEL structure"
+    );
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
     uint headroom = heap.acceleration_structure_free_count
         + (uint)heap.acceleration_structure_cells.len
@@ -721,17 +723,17 @@ fn void write_sampler_descriptor(VkDeviceState* state, uint slot, vk::Sampler sa
     vk::update_descriptor_sets(state.device, 1, &write, 0, null);
 }
 
-fn void? validate_descriptor_heap_binding(VkDeviceState* state) {
-    if (state == null) return gpu::INVALID_ARGUMENT~;
+fn void validate_descriptor_heap_binding(VkDeviceState* state) {
+    assert(state != null, "command record must reference a device state");
 }
 
-fn void? bind_descriptor_heap(
+fn void bind_descriptor_heap(
     VkDeviceState* state,
     CommandRecord* record,
     vk::PipelineLayout layout,
     vk::PipelineBindPoint bind_point,
 ) {
-    validate_descriptor_heap_binding(state)!;
+    validate_descriptor_heap_binding(state);
     DescriptorHeapCommandBinding* binding = &record.descriptor_heap_binding;
     bool* set_bound;
     switch (bind_point) {
@@ -742,7 +744,7 @@ fn void? bind_descriptor_heap(
         case vk::PipelineBindPoint.RAY_TRACING_KHR:
             set_bound = &binding.ray_tracing_set_bound;
         default:
-            return gpu::INVALID_ARGUMENT~;
+            unreachable("pipeline bind point must be compute, graphics or ray tracing");
     }
     bool graphics = bind_point == vk::PipelineBindPoint.GRAPHICS;
     if (*set_bound && (!graphics || binding.graphics_layout == layout)) return;
@@ -760,28 +762,17 @@ fn void? bind_descriptor_heap(
     if (graphics) binding.graphics_layout = layout;
 }
 
-fn TextureSlot*? resolve_descriptor_texture(
+<* A texture published in the shader heap must carry sampled or storage usage;
+   a violation panics in safe builds. *>
+fn TextureSlot* resolve_descriptor_texture(
     VkDeviceState* state,
     gpu::TextureHandle texture,
-    ZString operation,
-    ZString usage_field,
 ) @private {
     TextureSlot* slot = state.textures.get(texture);
-    if (!slot.usage.sampled && !slot.usage.storage) {
-        return report_contract_failure(
-            state:               state,
-            operation:           operation,
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.TEXTURE,
-            has_public_identity: true,
-            index:               texture.index,
-            generation:          texture.generation,
-            debug_name:          slot_name(&slot.debug_name[0]),
-            rejected_field:      usage_field,
-            invariant:           "texture must have sampled or storage usage",
-            backend_text:        null,
-        )~;
-    }
+    assert(
+        slot.usage.sampled || slot.usage.storage,
+        "texture must have sampled or storage usage"
+    );
     return slot;
 }
 
@@ -791,10 +782,9 @@ fn vk::ImageView? resolve_descriptor_texture_view(
     gpu::TextureHandle texture,
     gpu::TextureViewDesc* view,
     ZString operation,
-    ZString view_field,
     CachedViewCreation* creation,
 ) @private {
-    vk::ImageView? resolved = resolve_texture_view_tracked(
+    return resolve_texture_view_tracked(
         state:     state,
         slot:      slot,
         texture:   texture,
@@ -802,23 +792,6 @@ fn vk::ImageView? resolve_descriptor_texture_view(
         operation: operation,
         creation:  creation,
     );
-    if (catch f = resolved) {
-        if (f != gpu::INVALID_ARGUMENT) return f~;
-        return report_contract_failure(
-            state:               state,
-            operation:           operation,
-            public_fault:        f,
-            resource_kind:       gpu::DebugResourceKind.TEXTURE,
-            has_public_identity: true,
-            index:               texture.index,
-            generation:          texture.generation,
-            debug_name:          slot_name(&slot.debug_name[0]),
-            rejected_field:      view_field,
-            invariant:           "view must select a valid texture subresource range",
-            backend_text:        null,
-        )~;
-    }
-    return resolved;
 }
 
 fn gpu::TextureView? vk_create_texture_view(
@@ -831,12 +804,7 @@ fn gpu::TextureView? vk_create_texture_view(
     state.texture_view_cache_mutex.lock()!!;
     defer state.texture_view_cache_mutex.unlock();
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
-    TextureSlot* texture_slot = resolve_descriptor_texture(
-        state:       state,
-        texture:     texture,
-        operation:   "create_texture_view",
-        usage_field: "TextureDesc.usage",
-    )!;
+    TextureSlot* texture_slot = resolve_descriptor_texture(state, texture);
 
     uint headroom = texture_descriptor_headroom(heap);
     if (headroom == 0) {
@@ -868,7 +836,6 @@ fn gpu::TextureView? vk_create_texture_view(
         texture:   texture,
         view:      view,
         operation: "create_texture_view",
-        view_field: "view",
         creation:  &creation,
     )!;
 
@@ -899,12 +866,7 @@ fn void? prepare_texture_descriptor_item(
     PendingTextureWrite* pending,
     CachedViewCreation* creation,
 ) @private {
-    TextureSlot* texture_slot = resolve_descriptor_texture(
-        state:       state,
-        texture:     desc.texture,
-        operation:   "create_texture_views",
-        usage_field: "TextureDesc.usage",
-    )!;
+    TextureSlot* texture_slot = resolve_descriptor_texture(state, desc.texture);
     validate_texture_view_increment(
         state:         state,
         owner:         texture_slot,
@@ -917,7 +879,6 @@ fn void? prepare_texture_descriptor_item(
         texture:    desc.texture,
         view:       &desc.view,
         operation:  "create_texture_views",
-        view_field: "descs[].view",
         creation:   creation,
     )!;
     *pending = {
@@ -1030,21 +991,6 @@ fn void? vk_create_texture_views(
     gpu::TextureViewCreateDesc[] descs,
     gpu::TextureView[] out_views,
 ) {
-    if (out_views.len != descs.len) {
-        return report_contract_failure(
-            state:               state,
-            operation:           "create_texture_views",
-            public_fault:        gpu::INVALID_ARGUMENT,
-            resource_kind:       gpu::DebugResourceKind.TEXTURE_DESCRIPTOR,
-            has_public_identity: false,
-            index:               0,
-            generation:          0,
-            debug_name:          null,
-            rejected_field:      "out_views",
-            invariant:           "output count must match descriptor count",
-            backend_text:        null,
-        )~;
-    }
     if (descs.len == 0) return;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
@@ -1202,15 +1148,15 @@ fn void? vk_release_texture_indices(
     defer state.resource_mutex.unlock();
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
     uint capacity = (uint)heap.texture_cells.len;
-    if (!range.base.is_valid() || range.count == 0) return gpu::INVALID_ARGUMENT~;
     uint first = texture_index_slot(range.base);
-    if (first >= capacity
-        || first < heap.texture_reserved_low
-        || range.count > capacity - first) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        first < capacity
+            && first >= heap.texture_reserved_low
+            && range.count <= capacity - first,
+        "range must lie inside the reserved texture-index region"
+    );
     foreach (&cell : heap.texture_cells[first:range.count]) {
-        if (!cell.reserved) return gpu::INVALID_ARGUMENT~;
+        assert(cell.reserved, "every slot in range must be reserved");
         if (cell.used) return gpu::RESOURCE_IN_USE~;
     }
     foreach (&cell : heap.texture_cells[first:range.count]) {
@@ -1236,22 +1182,16 @@ fn gpu::TextureView? vk_create_texture_view_at(
     state.texture_view_cache_mutex.lock()!!;
     defer state.texture_view_cache_mutex.unlock();
     DescriptorHeapState* heap = &state.shader_heap.descriptors;
-    if (!slot.is_valid()) return gpu::INVALID_ARGUMENT~;
     uint cell_index = texture_index_slot(slot);
-    if (cell_index >= heap.texture_cells.len
-        || !heap.texture_cells[cell_index].reserved) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        cell_index < heap.texture_cells.len && heap.texture_cells[cell_index].reserved,
+        "slot must lie inside a live texture-index reservation"
+    );
     if (heap.texture_cells[cell_index].used) return gpu::RESOURCE_IN_USE~;
     if (!can_allocate_handle_generation(heap.texture_cells[cell_index].generation)) {
         return gpu::SLOT_TABLE_FULL~;
     }
-    TextureSlot* texture_slot = resolve_descriptor_texture(
-        state:       state,
-        texture:     texture,
-        operation:   "create_texture_view_at",
-        usage_field: "TextureDesc.usage",
-    )!;
+    TextureSlot* texture_slot = resolve_descriptor_texture(state, texture);
     validate_texture_view_increment(
         state:         state,
         owner:         texture_slot,
@@ -1265,7 +1205,6 @@ fn gpu::TextureView? vk_create_texture_view_at(
         texture:    texture,
         view:       desc,
         operation:  "create_texture_view_at",
-        view_field: "desc",
         creation:   &creation,
     )!;
     gpu::TextureView result;
@@ -1309,12 +1248,7 @@ fn void? vk_update_texture_view(
             "live texture descriptor owner is missing",
         );
     }
-    TextureSlot* texture_slot = resolve_descriptor_texture(
-        state:       state,
-        texture:     texture,
-        operation:   "update_texture_view",
-        usage_field: "TextureDesc.usage",
-    )!;
+    TextureSlot* texture_slot = resolve_descriptor_texture(state, texture);
     if (texture_slot != old_owner) {
         validate_texture_view_increment(
             state:         state,
@@ -1330,7 +1264,6 @@ fn void? vk_update_texture_view(
         texture:    texture,
         view:       desc,
         operation:  "update_texture_view",
-        view_field: "desc",
         creation:   &creation,
     )!;
     uint cell_index = texture_index_slot(view.index);

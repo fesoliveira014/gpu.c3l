@@ -49,6 +49,17 @@ names the handle type, for example `gpu: stale TextureHandle`, and the
 backtrace that follows shows the call. These checks are not compiled out;
 builds that turn panic messages off terminate without printing them.
 
+**Contracts.** The rules for an argument value are `@require` lines in the
+function's docstring, and rules about object state are documented beside the
+call. A violation is a programming error, not a fault: it never returns an
+optional. Contracts are checked in builds at `-O0`, `-O1` or `--safe=yes`; the
+panic message names the rule and points at the application's call. They are not
+checked at `-O2` and above, `-Os`, `-Oz` or `--safe=no`, where a violation is
+undefined behaviour. Develop with safety on. Contracts reference the public
+limit constants and `get_device_caps` fields, so an application can test a
+value before the call. Handle and token checks above are separate and always
+terminate.
+
 **Device loss.** Calls on a lost device keep succeeding without GPU effect:
 submissions complete immediately, waits return, and presentation consumes
 images. Results the GPU would have produced are undefined. Check
@@ -75,7 +86,6 @@ lifetimes. Enable Vulkan validation explicitly for development diagnostics.
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | No Vulkan 1.3 driver or backend creation failed | no |
 | `UNSUPPORTED_FEATURE` | Capability, layer, format, or capacity unavailable | no |
-| `INVALID_ARGUMENT` | Descriptor or parameter rejected | fix input |
 | `INVALID_RESOURCE_STATE` | Transition or command state contradicts prior state | fix order |
 | `OUT_OF_HOST_MEMORY`, `OUT_OF_DEVICE_MEMORY` | Allocation failed | release memory |
 | `DEVICE_BUSY` | GPU work the call depends on has not finished | wait on an older completion point, retry |
@@ -162,6 +172,7 @@ Constants: `GPU_ALLOCATION_INVALID`, `TEXTURE_HANDLE_INVALID`,
 `ACCELERATION_STRUCTURE_VIEW_INVALID`,
 `ACCELERATION_STRUCTURE_INDEX_INVALID`, `MAX_MEMORY_HEAPS`,
 `DEFAULT_TEXTURE_CAPACITY`, `MAX_SPARSE_TEXTURE_ASPECTS`,
+`MAX_SPARSE_TILE_BINDS`, `MAX_SPARSE_OPAQUE_BINDS`, `MAX_SPARSE_BIND_WAITS`,
 `DEFAULT_TEXTURE_HEAP_CAPACITY`, `DEFAULT_SAMPLER_HEAP_CAPACITY`,
 `MAX_SHADER_HEAP_CAPACITY`.
 
@@ -171,8 +182,8 @@ Methods: `GpuAllocation.is_valid`, `GpuAllocation.equals`,
 `AccelerationStructureHandle.is_valid`,
 `AccelerationStructureHandle.equals`, `AccelerationStructureView.is_valid`,
 `AccelerationStructureView.equals`, `AccelerationStructureIndex.is_valid`,
-`GpuSpan.unchecked_subspan`, `GpuSpan.checked_subspan`, `GpuSpan.allocation`,
-`MappedGpuSpan.checked_subspan`, `TextureCompatibility.is_valid`.
+`GpuSpan.unchecked_subspan`, `GpuSpan.subspan`, `GpuSpan.allocation`,
+`MappedGpuSpan.subspan`, `TextureCompatibility.is_valid`.
 
 Functions: `allocate_memory`, `allocate_mapped_memory`, `free_allocation`,
 `get_allocation_info`, `get_allocation_span`, `get_span_mapping`,
@@ -207,7 +218,7 @@ Types: `RootPush`, `GraphicsRootPush`, `GeneratedDrawRecord`,
 `RayTracingShaderBindingTableRegion`, `RayTracingShaderBindingTable`.
 
 Constants: `PIPELINE_HANDLE_INVALID`, `COLOR_WRITE_ALL`, `STENCIL_MASK_ALL`, `MAX_PIPELINES`,
-`MAX_COLOR_ATTACHMENTS`.
+`MAX_COLOR_ATTACHMENTS`, `MAX_SHADER_ENTRY_POINT_BYTES`.
 
 Methods: `PipelineHandle.is_valid`, `PipelineHandle.equals`.
 
@@ -280,7 +291,8 @@ Types: `StageMask`, `TextureLayout`, `TextureAccess`, `TextureState`,
 `SubmitDesc`, `TimestampPoolHandle`, `TimestampPoolDesc`.
 
 Constants: `COMPLETION_POINT_INVALID`, `TIMEOUT_INFINITE`,
-`TIMESTAMP_POOL_HANDLE_INVALID`.
+`TIMESTAMP_POOL_HANDLE_INVALID`, `MAX_SUBMIT_COMMAND_LISTS`,
+`MAX_SUBMIT_COMPLETION_WAITS`.
 
 Methods: `CompletionPoint.is_valid`, `CompletionPoint.equals`,
 `TimestampPoolHandle.is_valid`, `TimestampPoolHandle.equals`.

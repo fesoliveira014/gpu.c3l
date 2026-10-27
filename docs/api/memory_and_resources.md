@@ -13,7 +13,7 @@ Destroy and update calls do not infer shader use or wait for completion.
 flowchart LR
     AD[AllocationDesc] -->|allocate_memory| A[GpuAllocation]
     A -->|get_allocation_span| S[GpuSpan]
-    S -->|checked_subspan| S2[GpuSpan]
+    S -->|subspan| S2[GpuSpan]
     S -->|get_span_mapping| M["char[]"]
     S -->|get_span_address| G[GpuAddress]
     TD[TextureDesc] -->|create_texture| T[TextureHandle]
@@ -46,6 +46,23 @@ gpu::AllocationInfo info = gpu::get_allocation_info(&device, allocation);
 | `GPU_PRIVATE` | no | yes | device-local buffers |
 | `TEXTURE` | no | no | backing for placed and sparse textures |
 
+`allocate_memory` and `allocate_mapped_memory` require:
+
+- `desc` is not null and `desc.size` is greater than 0;
+- `desc.memory_class` is a defined `MemoryClass`;
+- `desc.alignment` is zero or a power of two;
+- `desc.access` is nonzero, names only known queue roles, and names only
+  roles the device exposes (see `DeviceCaps.queues`);
+- `desc.texture_requirements` is empty unless the class is `TEXTURE`, and a
+  `TEXTURE` allocation has at least one requirement, each with a nonzero size,
+  a power-of-two alignment and the compatibility value returned by
+  `get_texture_requirements`, with `desc.size` covering every `size`; and
+- for `allocate_mapped_memory`, `desc.memory_class` is a host-mapped class
+  (not `GPU_PRIVATE` or `TEXTURE`).
+
+Texture requirements whose compatibility values share no memory type fault
+with `UNSUPPORTED_FEATURE`.
+
 `AllocationInfo` reports the actual `mapped`, `coherent`, `device_local`,
 and `addressable` properties. `CPU_WRITE_GPU_LOCAL` prefers a memory type
 that is both device-local and host-visible and falls back to host memory
@@ -60,18 +77,41 @@ bytes are the application's problem.
 ## Spans, mappings, addresses
 
 A `GpuSpan` is a non-owning byte range inside an allocation.
+`subspan`, `get_allocation_span`, `get_span_mapping` and `get_span_address`
+return values rather than faults.
 
 ```c3
-gpu::GpuSpan whole = gpu::get_allocation_span(&device, allocation)!;
-gpu::GpuSpan part  = whole.checked_subspan(256, 1024)!;   // bounds-checked
-gpu::GpuSpan fast  = whole.unchecked_subspan(256, 1024);  // caller proved bounds
+gpu::GpuSpan whole = gpu::get_allocation_span(&device, allocation);
+gpu::GpuSpan part  = whole.subspan(256, 1024);            // range is a contract
+gpu::GpuSpan fast  = whole.unchecked_subspan(256, 1024);  // no range or overflow rules
 
-char[] bytes = gpu::get_span_mapping(&device, part)!;      // CPU_WRITE / CPU_READ only
-gpu::GpuAddress address = gpu::get_span_address(&device, part)!;
+char[] bytes = gpu::get_span_mapping(&device, part);      // CPU_WRITE / CPU_READ only
+gpu::GpuAddress address = gpu::get_span_address(&device, part);
 
 gpu::MappedGpuSpan mapped = gpu::mapped_gpu_span(&device, part)!;  // span + bytes + address
 gpu::GpuAllocation owner = part.allocation();                      // token for free_allocation
 ```
+
+`subspan` requires `size` to be greater than 0 and `offset + size` not to
+exceed the parent span's `size`, and the new base offset not to overflow.
+`MappedGpuSpan.subspan` also requires `bytes.len` to equal `span.size` and the
+derived GPU address not to overflow. `unchecked_subspan` applies none of
+these rules.
+
+`get_allocation_span` requires a buffer allocation, never a `TEXTURE` one.
+`get_span_mapping`, `get_span_address`, `mapped_gpu_span`,
+`flush_mapped_span` and `invalidate_mapped_span` require a span with
+`size > 0` that lies within its buffer allocation; the mapping, mapped-span
+and visibility calls also require a host-mapped class. Spans from
+`get_allocation_span` and `subspan` satisfy these rules.
+
+Every command that takes a `GpuSpan` requires it to be nonempty, and requires
+it to hold the bytes the call's own arguments imply (for example `draw_count`
+records of the indirect command type, or `index_count` indices). A span whose
+required size comes from the device, such as an acceleration-structure
+scratch range, must also cover that size. All of these are contracts: a
+violation panics in safe builds. `allocate_memory` and `allocate_mapped_memory`
+also require `desc.access` to name only queue roles the device selected.
 
 `allocate_mapped_memory` allocates a mapped class and returns the same
 three views in one call; free it through `span.allocation()`:
@@ -161,9 +201,24 @@ For placement, `get_texture_requirements` returns size, alignment, a
 `texture_requirements` list must include every texture placed in it. See
 [the cookbook](../cookbook.md#place-several-textures-in-one-allocation).
 
+`get_texture_requirements`, `create_texture`, `create_placed_texture` and
+`create_dedicated_texture` require a `TextureDesc` with nonzero `width` and
+`height`, a mip chain no longer than the full chain, a supported format, at
+least one usage, and a defined sample count, and the combinations below.
+`create_placed_texture` also requires an `offset` that is a multiple of the
+texture's required alignment, and an allocation that is non-dedicated texture
+memory with enough alignment and access, compatible with the requirements,
+holds the range, and shares it with no other placed texture.
+`create_dedicated_texture` requires a `TEXTURE` `AllocationDesc` whose `size`
+equals the texture's requirements and whose `access` covers `desc.access`.
+These are contracts: a violation panics in safe builds.
+`supports_texture_desc` answers `false` for a descriptor that breaks the
+creation rules.
+
 `destroy_texture` releases the image only, never a separate or placed
 allocation. It fails with `RESOURCE_IN_USE` while a view or attachment view
-is live.
+is live. A texture owned by a swapchain must not be destroyed; that is a
+contract.
 
 Limits: 2D and 3D only; multisample textures are single-mip attachments
 that may add `sampled` (see below); depth-stencil formats are 2D,
@@ -176,7 +231,7 @@ descriptor and size buffers with `texture_mip_aspect_bytes`.
 
 A multisample texture (`sample_count` above `ONE`) has one mip and a
 `color_attach` or `depth_attach` usage. `sampled` may be added; `storage`,
-`transfer_src` and `transfer_dst` are rejected with `INVALID_ARGUMENT`. Its
+`transfer_src` and `transfer_dst` break the creation contract. Its
 default view is a 2D view published at binding 0 like any sampled view, and
 shaders read it per sample with the aliases of
 [`multisample_heap.glsl`](../shader_abi.md#multisample-textures). The
@@ -211,7 +266,10 @@ sampled, single-sampled 2D textures. Support is per adapter: check
 block multiples. The caller supplies already compressed blocks for every
 mip. `texture_mip_dimension(size, mip)` gives a mip axis and
 `texture_mip_bytes(&desc, mip)` the packed byte footprint of one layer of a
-mip, in whole blocks; see [copies](commands_and_rendering.md#transfers) for
+mip, in whole blocks. `mip` must lie inside the description's mip chain and
+the format must be defined, and `AUTO` must not size a combined depth-stencil
+format; `texture_mip_aspect_bytes` also requires that `DEPTH` and `STENCIL`
+name an aspect the format has. These are contracts. See [copies](commands_and_rendering.md#transfers) for
 the region rules and [the cookbook](../cookbook.md#upload-a-compressed-texture).
 
 ## Texture views and indices
@@ -244,6 +302,17 @@ contiguous indices. Both are non-owning shader values. The texture must have
 `sampled` or `storage` usage. `DESCRIPTOR_HEAP_FULL`
 means the runtime's `texture_heap_capacity` is exhausted.
 
+A `TextureViewDesc` must name a defined `aspect`, and `base_mip` and
+`base_layer` must leave room for their counts. Against the texture, the view
+must lie inside it: `base_mip` below the mip count, `base_layer` below the
+layer count, and the counts within what remains. A combined depth-stencil
+texture takes a view that selects `DEPTH` or `STENCIL`, never `AUTO` and never
+the null default. `create_texture_views` requires `out_views.len` to equal
+`descs.len`. These are contracts: a violation panics in safe builds. A texture
+without `sampled` or `storage` usage must not be viewed, and
+`create_attachment_view` requires a 2D texture with `color_attach` or
+`depth_attach` usage and a `mip_level` and `array_layer` inside it.
+
 A reservation is `count` contiguous ascending slots that `create_texture_view`
 never hands out. Publish into a reserved slot with `create_texture_view_at`,
 and rewrite any live view's descriptor in place with `update_texture_view`:
@@ -272,6 +341,10 @@ before the call are stale. Releasing the lowest reservation returns it and any r
 reservations above it to the general region. A slot whose generation is
 exhausted stays reserved and out of both regions. The hazard rule is the same
 as for creation and destruction: no executing command may read the slot.
+`reserve_texture_indices` requires a nonzero `count`. `create_texture_view_at`
+requires a valid `slot` inside a live reservation, and
+`release_texture_indices` takes the zero range or a range inside the reserved
+region whose every slot is reserved; each is a contract.
 
 Keeping a reservation does not keep a destroyed view usable. A copied index
 does not retain its view or guarantee a fallback value after destruction.
@@ -280,7 +353,8 @@ updates, destruction, and reuse against all GPU accesses in the application.
 
 A view with `cube` set publishes six consecutive layers from `base_layer`
 as one sampled cube. The texture must be `cube_compatible` with `sampled`
-usage, and `layer_count` must be 0 or 6. Cube views are sampled only; they
+usage, and `layer_count` must be 0 or 6; a violation panics in safe builds.
+Cube views are sampled only; they
 never receive a storage descriptor. Storage or per-face access uses a
 separate 2D view of the same texture.
 
@@ -310,8 +384,13 @@ gpu::SamplerIndex sampler = gpu::intern_sampler(&device, &desc)!;
 
 Equal descriptions return the same index. There is no destroy; indices
 live until the device does. `compare_enable` plus `compare` makes a shadow
-sampler. Anisotropy above `caps.max_sampler_anisotropy` and LOD bias above
-`caps.max_sampler_lod_bias` return `INVALID_ARGUMENT`, never clamp.
+sampler. A `SamplerDesc` must name defined filters, address modes and, when
+`compare_enable` is set, a compare op; its LOD values must be finite with
+`min_lod` not above `max_lod`; and an enabled `max_anisotropy` must be finite
+and at least 1. Anisotropy above `caps.max_sampler_anisotropy` and LOD bias
+above `caps.max_sampler_lod_bias` are never clamped. All of these are
+contracts: a violation panics in safe builds. Enabling anisotropy on a device
+with `caps.max_sampler_anisotropy` of zero returns `UNSUPPORTED_FEATURE`.
 
 ## Sparse textures
 
@@ -338,6 +417,32 @@ keeps bound allocations alive, and orders unbinds after the last user.
 Binding shares the [native-queue host synchronization boundary](../architecture.md#threading)
 with submit and present, including aliased roles. Sparse images are single-layer,
 single-sample color 2D or 3D.
+
+The rules for these calls are contracts: a violation panics in safe builds.
+
+- `create_sparse_texture` takes a valid single-layer, uncompressed, non-depth
+  `TextureDesc` with no attachment usage.
+- `get_sparse_texture_requirements` takes a texture made by
+  `create_sparse_texture`, and returns the requirements directly.
+- A `SparseTextureBindDesc` holds at most `MAX_SPARSE_TILE_BINDS` tile binds,
+  `MAX_SPARSE_OPAQUE_BINDS` opaque binds and `MAX_SPARSE_BIND_WAITS` waits,
+  and at least one tile or opaque bind. Tile binds use the color aspect, a
+  nonempty extent and offsets no greater than `int::max`; opaque binds use a
+  defined aspect and a nonempty range. An unbind, with `GPU_ALLOCATION_INVALID`,
+  uses `allocation_offset` 0. Tile boxes of one mip, and opaque ranges of one
+  aspect, do not overlap.
+- The queue is a sparse-binding queue from
+  `caps.sparse_textures.binding_queues`, and `desc.texture` is a sparse
+  texture. Tile binds target mips below the aspect's `mip_tail_first_lod`, are
+  tile-aligned and inside the mip extent, end partial tiles at the mip edge,
+  and use z offset 0 and z extent 1 on 2D textures. Opaque binds name an aspect
+  from the texture's requirements, are page-aligned, and lie inside that
+  aspect's mip tail.
+- Each backing allocation is non-dedicated texture memory that fits the
+  texture's requirements, admits the texture's queue access, holds the bound
+  range, and is addressed at an `allocation_offset` that is a multiple of the
+  sparse page alignment. Backing ranges in one call overlap neither each other
+  nor the memory of a placed texture.
 
 ## Acceleration structures
 
@@ -366,6 +471,20 @@ storage), `create_placed_acceleration_structure` (range of a caller
 allocation), `create_dedicated_acceleration_structure` (returns the handle
 and its allocation).
 
+A descriptor follows these rules, which are contracts: a violation panics in
+safe builds. Flags use known bits and do not combine `prefer_fast_trace` with
+`prefer_fast_build`. A BLAS has at least one geometry, all of one defined kind,
+and no instances; a TLAS has a nonzero `max_instance_count` and no geometries.
+Triangle geometry has nonzero vertex and primitive maxima and a defined index
+type, and a non-indexed geometry has at least three vertices per primitive.
+AABB geometry has a nonzero primitive maximum. The primitive total fits `uint`,
+and the geometry count of a BLAS does not exceed
+`caps.acceleration_structures.max_geometry_count`. Exceeding the instance or
+primitive limits of the device returns `UNSUPPORTED_FEATURE`. A placed
+structure uses an allocation with acceleration-structure storage usage and an
+`offset` that is aligned, fits the allocation and overlaps no other placed
+structure.
+
 Input formats:
 
 | Geometry | Layout | Alignment |
@@ -378,8 +497,11 @@ Input formats:
 
 `make_acceleration_structure_instance` packs a live BLAS, a transform,
 custom index (24 bits), mask (8 bits), and flags into the 64-byte record.
+The custom index and mask must fit their widths, flags use known bits and do
+not combine `force_opaque` with `force_non_opaque`, and the referenced
+structure is a BLAS; a violation panics in safe builds.
 `get_acceleration_structure_address` returns a BLAS address for GPU-authored
-instances.
+instances; passing a TLAS panics in safe builds.
 
 `create_acceleration_structure_view` publishes a TLAS to the heap. The
 view owns the slot, blocks TLAS destruction while live, and exposes
@@ -395,7 +517,9 @@ Rules:
 - Build, clone, and update can be recorded in one list or dependent lists
   before any host completion poll. Use explicit barriers and submission waits.
   Recording does not validate construction history or update compatibility.
-- Clone destinations need compatible creation parameters and sufficient storage.
+- Clone destinations need compatible creation parameters and storage at
+  least as large as the source, and differ from the source; a violation panics
+  in safe builds.
   A cloned BLAS has its own address; instance records must explicitly name it
   to use the clone. A cloned TLAS needs its own view and still refers to the
   BLASes represented by its instance addresses: it neither owns nor retargets
@@ -414,6 +538,8 @@ On a device with ray-tracing pipelines, any addressable allocation may hold
 SBT records. `RayTracingShaderBindingTable` names four
 `RayTracingShaderBindingTableRegion` values (span plus stride). The
 ray-generation region holds exactly one record; the others may be zero.
+A region is either the zero value with stride 0 or a span with a nonzero size;
+a violation panics in safe builds.
 Pack with `RayTracingPipelineCaps` alignments and
 `get_ray_tracing_shader_group_handles`. The library never allocates or
 fills an SBT.
@@ -422,8 +548,7 @@ fills an SBT.
 
 | Cause | Fault |
 |---|---|
-| bad range, alignment, descriptor, or limit | `INVALID_ARGUMENT` |
-| unsupported usage, format, or feature | `UNSUPPORTED_FEATURE` |
+| unsupported usage, format, or feature, or texture requirements with no shared memory type | `UNSUPPORTED_FEATURE` |
 | out of memory | `OUT_OF_HOST_MEMORY`, `OUT_OF_DEVICE_MEMORY` |
 | fixed table full | `SLOT_TABLE_FULL` |
 | heap full | `DESCRIPTOR_HEAP_FULL` |

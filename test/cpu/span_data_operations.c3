@@ -146,3 +146,17 @@ fn void check_span_data_operations(
         max_dispatch_count: 1,
     );
 }
+
+fn void check_span_derivation(
+    gpu::Device* device,
+    gpu::GpuAllocation allocation,
+    gpu::MappedGpuSpan mapped,
+) {
+    gpu::GpuSpan whole = gpu::get_allocation_span(device, allocation);
+    gpu::GpuSpan head = whole.subspan(0, 1);
+    gpu::MappedGpuSpan mapped_head = mapped.subspan(0, 1);
+    char[] bytes = gpu::get_span_mapping(device, head);
+    gpu::GpuAddress address = gpu::get_span_address(device, mapped_head.span);
+    (void)bytes;
+    (void)address;
+}

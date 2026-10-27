@@ -87,7 +87,6 @@ const char[*] REFLECT_FUNCTIONAL_PROCEDURAL_HIT_SPIRV =
 const char[*] REFLECT_FUNCTIONAL_CALLABLE_SPIRV =
     $embed("shaders/ray_trace_functional.rcall.spv");
 
-const ZString ENTRY_POINT_OVER_CAP = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
 
 struct ShaderDiagnosticCapture {
     uint                      calls;
@@ -873,33 +872,6 @@ fn void oversized_push_constant_rejected() @test {
     fault push_fault = @catch(create_reflection_compute_pipeline(&device, &desc));
     assert(push_fault == gpu::SHADER_INVALID,
         "a push-constant block past the root-push ABI faults SHADER_INVALID");
-}
-
-fn void invalid_entry_points_reject_before_store_mutation() @test {
-    gpu::Device device = make_reflection_test_device();
-    defer destroy_test_device(&device)!!;
-    vk::VkDeviceState* state =
-        gpu::internal::device_slots[device.index].data.state;
-
-    gpu::ShaderDesc empty = {
-        .spirv       = REFLECT_BUFFERS_SPIRV[..],
-        .entry_point = "",
-    };
-    fault empty_fault =
-        @catch(create_reflection_compute_pipeline(&device, &empty));
-    assert(empty_fault == gpu::INVALID_ARGUMENT,
-        "an empty entry point faults INVALID_ARGUMENT");
-
-    gpu::ShaderDesc oversized = {
-        .spirv       = REFLECT_BUFFERS_SPIRV[..],
-        .entry_point = ENTRY_POINT_OVER_CAP,
-    };
-    fault cap_fault =
-        @catch(create_reflection_compute_pipeline(&device, &oversized));
-    assert(cap_fault == gpu::INVALID_ARGUMENT,
-        "an oversized entry point faults INVALID_ARGUMENT");
-    assert(vk::shader_store_live_count(state) == 0,
-        "entry-point validation retains no shader identity");
 }
 
 fn void shader_contract_rejections_report_exact_context() @test {

@@ -643,7 +643,7 @@ fn void command_allocator_defaults_preallocate_exact_storage() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocatorDesc desc = {
         .debug_name = "graphics_allocator",
     };
@@ -696,7 +696,7 @@ fn void first_begin_allocates_one_command_buffer_per_index() @test {
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc desc = { .command_buffer_capacity = 2 };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -788,7 +788,7 @@ fn void begin_observes_completed_work_without_application_poll() @test {
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc desc = { .command_buffer_capacity = 2 };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -827,7 +827,7 @@ fn void command_allocator_capacity_and_destroy_are_non_waiting() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 1,
     };
@@ -869,7 +869,7 @@ fn void command_allocator_destroy_never_waits_for_an_active_operation() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -922,7 +922,7 @@ fn void command_table_exhaustion_restores_allocator_claim() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocatorDesc desc = {
         .command_buffer_capacity = 1,
     };
@@ -976,7 +976,7 @@ fn void native_reset_failure_restores_unpublished_allocator_claim() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocatorDesc desc = { .command_buffer_capacity = 1 };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -1049,7 +1049,7 @@ fn void native_begin_failure_restores_unpublished_allocator_claim() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocatorDesc desc = { .command_buffer_capacity = 1 };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -1122,7 +1122,7 @@ fn void native_end_failure_preserves_recording_for_retry() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocatorDesc desc = { .command_buffer_capacity = 1 };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -1213,7 +1213,7 @@ fn void held_units_exceed_allocator_capacity() @test {
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc desc = { .command_buffer_capacity = 2 };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
@@ -1242,7 +1242,7 @@ fn void mixed_held_and_in_flight_units_report_busy() @test {
     };
     gpu::Device device = create_test_device(&runtime_desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc desc = { .command_buffer_capacity = 2 };
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,

@@ -79,10 +79,11 @@ fn DeviceContextDesc default_device_context_desc() {
 <* Create an owning context without submitting work or retrying setup failures.
    Externally synchronize runtime/surface mutation. Callbacks run synchronously;
    native window objects and debug userdata remain borrowed through teardown.
-   @param desc : "Call-scoped settings; never modified. Null is invalid."
-   @return "A complete context, or the original fault after best-effort cleanup." *>
+   @param desc : "Call-scoped settings; never modified."
+   @return "A complete context, or the original fault after best-effort cleanup."
+   @require desc != null : "desc must not be null"
+   @require device_context_desc_valid(desc) : "desc.device.surface must be zero, each user data must come with its callback, desc.command_queue must be a required queue role, and the required roles must include graphics when create_surface is set" *>
 fn DeviceContext? create_device_context(DeviceContextDesc* desc) {
-    validate_context_desc(desc)!;
     DeviceContextDesc settings = *desc;
     gpu::DeviceDesc device_desc = settings.device;
     if ((uint)device_desc.queues.required == 0
@@ -114,7 +115,7 @@ fn DeviceContext? create_device_context(DeviceContextDesc* desc) {
     gpu::Device device = gpu::create_device(&adapter, &device_desc)!;
     defer catch (void)gpu::destroy_device(&device);
 
-    gpu::Queue queue = gpu::get_queue(&device, settings.command_queue)!;
+    gpu::Queue queue = gpu::get_queue(&device, settings.command_queue);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -178,14 +179,10 @@ fn void destroy_device_context(DeviceContext* context) {
     *context = {};
 }
 
-fn void? validate_context_desc(DeviceContextDesc* desc) @private {
-    if (desc == null || desc.device.surface.is_valid()) return gpu::INVALID_ARGUMENT~;
-    if (desc.create_surface == null && desc.surface_user_data != null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (desc.select_adapter == null && desc.adapter_user_data != null) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+fn bool device_context_desc_valid(DeviceContextDesc* desc) @private {
+    if (desc == null || desc.device.surface.is_valid()) return false;
+    if (desc.create_surface == null && desc.surface_user_data != null) return false;
+    if (desc.select_adapter == null && desc.adapter_user_data != null) return false;
 
     gpu::QueueRoles required = desc.device.queues.required;
     if ((uint)required == 0) required = { .graphics, .compute, .transfer };
@@ -194,10 +191,9 @@ fn void? validate_context_desc(DeviceContextDesc* desc) @private {
         case gpu::QueueKind.GRAPHICS: available = required.graphics;
         case gpu::QueueKind.COMPUTE: available = required.compute;
         case gpu::QueueKind.TRANSFER: available = required.transfer;
-        default: return gpu::INVALID_ARGUMENT~;
+        default: return false;
     }
-    if (!available) return gpu::INVALID_ARGUMENT~;
-    if (desc.create_surface != null && !required.graphics) return gpu::INVALID_ARGUMENT~;
+    return available && (desc.create_surface == null || required.graphics);
 }
 
 fn gpu::Surface? create_context_surface(
@@ -211,7 +207,7 @@ fn gpu::Surface? create_context_surface(
     if ((ulong)data.runtime != (ulong)*runtime) {
         abort("gpu: mismatched Surface");
     }
-    gpu::Adapter first_adapter = adapters.get(0)!;
+    gpu::Adapter first_adapter = adapters.get(0);
     if (catch err = gpu::supports_presentation(&first_adapter, &surface)) {
         (void)gpu::destroy_surface(&surface);
         return err~;
@@ -233,7 +229,7 @@ fn gpu::Adapter? select_context_adapter(
             settings.adapter_user_data,
         )!;
         for (uint index = 0; index < adapters.count; index++) {
-            gpu::Adapter candidate = adapters.get(index)!;
+            gpu::Adapter candidate = adapters.get(index);
             if ((ulong)candidate != (ulong)selected) continue;
             if (!gpu::supports_device_desc(&selected, requirements)!.supported) {
                 return gpu::UNSUPPORTED_FEATURE~;
@@ -246,7 +242,7 @@ fn gpu::Adapter? select_context_adapter(
     gpu::Adapter best;
     uint best_rank;
     for (uint index = 0; index < adapters.count; index++) {
-        gpu::Adapter candidate = adapters.get(index)!;
+        gpu::Adapter candidate = adapters.get(index);
         if (!gpu::supports_device_desc(&candidate, requirements)!.supported) continue;
         gpu::AdapterInfo info = gpu::get_adapter_info(&candidate);
         uint rank = adapter_rank(info.device_class);

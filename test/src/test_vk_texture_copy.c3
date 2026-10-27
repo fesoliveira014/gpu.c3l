@@ -47,7 +47,7 @@ fn void copy_transition(
     gpu::TextureState before,
     gpu::TextureState after,
 ) {
-    gpu::TextureBarrier barrier = gpu::texture_transition(texture, before, after)!!;
+    gpu::TextureBarrier barrier = gpu::texture_transition(texture, before, after);
     gpu::cmd_texture_barrier(commands, &barrier)!!;
 }
 
@@ -125,7 +125,7 @@ fn void copy_texture_moves_mip_between_textures() @test {
     )!!;
     defer free_owned_span(&device, &readback)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -134,13 +134,13 @@ fn void copy_texture_moves_mip_between_textures() @test {
     copy_transition(&cmd, source, { .layout = gpu::TextureLayout.UNDEFINED }, copy_write_state());
     copy_transition(&cmd, dest, { .layout = gpu::TextureLayout.UNDEFINED }, copy_write_state());
     gpu::BufferTextureCopyDesc upload_mip0 = {
-        .src     = staging.span.checked_subspan(0, COPY_RGBA_MIP0_BYTES)!!,
+        .src     = staging.span.subspan(0, COPY_RGBA_MIP0_BYTES),
         .texture = source,
         .mip     = 0,
     };
     gpu::cmd_copy_buffer_to_texture(&cmd, &upload_mip0)!!;
     gpu::BufferTextureCopyDesc upload_mip1 = {
-        .src     = staging.span.checked_subspan(COPY_RGBA_MIP0_BYTES, COPY_RGBA_MIP1_BYTES)!!,
+        .src     = staging.span.subspan(COPY_RGBA_MIP0_BYTES, COPY_RGBA_MIP1_BYTES),
         .texture = source,
         .mip     = 1,
     };
@@ -223,7 +223,7 @@ fn void copy_texture_moves_block_compressed_tail_mips() @test {
     )!!;
     defer free_owned_span(&device, &readback)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -233,10 +233,10 @@ fn void copy_texture_moves_block_compressed_tail_mips() @test {
     copy_transition(&cmd, dest, { .layout = gpu::TextureLayout.UNDEFINED }, copy_write_state());
     for (uint mip = 0; mip < COPY_BC_SOURCE_MIPS; mip++) {
         gpu::BufferTextureCopyDesc upload = {
-            .src     = staging.span.checked_subspan(
+            .src     = staging.span.subspan(
                 copy_bc_source_offset(mip),
                 COPY_BC_SOURCE_BLOCKS[mip] * COPY_BC_BLOCK_BYTES,
-            )!!,
+            ),
             .texture = source,
             .mip     = mip,
         };
@@ -258,10 +258,10 @@ fn void copy_texture_moves_block_compressed_tail_mips() @test {
     for (uint mip = 0; mip < COPY_BC_DEST_MIPS; mip++) {
         gpu::TextureBufferCopyDesc download = {
             .texture = dest,
-            .dst     = readback.span.checked_subspan(
+            .dst     = readback.span.subspan(
                 copy_bc_dest_offset(mip),
                 COPY_BC_SOURCE_BLOCKS[mip + COPY_BC_LEVEL_SHIFT] * COPY_BC_BLOCK_BYTES,
-            )!!,
+            ),
             .mip     = mip,
         };
         gpu::cmd_copy_texture_to_buffer(&cmd, &download)!!;
@@ -280,43 +280,4 @@ fn void copy_texture_moves_block_compressed_tail_mips() @test {
         assert(read[i] == bytes[base + i],
             "every destination block byte equals the copied source level, down to the 1x1 level");
     }
-}
-
-fn void copy_texture_validation_faults_at_the_command() @test {
-    gpu::Device device = make_copy_test_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc source_desc = {
-        .access     = { .graphics, .compute, .transfer },
-        .width      = COPY_RGBA_SIZE,
-        .height     = COPY_RGBA_SIZE,
-        .format     = gpu::Format.RGBA8_UNORM,
-        .usage      = { .transfer_src, .transfer_dst },
-        .debug_name = "copy_fault_source",
-    };
-    gpu::TextureHandle source = gpu::create_texture(&device, &source_desc)!!;
-    defer gpu::destroy_texture(&device, source)!!;
-    gpu::TextureDesc other_desc = source_desc;
-    other_desc.format = gpu::Format.BGRA8_UNORM;
-    other_desc.debug_name = "copy_fault_other";
-    gpu::TextureHandle other = gpu::create_texture(&device, &other_desc)!!;
-    defer gpu::destroy_texture(&device, other)!!;
-
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
-    defer gpu::destroy_command_allocator(&allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-
-    assert(@catch(gpu::cmd_copy_texture(&cmd, null)) == gpu::INVALID_ARGUMENT,
-        "a null descriptor faults INVALID_ARGUMENT");
-    gpu::TextureCopyDesc unequal = { .src = source, .dst = other };
-    assert(@catch(gpu::cmd_copy_texture(&cmd, &unequal)) == gpu::INVALID_ARGUMENT,
-        "unequal formats fault INVALID_ARGUMENT");
-    gpu::TextureCopyDesc overlapping = { .src = source, .dst = source, .dst_x = 1, .width = 2, .height = 2 };
-    assert(@catch(gpu::cmd_copy_texture(&cmd, &overlapping)) == gpu::INVALID_ARGUMENT,
-        "an overlapping same-texture region faults INVALID_ARGUMENT");
-
-    gpu::ExecutableCommandList executable = gpu::end_commands(&cmd)!!;
-    defer discard_test_executable(&executable)!!;
 }

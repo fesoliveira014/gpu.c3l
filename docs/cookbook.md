@@ -26,7 +26,7 @@ gpu::DeviceDesc desc = {
 };
 gpu::AdapterList adapters = gpu::enumerate_adapters(runtime);
 for (uint i = 0; i < adapters.count; i++) {
-    gpu::Adapter adapter = adapters.get(i)!;
+    gpu::Adapter adapter = adapters.get(i);
     gpu::AdapterInfo info = gpu::get_adapter_info(&adapter);
     if (info.device_class != gpu::AdapterClass.DISCRETE) continue;
     gpu::DeviceSupport support = gpu::supports_device_desc(&adapter, &desc)!;
@@ -60,7 +60,7 @@ gpu::flush_mapped_span(device, staging.span)!;
 gpu::AllocationDesc private_desc = staging_desc;
 private_desc.memory_class = gpu::MemoryClass.GPU_PRIVATE;
 gpu::GpuAllocation buffer = gpu::allocate_memory(device, &private_desc)!;
-gpu::GpuSpan buffer_span = gpu::get_allocation_span(device, buffer)!;
+gpu::GpuSpan buffer_span = gpu::get_allocation_span(device, buffer);
 
 gpu::BufferCopyDesc copy = { .src = staging.span, .dst = buffer_span };
 gpu::cmd_copy_buffer(commands, &copy)!;
@@ -94,7 +94,7 @@ gpu::TextureBarrier to_dst = gpu::texture_transition(
         .stages = { .transfer },
         .access = { .write },
     },
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_dst)!;
 
 gpu::BufferTextureCopyDesc upload = { .src = staging.span, .texture = texture };
@@ -104,7 +104,7 @@ gpu::TextureBarrier to_sampled = gpu::texture_transition(
     texture: texture,
     before:  to_dst.after,
     after:   gpu::sampled_at({ .fragment_shader }),
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_sampled)!;
 ```
 
@@ -134,9 +134,9 @@ gpu::TextureHandle albedo = gpu::create_texture(device, &bc_desc)!;
 // ... transition to TRANSFER_DESTINATION as in "Upload a texture"
 usz offset = 0;
 for (uint mip = 0; mip < MIP_COUNT; mip++) {
-    usz mip_bytes = gpu::texture_mip_bytes(&bc_desc, mip)!;
+    usz mip_bytes = gpu::texture_mip_bytes(&bc_desc, mip);
     gpu::BufferTextureCopyDesc upload = {
-        .src     = staging_span.checked_subspan(offset, mip_bytes)!,
+        .src     = staging_span.subspan(offset, mip_bytes),
         .texture = albedo,
         .mip     = mip,
     };
@@ -224,14 +224,14 @@ gpu::TextureBarrier to_storage = gpu::texture_transition(
     texture: image,
     before:  { .layout = gpu::TextureLayout.UNDEFINED },
     after:   gpu::storage_at({ .compute }, { .write }),
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_storage)!;
 // dispatch that writes the image ...
 gpu::TextureBarrier to_sampled = gpu::texture_transition(
     texture: image,
     before:  to_storage.after,
     after:   gpu::sampled_at({ .fragment_shader }),
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_sampled)!;
 ```
 
@@ -329,7 +329,7 @@ gpu::TextureBarrier to_attach = gpu::texture_transition(
         .stages = { .color_output },
         .access = { .read, .write },
     },
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_attach)!;
 
 gpu::ColorTargetDesc[1] colors = {{
@@ -339,7 +339,7 @@ gpu::ColorTargetDesc[1] colors = {{
     .clear    = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
 }};
 gpu::RenderPassDesc pass = { .colors = colors[..] };
-gpu::GraphicsState state = gpu::render_geometry_state(WIDTH, HEIGHT)!;
+gpu::GraphicsState state = gpu::render_geometry_state(WIDTH, HEIGHT);
 gpu::ColorTargetState[1] color_targets = { gpu::color_blend_disabled() };
 state.color.targets = color_targets[..];
 
@@ -392,7 +392,7 @@ gpu::TextureBarrier to_depth = gpu::texture_transition(
         .stages = { .depth_output },
         .access = { .read, .write },
     },
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_depth)!;
 
 gpu::DepthTargetDesc depth_target = {
@@ -407,7 +407,7 @@ gpu::RenderPassDesc pass = {
     .width  = WIDTH,
     .height = HEIGHT,
 };
-gpu::GraphicsState state = gpu::render_geometry_state(WIDTH, HEIGHT)!;
+gpu::GraphicsState state = gpu::render_geometry_state(WIDTH, HEIGHT);
 state.raster.cull_mode = gpu::CullMode.BACK;
 state.depth = {
     .test_enable  = true,
@@ -450,7 +450,7 @@ gpu::DepthTargetDesc ds_target = {
     .stencil_store_op = gpu::StoreOp.STORE,
     .clear            = { .depth = 1.0f, .stencil = 0 },
 };
-gpu::GraphicsState write_id = gpu::render_geometry_state(WIDTH, HEIGHT)!;
+gpu::GraphicsState write_id = gpu::render_geometry_state(WIDTH, HEIGHT);
 write_id.stencil = {
     .test_enable = true,
     .front = gpu::stencil_face(gpu::CompareOp.ALWAYS, gpu::StencilOp.REPLACE, 1),
@@ -525,7 +525,7 @@ gpu::AllocationDesc readback_desc = {
 };
 gpu::GpuAllocation readback = gpu::allocate_memory(device, &readback_desc)!;
 defer (void)gpu::free_allocation(device, &readback);
-gpu::GpuSpan readback_span = gpu::get_allocation_span(device, readback)!;
+gpu::GpuSpan readback_span = gpu::get_allocation_span(device, readback);
 
 gpu::CommandList commands = gpu::begin_commands(allocator)!;
 defer (void)gpu::discard_commands(&commands);
@@ -541,7 +541,7 @@ gpu::TextureBarrier to_source = gpu::texture_transition(
         .stages = { .transfer },
         .access = { .read },
     },
-)!;
+);
 gpu::cmd_texture_barrier(&commands, &to_source)!;
 gpu::TextureBufferCopyDesc copy = { .texture = target, .dst = readback_span };
 gpu::cmd_copy_texture_to_buffer(&commands, &copy)!;
@@ -556,7 +556,7 @@ gpu::CompletionPoint done = gpu::submit(allocator.queue, &submit)!;
 
 gpu::wait_completion(done)!;
 gpu::invalidate_mapped_span(device, readback_span)!;
-mem::copy(out.ptr, gpu::get_span_mapping(device, readback_span)!.ptr, out.len);
+mem::copy(out.ptr, gpu::get_span_mapping(device, readback_span).ptr, out.len);
 ```
 
 `get_span_mapping` never waits and `invalidate_mapped_span` never orders.
@@ -576,7 +576,7 @@ struct PendingReadback {
 fn bool? try_consume(gpu::Device* device, PendingReadback* pending) {
     if (!gpu::poll_completion(pending.completion)!) return false;
     gpu::invalidate_mapped_span(device, pending.span)!;
-    char[] bytes = gpu::get_span_mapping(device, pending.span)!;
+    char[] bytes = gpu::get_span_mapping(device, pending.span);
     // consume bytes ...
     gpu::free_allocation(device, &pending.allocation)!;
     return true;
@@ -925,7 +925,7 @@ gpu::TextureBarrier to_sampled = gpu::texture_transition(
         .access = { .read, .write },
     },
     after:   gpu::sampled_at({ .fragment_shader }),
-)!;
+);
 gpu::cmd_texture_barrier(commands, &to_sampled)!;
 ```
 
@@ -1147,7 +1147,7 @@ AABBs cannot share a BLAS.
 ```c3
 gpu::RayTracingPipelineCaps rt = caps.ray_tracing_pipelines;
 gpu::RayTracingPipelineInfo info =
-    gpu::get_ray_tracing_pipeline_info(&device, pipeline)!;
+    gpu::get_ray_tracing_pipeline_info(&device, pipeline);
 gpu::get_ray_tracing_shader_group_handles(
     device:      &device,
     pipeline:    pipeline,

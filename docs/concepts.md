@@ -76,7 +76,8 @@ fn void? handles_and_ownership() {
     defer (void)gpu::destroy_runtime(&runtime);
 
     gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
-    gpu::Adapter adapter = adapters.get(0)!;
+    if (adapters.count == 0) return gpu::UNSUPPORTED_FEATURE~;
+    gpu::Adapter adapter = adapters.get(0);
     gpu::Device device = gpu::create_device(&adapter)!;
     defer (void)gpu::destroy_device(&device);
 
@@ -114,9 +115,9 @@ Contract: [Object model](architecture.md#object-model),
 
 GPU memory comes from `allocate_memory`, which returns a `GpuAllocation`: the
 owning token you free later. The bytes inside are addressed through a
-`GpuSpan`, a non-owning byte range with a bounds check. `get_allocation_span`
-gives the span that covers the whole allocation; `checked_subspan` carves a
-smaller one.
+`GpuSpan`, a non-owning byte range. `get_allocation_span` gives the span that
+covers the whole allocation; `subspan` carves a smaller one that must lie
+inside its parent.
 
 Every allocation declares a **memory class**, which decides where the memory
 lives and whether the CPU can see it:
@@ -155,7 +156,7 @@ fn void? memory_spans_and_mapping(gpu::Device* device) {
     for (usz i = 0; i < staging.bytes.len; i++) staging.bytes[i] = (char)i;
     gpu::flush_mapped_span(device, staging.span)!;
 
-    gpu::GpuSpan first_half = staging.span.checked_subspan(0, 512)!;
+    gpu::GpuSpan first_half = staging.span.subspan(0, 512);
     gpu::AllocationDesc private_desc = {
         .size         = 512,
         .memory_class = gpu::MemoryClass.GPU_PRIVATE,
@@ -164,7 +165,7 @@ fn void? memory_spans_and_mapping(gpu::Device* device) {
     };
     gpu::GpuAllocation private_allocation = gpu::allocate_memory(device, &private_desc)!;
     defer (void)gpu::free_allocation(device, &private_allocation);
-    gpu::GpuSpan destination = gpu::get_allocation_span(device, private_allocation)!;
+    gpu::GpuSpan destination = gpu::get_allocation_span(device, private_allocation);
     assert(first_half.size == destination.size);
 }
 ```
@@ -235,8 +236,8 @@ fn void? root_pointers(
     defer (void)gpu::free_allocation(device, &root_allocation);
 
     Params* params = (Params*)root.bytes.ptr;
-    params.input_gpu  = gpu::get_span_address(device, input)!;
-    params.output_gpu = gpu::get_span_address(device, output)!;
+    params.input_gpu  = gpu::get_span_address(device, input);
+    params.output_gpu = gpu::get_span_address(device, output);
     params.count      = count;
     gpu::flush_mapped_span(device, root.span)!;
 
@@ -468,7 +469,7 @@ fn void? texture_state(gpu::CommandList* commands, gpu::TextureHandle texture) {
             .stages = { .fragment_shader },
             .access = { .read },
         },
-    )!;
+    );
     gpu::cmd_texture_barrier(commands, &upload_to_sampled)!;
 }
 ```
@@ -557,7 +558,7 @@ fn void? render_passes(
         .clear    = { .rgba = { 0.0f, 0.0f, 0.0f, 1.0f } },
     }};
     gpu::RenderPassDesc pass = { .colors = colors[..] };
-    gpu::GraphicsState state = gpu::render_geometry_state(width, height)!;
+    gpu::GraphicsState state = gpu::render_geometry_state(width, height);
     gpu::ColorTargetState[1] color_state = { gpu::color_blend_disabled() };
     state.color.targets = color_state[..];
 
@@ -617,13 +618,13 @@ fn gpu::CompletionPoint? presentation(
             .stages = { .color_output },
             .access = { .read, .write },
         },
-    )!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_attachment)!;
     gpu::TextureBarrier to_present = gpu::texture_transition(
         texture: acquired.texture,
         before:  to_attachment.after,
         after:   { .layout = gpu::TextureLayout.PRESENT },
-    )!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_present)!;
 
     gpu::ExecutableCommandList[1] lists = { gpu::end_commands(&commands)! };

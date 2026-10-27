@@ -33,7 +33,7 @@ fn SurfaceData* require_surface(Surface* surface) @private {
 
 fn Surface? register_surface(Runtime* runtime, void* backend_surface) @private {
     require_runtime(runtime);
-    if (backend_surface == null) return gpu::INVALID_ARGUMENT~;
+    assert(backend_surface != null, "backend surface must not be null");
 
     for (uint i = 0; i < MAX_SURFACES; i++) {
         SurfaceData* data = &surface_slots[i];

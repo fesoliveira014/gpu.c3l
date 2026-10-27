@@ -162,7 +162,8 @@ gpu::Runtime runtime = gpu::create_runtime(&runtime_desc)!;
 defer (void)gpu::destroy_runtime(&runtime);
 
 gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
-gpu::Adapter adapter = adapters.get(0)!;
+if (adapters.count == 0) return gpu::UNSUPPORTED_FEATURE~;
+gpu::Adapter adapter = adapters.get(0);
 gpu::Device device = gpu::create_device(&adapter)!;
 defer (void)gpu::destroy_device(&device);
 ```
@@ -246,8 +247,8 @@ gpu::GpuAllocation root_allocation = root.span.allocation();
 defer (void)gpu::free_allocation(&device, &root_allocation);
 
 DoublerRoot* record = (DoublerRoot*)root.bytes.ptr;
-record.input_gpu  = gpu::get_span_address(&device, input.span)!;
-record.output_gpu = gpu::get_span_address(&device, output.span)!;
+record.input_gpu  = gpu::get_span_address(&device, input.span);
+record.output_gpu = gpu::get_span_address(&device, output.span);
 record.count      = COUNT;
 gpu::flush_mapped_span(&device, root.span)!;
 ```
@@ -260,7 +261,7 @@ queue and returns the [completion point](concepts.md#completion-points) to
 wait on.
 
 ```c3
-gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!;
+gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
 gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!;
 defer (void)gpu::destroy_command_allocator(&allocator);
 
@@ -299,13 +300,14 @@ if (gpu::is_device_lost(&device)) return LOST_DEVICE~;
 gpu::invalidate_mapped_span(&device, output.span)!;
 float* out_data = (float*)output.bytes.ptr;
 for (uint i = 0; i < COUNT; i++) {
-    if (out_data[i] != (float)i * 2.0f) return gpu::INVALID_ARGUMENT~;
+    if (out_data[i] != (float)i * 2.0f) return WRONG_RESULT~;
 }
 ```
 
 If the device was lost, the wait still returned but the output is undefined,
-so the program checks `is_device_lost` before trusting it. `LOST_DEVICE` is
-the program's own fault, declared with `faultdef LOST_DEVICE;`.
+so the program checks `is_device_lost` before trusting it. `LOST_DEVICE` and
+`WRONG_RESULT` are the program's own faults, declared with
+`faultdef LOST_DEVICE, WRONG_RESULT;`.
 
 ### Run
 
@@ -409,7 +411,7 @@ fn gpu::Device? create_presentation_device(gpu::Runtime* runtime, gpu::Surface* 
     gpu::DeviceDesc desc = { .surface = *surface };
     gpu::AdapterList adapters = gpu::enumerate_adapters(runtime);
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::Adapter adapter = adapters.get(i);
         if (!gpu::supports_device_desc(&adapter, &desc)!.supported) continue;
         return gpu::create_device(&adapter, &desc);
     }
@@ -497,7 +499,7 @@ gpu::TextureBarrier to_attachment = gpu::texture_transition(
         .stages = { .color_output },
         .access = { .read, .write },
     },
-)!;
+);
 gpu::cmd_texture_barrier(&commands, &to_attachment)!;
 
 gpu::ColorTargetDesc[1] colors = {{
@@ -508,7 +510,7 @@ gpu::ColorTargetDesc[1] colors = {{
 }};
 gpu::RenderPassDesc pass = { .colors = colors[..] };
 gpu::GraphicsState state =
-    gpu::render_geometry_state(swapchain_info.width, swapchain_info.height)!;
+    gpu::render_geometry_state(swapchain_info.width, swapchain_info.height);
 gpu::ColorTargetState[1] color_state = { gpu::color_blend_disabled() };
 state.color.targets = color_state[..];
 
@@ -528,7 +530,7 @@ gpu::TextureBarrier to_present = gpu::texture_transition(
     texture: acquired.texture,
     before:  to_attachment.after,
     after:   { .layout = gpu::TextureLayout.PRESENT },
-)!;
+);
 gpu::cmd_texture_barrier(&commands, &to_present)!;
 ```
 

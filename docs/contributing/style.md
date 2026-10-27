@@ -60,7 +60,7 @@ Fallible operations return `T?` or `void?` and fail with a named fault:
 
 ```c3
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc);
-return INVALID_ARGUMENT~;
+return UNSUPPORTED_FEATURE~;
 ```
 
 Do not use bool out-parameters, null returns, `-1` sentinels, or global
@@ -75,6 +75,35 @@ probe, uses the non-terminating lookup (`find` on a slot table,
 `resolve_runtime`, `find_command_record`), which returns null. A function
 with no remaining fault, public or internal, returns `T` or `void`; it
 unwraps with `!!` a callee's optional that cannot fail at that call.
+
+Choose the mechanism by who can know the rule is broken:
+
+- `@require` on the public function, for a rule that reads only the call's
+  arguments. It runs before the device is pinned or locked, so it must not
+  read device or resource state or dereference a handle. Put a null check
+  first for each pointer parameter a later rule reads through.
+- `assert` for a rule that needs state, placed after the pin and under the
+  lock where the check runs, and for internal invariants. A rule that mixes
+  both splits into a `@require` and an `assert`. Both are checked in safe
+  builds only.
+- `abort` only for handle misuse, as above.
+- A fault only for a condition the application cannot know before calling.
+
+In unsafe builds `assert` and `@require` become optimizer assumptions: the
+compiler treats the condition as true from that point on. A guard that keeps
+library memory safe by construction, such as a clamped copy length, must not
+come after a contract that restates its condition, or the optimizer removes
+the guard. Put such an `assert` after the guarded write.
+
+Messages read `<field or value> must <rule>`, for example
+`desc.width must be greater than 0`. A field inside a slice is written with
+`[]`, for example `descs[].view`. An `assert` may format the values it
+compared. A contract references the public limit constants or
+`get_device_caps` fields, never literals.
+
+A rule that loops over a slice or a nested descriptor lives in a
+`fn bool <name>_valid(...)` predicate in `gpu::internal`, and the `@require`
+calls it. Unit tests call the predicate directly with bad input.
 
 ## 7. Handles
 
@@ -103,8 +132,8 @@ K&R:
 
 ```c3
 fn void? allocate_texture_storage(Device* device, TextureDesc* desc) {
-    if (desc == null || desc.width == 0) {
-        return INVALID_ARGUMENT~;
+    if (!supports_texture_format(device, desc.format)) {
+        return UNSUPPORTED_FEATURE~;
     }
 }
 ```

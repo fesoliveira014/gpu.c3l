@@ -61,13 +61,13 @@ fn void volume_texture_upload_and_readback_regions() @test {
     )!!;
     defer free_owned_span(&device, &upload)!!;
     gpu::GpuSpan whole_upload =
-        upload.span.checked_subspan(0, VOLUME_BYTES)!!;
+        upload.span.subspan(0, VOLUME_BYTES);
     gpu::GpuSpan partial_upload =
-        upload.span.checked_subspan(VOLUME_BYTES, PARTIAL_BYTES)!!;
-    gpu::GpuSpan mip_upload = upload.span.checked_subspan(
+        upload.span.subspan(VOLUME_BYTES, PARTIAL_BYTES);
+    gpu::GpuSpan mip_upload = upload.span.subspan(
         VOLUME_BYTES + PARTIAL_BYTES,
         VOLUME_MIP_BYTES,
-    )!!;
+    );
     char* upload_bytes =
         (char*)test_span_mapping(&device, upload.span).ptr;
     for (uint z = 0; z < VOLUME_SIZE; z++) {
@@ -119,16 +119,16 @@ fn void volume_texture_upload_and_readback_regions() @test {
     )!!;
     defer free_owned_span(&device, &readback)!!;
     gpu::GpuSpan whole_readback =
-        readback.span.checked_subspan(0, VOLUME_BYTES)!!;
+        readback.span.subspan(0, VOLUME_BYTES);
     gpu::GpuSpan partial_readback =
-        readback.span.checked_subspan(VOLUME_BYTES, PARTIAL_BYTES)!!;
-    gpu::GpuSpan mip_readback = readback.span.checked_subspan(
+        readback.span.subspan(VOLUME_BYTES, PARTIAL_BYTES);
+    gpu::GpuSpan mip_readback = readback.span.subspan(
         VOLUME_BYTES + PARTIAL_BYTES,
         VOLUME_MIP_SLICE_BYTES,
-    )!!;
+    );
 
     gpu::Queue queue =
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -143,7 +143,7 @@ fn void volume_texture_upload_and_readback_regions() @test {
         texture: texture,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   transfer_destination,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_destination)!!;
 
     gpu::BufferTextureCopyDesc whole_upload_copy = {
@@ -155,7 +155,7 @@ fn void volume_texture_upload_and_readback_regions() @test {
         texture: texture,
         before:  transfer_destination,
         after:   transfer_destination,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &order_partial)!!;
     gpu::BufferTextureCopyDesc partial_upload_copy = {
         .src               = partial_upload,
@@ -185,7 +185,7 @@ fn void volume_texture_upload_and_readback_regions() @test {
         texture: texture,
         before:  transfer_destination,
         after:   transfer_source,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&commands, &to_source)!!;
     gpu::TextureBufferCopyDesc whole_readback_copy = {
         .texture = texture,
@@ -379,7 +379,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -396,17 +396,17 @@ fn void sampled_texture_upload_and_mip_readback() @test {
             .stages = { .transfer },
             .access = { .write },
         },
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
 
     gpu::BufferTextureCopyDesc mip0_copy = {
-        .src     = staging_span.checked_subspan(0, MIP0_BYTES)!!,
+        .src     = staging_span.subspan(0, MIP0_BYTES),
         .texture = texture,
         .mip     = 0,
     };
     gpu::cmd_copy_buffer_to_texture(&cmd, &mip0_copy)!!;
     gpu::BufferTextureCopyDesc mip1_copy = {
-        .src     = staging_span.checked_subspan(MIP0_BYTES, MIP1_BYTES)!!,
+        .src     = staging_span.subspan(MIP0_BYTES, MIP1_BYTES),
         .texture = texture,
         .mip     = 1,
     };
@@ -420,7 +420,7 @@ fn void sampled_texture_upload_and_mip_readback() @test {
             .access = { .write },
         },
         after:   gpu::sampled_at({ .compute }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &to_read)!!;
 
     const uint GROUPS = (UP_SIZE + 7) / 8;
@@ -611,7 +611,7 @@ fn void compressed_upload_mip_chain_sample_and_readback() @test {
     gpu::PipelineHandle sample_pipe = gpu::create_compute_pipeline(&device, &sample_pd)!!;
     defer gpu::destroy_pipeline(&device, sample_pipe)!!;
 
-    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue command_queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -634,35 +634,26 @@ fn void compressed_upload_mip_chain_sample_and_readback() @test {
         texture: chain,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   transfer_write,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &chain_to_dst)!!;
     gpu::TextureBarrier edge_to_dst = gpu::texture_transition(
         texture: edge,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   transfer_write,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &edge_to_dst)!!;
-
-    gpu::BufferTextureCopyDesc short_tail = {
-        .src     = staging.span.checked_subspan(bc_mip_offset(3), 4)!!,
-        .texture = chain,
-        .mip     = 3,
-    };
-    assert(@catch(gpu::cmd_copy_buffer_to_texture(&cmd, &short_tail))
-            == gpu::INVALID_ARGUMENT,
-        "a 1x1 tail mip still needs one whole block of source bytes");
 
     for (uint mip = 0; mip < BC_MIPS; mip++) {
         usz mip_bytes = mip == 0 ? BC1_BLOCK_BYTES * 4 : BC1_BLOCK_BYTES;
         gpu::BufferTextureCopyDesc upload = {
-            .src     = staging.span.checked_subspan(bc_mip_offset(mip), mip_bytes)!!,
+            .src     = staging.span.subspan(bc_mip_offset(mip), mip_bytes),
             .texture = chain,
             .mip     = mip,
         };
         gpu::cmd_copy_buffer_to_texture(&cmd, &upload)!!;
     }
     gpu::BufferTextureCopyDesc edge_upload = {
-        .src     = staging.span.checked_subspan(BC_CHAIN_BYTES, BC_EDGE_BYTES)!!,
+        .src     = staging.span.subspan(BC_CHAIN_BYTES, BC_EDGE_BYTES),
         .texture = edge,
         .width   = BC_EDGE_SIZE,
         .height  = BC_EDGE_SIZE,
@@ -673,7 +664,7 @@ fn void compressed_upload_mip_chain_sample_and_readback() @test {
         texture: chain,
         before:  transfer_write,
         after:   gpu::sampled_at({ .compute }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &chain_to_sample)!!;
     bind_test_compute_pipeline(&cmd, sample_pipe);
     gpu::cmd_dispatch(
@@ -691,26 +682,26 @@ fn void compressed_upload_mip_chain_sample_and_readback() @test {
         texture: chain,
         before:  gpu::sampled_at({ .compute }),
         after:   transfer_read,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &chain_to_src)!!;
     gpu::TextureBarrier edge_to_src = gpu::texture_transition(
         texture: edge,
         before:  transfer_write,
         after:   transfer_read,
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &edge_to_src)!!;
     for (uint mip = 0; mip < BC_MIPS; mip++) {
         usz mip_bytes = mip == 0 ? BC1_BLOCK_BYTES * 4 : BC1_BLOCK_BYTES;
         gpu::TextureBufferCopyDesc out = {
             .texture = chain,
-            .dst     = readback.span.checked_subspan(bc_mip_offset(mip), mip_bytes)!!,
+            .dst     = readback.span.subspan(bc_mip_offset(mip), mip_bytes),
             .mip     = mip,
         };
         gpu::cmd_copy_texture_to_buffer(&cmd, &out)!!;
     }
     gpu::TextureBufferCopyDesc edge_out = {
         .texture = edge,
-        .dst     = readback.span.checked_subspan(BC_CHAIN_BYTES, BC_EDGE_BYTES)!!,
+        .dst     = readback.span.subspan(BC_CHAIN_BYTES, BC_EDGE_BYTES),
     };
     gpu::cmd_copy_texture_to_buffer(&cmd, &edge_out)!!;
     gpu::Barrier host_read = {
@@ -799,7 +790,7 @@ fn void storage_write_direct_readback() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -867,73 +858,6 @@ fn void storage_write_direct_readback() @test {
     }
 }
 
-fn void copy_validation_faults() @test {
-    gpu::Device device = make_upload_test_device();
-    defer destroy_test_device(&device)!!;
-
-    gpu::TextureDesc tex_desc = {
-        .access    = { .graphics, .compute, .transfer },
-        .width     = UP_SIZE,
-        .height    = UP_SIZE,
-        .format    = gpu::Format.RGBA8_UNORM,
-        .usage     = { .sampled, .transfer_dst },
-    };
-    gpu::TextureHandle texture = gpu::create_texture(&device, &tex_desc)!!;
-    defer gpu::destroy_texture(&device, texture)!!;
-
-    OwnedSpan staging = allocate_owned_span(
-        device:       &device,
-        size:         MIP0_BYTES,
-        memory_class: gpu::MemoryClass.CPU_WRITE,
-        access:       { .graphics, .compute, .transfer },
-        debug_name:   "copy_validation_staging",
-    )!!;
-    defer free_owned_span(&device, &staging)!!;
-    gpu::GpuSpan span = staging.span;
-    gpu::Queue command_queue = gpu::get_queue(
-        &device,
-        gpu::QueueKind.COMPUTE,
-    )!!;
-    gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
-        &device,
-        command_queue,
-    )!!;
-    defer gpu::destroy_command_allocator(&command_allocator)!!;
-    gpu::CommandList cmd = gpu::begin_commands(&command_allocator)!!;
-    defer discard_test_commands(&cmd)!!;
-
-    gpu::TextureBarrier to_dst = {
-        .texture = texture,
-        .before  = { .layout = gpu::TextureLayout.UNDEFINED },
-        .after   = {
-            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
-            .stages = { .transfer },
-            .access = { .write },
-        },
-    };
-    gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
-
-    gpu::BufferTextureCopyDesc past_extent = { .src = span, .texture = texture, .width = UP_SIZE + 1 };
-    fault extent_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &past_extent));
-    assert(extent_fault == gpu::INVALID_ARGUMENT, "region past the mip extent faults INVALID_ARGUMENT");
-
-    gpu::BufferTextureCopyDesc past_span = { .src = span.checked_subspan(0, MIP0_BYTES - 4)!!, .texture = texture };
-    fault span_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &past_span));
-    assert(span_fault == gpu::INVALID_ARGUMENT, "copy bytes past the span fault INVALID_ARGUMENT");
-
-    gpu::BufferTextureCopyDesc misaligned = { .src = span.checked_subspan(2, MIP0_BYTES - 2)!!, .texture = texture };
-    fault align_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &misaligned));
-    assert(align_fault == gpu::INVALID_ARGUMENT, "misaligned span offset faults INVALID_ARGUMENT");
-
-    gpu::BufferTextureCopyDesc bad_mip = { .src = span, .texture = texture, .mip = 1 };
-    fault mip_fault = @catch(gpu::cmd_copy_buffer_to_texture(&cmd, &bad_mip));
-    assert(mip_fault == gpu::INVALID_ARGUMENT, "copy to a missing mip faults INVALID_ARGUMENT");
-
-    gpu::ExecutableCommandList cmd_executable = gpu::end_commands(&cmd)!!;
-
-    defer discard_test_executable(&cmd_executable)!!;
-}
-
 fn void mip_subset_view_sampled() @test {
     gpu::Device device = make_upload_test_device();
     defer destroy_test_device(&device)!!;
@@ -954,10 +878,6 @@ fn void mip_subset_view_sampled() @test {
     gpu::TextureView tex_index_view = gpu::create_texture_view(&device, texture, &mip1_view)!!;
     gpu::TextureIndex tex_index = tex_index_view.index;
     defer gpu::destroy_texture_view(&device, tex_index_view);
-
-    gpu::TextureViewDesc out_of_range = { .base_mip = 2, .mip_count = 1 };
-    fault range_fault = @catch(gpu::create_texture_view(&device, texture, &out_of_range));
-    assert(range_fault == gpu::INVALID_ARGUMENT, "view past the mip chain faults INVALID_ARGUMENT");
 
     gpu::SamplerDesc sampler_desc = {
         .min_filter = gpu::Filter.NEAREST,
@@ -1022,7 +942,7 @@ fn void mip_subset_view_sampled() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -1040,10 +960,10 @@ fn void mip_subset_view_sampled() @test {
         },
     };
     gpu::cmd_texture_barrier(&cmd, &to_dst)!!;
-    gpu::GpuSpan mip0_span = staging_span.checked_subspan(0, MIP0_BYTES)!!;
+    gpu::GpuSpan mip0_span = staging_span.subspan(0, MIP0_BYTES);
     gpu::BufferTextureCopyDesc mip0_copy = { .src = mip0_span, .texture = texture, .mip = 0 };
     gpu::cmd_copy_buffer_to_texture(&cmd, &mip0_copy)!!;
-    gpu::GpuSpan mip1_span = staging_span.checked_subspan(MIP0_BYTES, MIP1_BYTES)!!;
+    gpu::GpuSpan mip1_span = staging_span.subspan(MIP0_BYTES, MIP1_BYTES);
     gpu::BufferTextureCopyDesc mip1_copy = { .src = mip1_span, .texture = texture, .mip = 1 };
     gpu::cmd_copy_buffer_to_texture(&cmd, &mip1_copy)!!;
     gpu::TextureBarrier to_read = {

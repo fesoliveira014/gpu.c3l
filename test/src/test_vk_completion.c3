@@ -143,7 +143,7 @@ fn void completion_observation_advances_for_poll_and_wait() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     vk::QueueCompletionState* completion =
@@ -189,7 +189,7 @@ fn void queue_completion_poll_wait_is_reusable() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint point = vk::reserve_queue_completion(
@@ -234,7 +234,7 @@ fn void completion_cache_skips_native_and_locked_work() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint point = vk::reserve_queue_completion(state, queue)!!;
@@ -293,7 +293,7 @@ fn void concurrent_cached_waits_skip_native_work() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint point = vk::reserve_queue_completion(state, queue)!!;
@@ -334,7 +334,7 @@ fn void wait_retires_exact_sequence_and_timeout_preserves_state() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint first = vk::reserve_queue_completion(state, queue)!!;
@@ -386,7 +386,7 @@ fn void concurrent_first_observers_retire_monotonically() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     gpu::CompletionPoint point = vk::reserve_queue_completion(state, queue)!!;

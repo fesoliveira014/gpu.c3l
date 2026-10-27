@@ -11,7 +11,7 @@ fn RuntimeDesc queue_runtime_desc() {
 }
 
 fn Device create_queue_test_device(Runtime* runtime) {
-    Adapter adapter = gpu::enumerate_adapters(runtime).get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(runtime).get(0);
     return gpu::create_device(&adapter)!!;
 }
 
@@ -42,10 +42,10 @@ fn void queue_queries_return_device_owned_identities() @test {
     gpu::QueueRoles selected = gpu::get_device_caps(&first).queues;
     assert(queue_roles_are_all(selected), "default device selects all semantic roles");
 
-    gpu::Queue first_graphics = gpu::get_queue(&first, gpu::QueueKind.GRAPHICS)!!;
-    gpu::Queue first_compute = gpu::get_queue(&first, gpu::QueueKind.COMPUTE)!!;
-    gpu::Queue first_transfer = gpu::get_queue(&first, gpu::QueueKind.TRANSFER)!!;
-    gpu::Queue second_graphics = gpu::get_queue(&second, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue first_graphics = gpu::get_queue(&first, gpu::QueueKind.GRAPHICS);
+    gpu::Queue first_compute = gpu::get_queue(&first, gpu::QueueKind.COMPUTE);
+    gpu::Queue first_transfer = gpu::get_queue(&first, gpu::QueueKind.TRANSFER);
+    gpu::Queue second_graphics = gpu::get_queue(&second, gpu::QueueKind.GRAPHICS);
 
     assert(first_graphics.is_valid(), "queried queue token is valid");
     assert(first_graphics == first_compute, "aliased graphics and compute roles share one queue identity");
@@ -78,9 +78,9 @@ fn void queue_queries_preserve_distinct_compute_identity() @test {
         queues: selection,
     )!!;
 
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
+    gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
+    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
     assert(graphics != compute, "distinct compute receives its own queue identity");
     assert(graphics == transfer, "aliased transfer shares the graphics queue identity");
     assert(queue_roles_are_graphics_transfer(graphics.roles), "graphics identity reports aliased transfer role");
@@ -90,22 +90,6 @@ fn void queue_queries_preserve_distinct_compute_identity() @test {
     forged.roles.graphics = true;
 
     gpu::destroy_device(&device)!!;
-}
-
-fn void queue_queries_reject_unavailable_roles() @test {
-    RuntimeDesc desc = queue_runtime_desc();
-    Runtime runtime = gpu::create_runtime(&desc)!!;
-    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
-    DeviceDesc compute_desc = {
-        .queues = { .required = { .compute } },
-    };
-    Device first = gpu::create_device(&adapter, &compute_desc)!!;
-
-    assert(@catch(gpu::get_queue(&first, gpu::QueueKind.GRAPHICS))
-        == gpu::INVALID_ARGUMENT);
-
-    gpu::destroy_device(&first)!!;
-    gpu::destroy_runtime(&runtime)!!;
 }
 
 fn void selected_queue_roles_round_trip_canonical_identities() @test {
@@ -127,9 +111,9 @@ fn void selected_queue_roles_round_trip_canonical_identities() @test {
     )!!;
     defer gpu::destroy_device(&device)!!;
 
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
+    gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
+    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
     assert(graphics != compute, "distinct native choices publish distinct identities");
     assert(graphics == transfer, "aliased native choices share one identity");
     assert(gpu::get_queue_info(&device, graphics).id == graphics.id);
@@ -158,9 +142,9 @@ fn void single_queue_request_publishes_one_all_role_identity() @test {
     )!!;
     defer gpu::destroy_device(&device)!!;
 
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
-    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
+    gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
+    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
 
     assert(graphics == compute && compute == transfer,
         "single-queue requests publish one exact queue token");
@@ -168,8 +152,7 @@ fn void single_queue_request_publishes_one_all_role_identity() @test {
         "the exact queue token reports all required roles");
 }
 
-fn void queue_registration_rejects_split_single_queue_selection() @test {
-    gpu::internal::vk::VkDeviceState state;
+fn void queue_selection_check_rejects_split_single_queue_selection() @test {
     gpu::QueueRequest request = {
         .required = { .graphics, .compute },
     };
@@ -183,33 +166,23 @@ fn void queue_registration_rejects_split_single_queue_selection() @test {
     selection.single_queue = true;
 
     assert(
-        @catch(gpu::internal::register_device(
-            state:  &state,
-            caps:   {},
-            queues: selection,
-        )) == gpu::INVALID_ARGUMENT,
+        !gpu::internal::queue_selection_is_well_formed(&selection),
         "canonical validation rejects split single-queue identities"
     );
 }
 
-fn void queue_registration_rejects_empty_single_queue_selection() @test {
-    gpu::internal::vk::VkDeviceState state;
+fn void queue_selection_check_rejects_empty_single_queue_selection() @test {
     gpu::internal::QueueSelection selection = {
         .single_queue = true,
     };
 
     assert(
-        @catch(gpu::internal::register_device(
-            state:  &state,
-            caps:   {},
-            queues: selection,
-        )) == gpu::INVALID_ARGUMENT,
+        !gpu::internal::queue_selection_is_well_formed(&selection),
         "an empty single-queue policy cannot normalize to default queues"
     );
 }
 
-fn void queue_registration_rejects_malformed_identity_roles() @test {
-    gpu::internal::vk::VkDeviceState state;
+fn void queue_selection_check_rejects_malformed_identity_roles() @test {
     gpu::internal::QueueSelection selection =
         gpu::internal::queue_selection_for_aliases(
             compute_aliases_graphics:  true,
@@ -219,11 +192,7 @@ fn void queue_registration_rejects_malformed_identity_roles() @test {
     selection.identity_roles[0].compute = false;
 
     assert(
-        @catch(gpu::internal::register_device(
-            state:  &state,
-            caps:   {},
-            queues: selection,
-        )) == gpu::INVALID_ARGUMENT,
+        !gpu::internal::queue_selection_is_well_formed(&selection),
         "canonical identity roles must match the selected role mapping"
     );
 }
@@ -232,7 +201,7 @@ fn void device_exposes_only_requested_queue_roles() @test {
     RuntimeDesc runtime_desc = queue_runtime_desc();
     Runtime runtime = gpu::create_runtime(&runtime_desc)!!;
     defer gpu::destroy_runtime(&runtime)!!;
-    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0)!!;
+    Adapter adapter = gpu::enumerate_adapters(&runtime).get(0);
     DeviceDesc desc = {
         .queues = { .required = { .compute } },
     };
@@ -240,12 +209,10 @@ fn void device_exposes_only_requested_queue_roles() @test {
     defer gpu::destroy_device(&device)!!;
 
     QueueRoles selected = gpu::get_device_caps(&device).queues;
-    Queue compute = gpu::get_queue(&device, QueueKind.COMPUTE)!!;
+    Queue compute = gpu::get_queue(&device, QueueKind.COMPUTE);
     QueueInfo info = gpu::get_queue_info(&device, compute);
     assert(!selected.graphics, "unrequested graphics stays hidden");
     assert(selected.compute, "requested compute is exposed");
     assert(!selected.transfer, "unrequested transfer stays hidden");
     assert((uint)info.roles == (uint)(QueueRoles){ .compute });
-    assert(@catch(gpu::get_queue(&device, QueueKind.GRAPHICS))
-        == gpu::INVALID_ARGUMENT);
 }

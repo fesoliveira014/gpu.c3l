@@ -17,7 +17,7 @@ stateDiagram-v2
 ## Command allocators
 
 ```c3
-gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
+gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
 gpu::CommandAllocatorDesc desc = {
     .command_buffer_capacity          = 8,    // 0 selects 32
     .debug_name                       = "frame_allocator",
@@ -31,6 +31,12 @@ An allocator is bound to one queue and owns `command_buffer_capacity`
 reusable units. Each `begin_commands` takes a unit; the unit returns when
 its submission's completion point retires. A `null` descriptor selects the
 defaults. `MAX_COMMAND_ALLOCATOR_CAPACITY` limits an allocator to 4,096 units.
+`command_buffer_capacity` must not exceed it, and its product with
+`max_acceleration_structure_geometries_per_build` must fit `uint`. A nonzero
+`max_acceleration_structure_geometries_per_build` must not exceed
+`DeviceCaps.acceleration_structures.max_geometry_count`. These are contracts: a
+violation panics in safe builds. Asking for geometry capacity on a device
+without acceleration structures returns `UNSUPPORTED_FEATURE`.
 
 One allocator has one recording thread while any recording is live.
 Different allocators record in parallel. `destroy_command_allocator` never
@@ -108,6 +114,15 @@ Applications supply valid usage, alignment, bounds, and queue access. Copies
 resolve library handles and protect argument lowering. They do not transition
 textures or make results host-visible; record a barrier for each.
 
+The rules for these calls are contracts: a violation panics in safe builds.
+A `BufferCopyDesc.src` span must not be larger than its `dst` span. For the
+buffer-texture copies, `aspect` is a defined aspect the format has, `mip`
+is below the texture's mip count, the region lies within the mip extent and
+the texture's array layers, and the buffer span holds the whole region. A 3D
+texture uses layer zero and selects depth with `z` and `depth`; a 2D texture
+uses `z` zero and depth at most one. `row_length_texels` is zero or at least the
+copy width.
+
 Regions are in texels. The buffer side holds tightly packed rows unless
 `row_length_texels` sets a longer pitch, then slices (3D depth or array
 layers) back to back. For block-compressed formats the same rules apply in
@@ -125,8 +140,8 @@ independent; width, height, depth and layer count are shared. Both
 textures must be 3D or both not; a 3D copy uses layer zero. For
 block-compressed formats offsets are block multiples, and the extent is a
 block multiple or reaches the mip edge on each side, so a 1x1 tail mip copies
-whole. A region inside one texture must not overlap itself, and any
-violation returns `INVALID_ARGUMENT`.
+whole. A region inside one texture must not overlap itself. These rules, and the
+aspect rules of the format, are contracts: a violation panics in safe builds.
 
 ## Compute
 
@@ -143,6 +158,10 @@ pushed after the root header; see
 [shader ABI](../shader_abi.md#inline-payload). Group counts must fit
 `DeviceCaps.max_compute_work_group_count`. Indirect argument memory is a
 caller-owned span made visible with a barrier to `.indirect`.
+
+`inline_root` has a length that is a multiple of four and at most
+`INLINE_ROOT_CAPACITY`, and it must fit `ROOT_PUSH_CAPACITY` after the bound
+pipeline's header. These are contracts: a violation panics in safe builds.
 
 ## Render passes
 
@@ -180,6 +199,10 @@ the depth attachment's when there is no color target. Explicit values must
 fit every attachment. `render_geometry_state` still takes explicit
 dimensions.
 
+`desc.colors` holds at most `MAX_COLOR_ATTACHMENTS` entries. `width` and
+`height` are both zero or both nonzero, and a zero extent needs at least one
+attachment. These are contracts: a violation panics in safe builds.
+
 The required order inside a pass: bind a compatible pipeline, set a
 complete `GraphicsState`, draw. Pass begin does not bind, set, or
 transition anything. Attachments must already be in `COLOR_ATTACHMENT` or
@@ -206,10 +229,11 @@ gpu::DepthTargetDesc depth = {
 
 `SAMPLE_ZERO` is available on every device; `MIN` and `MAX` need the matching
 bit of `DeviceCaps.depth_resolve_modes`, otherwise `cmd_begin_render_pass`
-returns `UNSUPPORTED_FEATURE`. A depth resolve view on a format with a
-stencil aspect returns `INVALID_ARGUMENT`: stencil is not resolved. The
-resolve view must be single-sample, of the attachment's format and at least
-as large as the render area.
+returns `UNSUPPORTED_FEATURE`. `resolve_mode` is a defined
+`DepthResolveMode`. A depth resolve view must not be used with a format that
+has a stencil aspect, because stencil is not resolved; a violation panics in
+safe builds. The resolve view must be single-sample, of the attachment's
+format and at least as large as the render area.
 
 The resolve runs at the end of the pass in the colour-attachment-output
 stage, reading the multisample source with colour-attachment read access and
@@ -244,7 +268,7 @@ views after their last submitted use retires.
 ## Graphics state
 
 ```c3
-gpu::GraphicsState state = gpu::render_geometry_state(width, height)!;
+gpu::GraphicsState state = gpu::render_geometry_state(width, height);
 state.color.targets = targets[..];
 state.stencil = {
     .test_enable = true,
@@ -267,6 +291,11 @@ a compatible stencil attachment. The application must ensure that a stencil
 The library does not track stencil content history.
 Binding a pipeline or beginning a pass does not reset state. Fields are
 described in [shaders and pipelines](shaders_and_pipelines.md#graphics-pipelines).
+
+`render_geometry_state` takes `width` and `height` in `[1, int::max]` and
+returns the state directly. `state.color.targets` holds at most
+`MAX_COLOR_ATTACHMENTS` entries. These are contracts: a violation panics in
+safe builds.
 
 ## Draws
 
@@ -378,6 +407,12 @@ gpu::cmd_draw_indexed_generated(
 gpu::release_generated_work(&allocator, pipeline, gpu::GeneratedWorkKind.DRAW_INDEXED)!;
 ```
 
+`reserve_generated_work` needs a defined `kind`, nonzero `max_commands_per_list`
+and `concurrent_lists`, a pipeline of the matching kind (graphics for draws,
+compute for dispatches), and a `max_commands_per_list` within
+`DeviceCaps.max_generated_work_count`. `release_generated_work` needs a defined
+`kind`. These are contracts: a violation panics in safe builds.
+
 The backend derives and owns the private storage. Each generated call in
 flight holds one unit of `concurrent_lists` until its command unit
 retires, so two calls in one list use two units. Reserving the same key
@@ -406,6 +441,19 @@ Direct builds carry actual counts; indirect builds carry CPU maxima and
 read one `AccelerationStructureIndirectBuildRange` per geometry from
 `ranges_span`. Clone uses no scratch.
 
+The rules for these calls are contracts: a violation panics in safe builds.
+Every geometry in `AccelerationStructureBuildDesc` names a defined kind with
+nonzero primitive counts. A triangle geometry has a nonzero `vertex_count`
+and a `vertex_stride` of at least 12; an AABB geometry has a `stride` of at
+least 24; and `(count - 1) * stride` plus the element size fits `usz`. The
+build matches the destination: a TLAS takes no geometries and between one
+and its `max_instance_count` instances; a BLAS takes exactly its geometries,
+each of its kind, within its maxima, with a transform exactly when the
+destination has one, no indices and at least three vertices per primitive for
+non-indexed triangles, and no instances. An update destination was created
+with `allow_update`. A clone's source and destination are distinct and the
+destination storage is at least as large as the source's.
+
 None of these insert barriers. Order them with
 `.acceleration_structure_build` on both sides of a `Barrier`. Keep the destination
 and every named span valid through their last GPU use, including scratch reuse.
@@ -420,7 +468,7 @@ family supports compute. A ray-tracing pipeline must be bound.
 
 ```c3
 gpu::cmd_bind_pipeline(&commands, ray_pipeline)!;
-gpu::cmd_set_ray_tracing_pipeline_stack_size(&commands, stack_bytes)!;   // dynamic_stack_size pipelines only
+gpu::cmd_set_ray_tracing_pipeline_stack_size(&commands, stack_bytes)!;   // dynamic_stack_size pipelines only; stack_bytes fits uint
 gpu::cmd_trace_rays(
     commands:             &commands,
     root:                 root_address,
@@ -443,6 +491,11 @@ gpu::cmd_trace_rays_indirect2(&commands, root_address, packet_span);   // TraceR
 span is four-byte aligned and made visible with a barrier to `.indirect`.
 The library never reads the packet back.
 
+`shader_binding_table` is not null, and each of its regions is either the
+zero value with stride 0 or a span with a nonzero size. The value passed to
+`cmd_set_ray_tracing_pipeline_stack_size` fits `uint`. These are contracts: a
+violation panics in safe builds.
+
 The stack-size value persists across binds of other dynamic-stack ray
 pipelines and is invalidated by binding a static-stack ray pipeline.
 
@@ -463,7 +516,6 @@ command list; label text is borrowed only for the begin call.
 |---|---|
 | wrong token phase or unbalanced pass | `COMMAND_RECORDING_ERROR` |
 | unusable pipeline snapshot or incompatible implementation state | `INVALID_RESOURCE_STATE` |
-| bad range, count, or descriptor | `INVALID_ARGUMENT` |
 | unavailable capability or native procedure | `UNSUPPORTED_FEATURE` |
 | every unit held by unsubmitted lists, or geometry capacity exceeded | `COMMAND_ALLOCATOR_CAPACITY_EXCEEDED` |
 | generated reservation exceeded | `GENERATED_SCRATCH_EXHAUSTED` |

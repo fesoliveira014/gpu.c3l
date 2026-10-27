@@ -311,7 +311,7 @@ fn int main() {
     };
     gpu::Device device = create_bench_device(&desc)!!;
     defer destroy_bench_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity = MAX_SUBMIT_BATCH_SIZE,
     };

@@ -280,11 +280,6 @@ fn void? check_descriptor_allocate_result(vk::Result result) @private {
     }
 }
 
-fn void? check_pipeline_cache_data_result(vk::Result result) @private {
-    if (result == vk::Result.INCOMPLETE) return gpu::INVALID_ARGUMENT~;
-    return check(result);
-}
-
 fn void? check_enumeration_result(vk::Result result) @private {
     if (result == vk::Result.INCOMPLETE) return gpu::BACKEND_ERROR~;
     return check(result);
@@ -542,8 +537,9 @@ fn bool barrier_stage_mask_supported(
     return true;
 }
 
-<* Validate and lower the first destination stages of a queue submission wait. *>
-fn vk::PipelineStageFlags2? submit_wait_stages_to_vk(
+<* Lower the first destination stages of a queue submission wait. Stages the
+   target queue or the enabled features cannot execute panic in safe builds. *>
+fn vk::PipelineStageFlags2 submit_wait_stages_to_vk(
     gpu::StageMask stages,
     vk::QueueFlags flags,
     bool generated_work = false,
@@ -552,18 +548,16 @@ fn vk::PipelineStageFlags2? submit_wait_stages_to_vk(
     bool mesh_shaders = false,
     bool task_shaders = false,
 ) {
-    if (!barrier_stage_mask_valid(stages)
-        || stages.host
-        || stages.present
-        || !barrier_stage_mask_supported(
+    assert(
+        barrier_stage_mask_supported(
             stages:                stages,
             flags:                 flags,
             ray_queries:           ray_queries,
             ray_tracing_pipelines: ray_tracing_pipelines,
             mesh_shaders:          mesh_shaders,
-        )) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+        ),
+        "wait stages must be supported by the target queue and the enabled device features"
+    );
     return barrier_before_stages_to_vk(stages, generated_work, task_shaders);
 }
 

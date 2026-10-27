@@ -627,22 +627,25 @@ fn vk::MemoryRequirements? generated_scratch_requirements(
     vk::IndirectCommandsLayoutEXT layout;
     switch (desc.kind) {
         case gpu::GeneratedWorkKind.DRAW:
-            if (pipeline_kind != PipelineKind.GRAPHICS) {
-                return gpu::INVALID_ARGUMENT~;
-            }
+            assert(
+                pipeline_kind == PipelineKind.GRAPHICS,
+                "DRAW generated work requires a graphics pipeline"
+            );
             layout = state.generated_draw_layout;
         case gpu::GeneratedWorkKind.DRAW_INDEXED:
-            if (pipeline_kind != PipelineKind.GRAPHICS) {
-                return gpu::INVALID_ARGUMENT~;
-            }
+            assert(
+                pipeline_kind == PipelineKind.GRAPHICS,
+                "DRAW_INDEXED generated work requires a graphics pipeline"
+            );
             layout = state.generated_indexed_draw_layout;
         case gpu::GeneratedWorkKind.DISPATCH:
-            if (pipeline_kind != PipelineKind.COMPUTE) {
-                return gpu::INVALID_ARGUMENT~;
-            }
+            assert(
+                pipeline_kind == PipelineKind.COMPUTE,
+                "DISPATCH generated work requires a compute pipeline"
+            );
             layout = slot.generated_dispatch_layout;
         default:
-            return gpu::INVALID_ARGUMENT~;
+            unreachable("desc.kind must be a defined GeneratedWorkKind");
     }
     layout = required_generated_work_layout(layout)!;
 
@@ -1442,7 +1445,6 @@ fn PreparedBufferCopy? lower_buffer_copy(
     CommandRecord* commands,
     gpu::BufferCopyDesc* desc,
 ) {
-    if (desc == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = commands;
     if (record.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
@@ -1453,16 +1455,12 @@ fn PreparedBufferCopy? lower_buffer_copy(
             state:          state,
             span:           &desc.src,
             required:       0,
-            operation:      "cmd_copy_buffer",
-            rejected_field: "BufferCopyDesc.src",
-        )!,
+        ),
         .dst = resolve_span_slot(
             state:          state,
             span:           &desc.dst,
             required:       0,
-            operation:      "cmd_copy_buffer",
-            rejected_field: "BufferCopyDesc.dst",
-        )!,
+        ),
     };
 }
 
@@ -1490,7 +1488,6 @@ fn void? vk_cmd_copy_buffer(
     gpu::BufferCopyDesc* desc,
 ) {
     PreparedBufferCopy copy = lower_buffer_copy(commands, desc)!;
-    if (copy.src.size > copy.dst.size) return gpu::INVALID_ARGUMENT~;
     record_buffer_copy(commands, &copy);
 }
 
@@ -1508,9 +1505,7 @@ fn PreparedBufferFill? lower_buffer_fill(
         state:          state,
         span:           &dst,
         required:       0,
-        operation:      "cmd_fill_buffer",
-        rejected_field: "dst",
-    )!;
+    );
     return {
         .span   = resolved,
         .value  = value,
@@ -1540,7 +1535,7 @@ fn void? vk_cmd_fill_buffer(
 }
 
 <* Validate and translate a buffer-image copy region. *>
-fn vk::BufferImageCopy? resolve_texture_copy_region(
+fn vk::BufferImageCopy resolve_texture_copy_region(
     ResolvedSpan* resolved,
     TextureSlot* slot,
     uint row_length_texels,
@@ -1555,60 +1550,75 @@ fn vk::BufferImageCopy? resolve_texture_copy_region(
     uint depth,
     gpu::TextureAspect aspect = gpu::TextureAspect.AUTO,
 ) @private {
-    if (mip >= slot.mip_levels) return gpu::INVALID_ARGUMENT~;
-    if (!gpu::internal::texture_aspect_valid(aspect)) return gpu::INVALID_ARGUMENT~;
-    vk::ImageAspectFlags aspect_mask = resolve_aspect(slot.format, aspect)!;
+    assert(
+        mip < slot.mip_levels,
+        "desc.mip must be less than the texture's mip level count: mip %s, levels %s",
+        mip,
+        slot.mip_levels
+    );
+    vk::ImageAspectFlags aspect_mask = resolve_aspect(slot.format, aspect);
     MipExtent extent = texture_mip_extent(slot, mip);
     bool is_3d = texture_slot_is_3d(slot);
-    if (x > extent.width || y > extent.height) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        x <= extent.width && y <= extent.height,
+        "desc.x and desc.y must lie within the mip extent"
+    );
     if (width == 0) width = extent.width - x;
     if (height == 0) height = extent.height - y;
 
     uint layers;
     if (is_3d) {
-        if (base_layer != 0 || layer_count > 1 || z > extent.depth) {
-            return gpu::INVALID_ARGUMENT~;
-        }
+        assert(
+            base_layer == 0 && layer_count <= 1 && z <= extent.depth,
+            "3D texture copies must use layer 0 and z within the mip depth"
+        );
         layers = 1;
         if (depth == 0) depth = extent.depth - z;
     } else {
-        if (z != 0 || depth > 1) return gpu::INVALID_ARGUMENT~;
+        assert(
+            z == 0 && depth <= 1,
+            "2D texture copies must use z 0 and depth at most 1"
+        );
         layers = layer_count == 0 ? 1 : layer_count;
         depth = 1;
     }
 
-    if (width == 0 || height == 0 || depth == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (width > extent.width - x || height > extent.height - y) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(width != 0 && height != 0 && depth != 0, "the copy extent must be non-zero");
+    assert(
+        width <= extent.width - x && height <= extent.height - y,
+        "the copy region must fit the mip extent"
+    );
     if (is_3d) {
-        if (depth > extent.depth - z) return gpu::INVALID_ARGUMENT~;
-    } else if (base_layer > slot.array_layers
-        || layers > slot.array_layers - base_layer) {
-        return gpu::INVALID_ARGUMENT~;
+        assert(depth <= extent.depth - z, "the copy depth must fit the mip depth");
+    } else {
+        assert(
+            base_layer <= slot.array_layers && layers <= slot.array_layers - base_layer,
+            "the copy layers must fit the texture's array layers"
+        );
     }
-    if (row_length_texels != 0 && row_length_texels < width) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        row_length_texels == 0 || row_length_texels >= width,
+        "desc.row_length_texels must be zero or at least the copy width"
+    );
 
     gpu::internal::FormatBlock block = gpu::internal::format_aspect_block(slot.format, aspect);
-    if (block.bytes == 0) return gpu::INVALID_ARGUMENT~;
+    assert(block.bytes != 0, "the copy aspect must have a non-zero texel block size");
 
     usz row_texels = row_length_texels == 0 ? width : row_length_texels;
     usz row_blocks = (row_texels + block.width - 1) / block.width;
     usz block_rows = ((usz)height + block.height - 1) / block.height;
     usz slice_count = is_3d ? (usz)depth : (usz)layers;
-    if (row_blocks > usz::max / block.bytes) return gpu::INVALID_ARGUMENT~;
     usz copy_bytes = row_blocks * block.bytes;
-    if (block_rows > usz::max / copy_bytes) return gpu::INVALID_ARGUMENT~;
+    assert(block_rows <= usz::max / copy_bytes, "the copy region byte size must fit usz");
     copy_bytes *= block_rows;
-    if (slice_count > usz::max / copy_bytes) return gpu::INVALID_ARGUMENT~;
+    assert(slice_count <= usz::max / copy_bytes, "the copy region byte size must fit usz");
     copy_bytes *= slice_count;
-    if (copy_bytes > resolved.size) return gpu::INVALID_ARGUMENT~;
+    assert(
+        copy_bytes <= resolved.size,
+        "the buffer span must hold the whole copy region: needs %s bytes, span holds %s",
+        copy_bytes,
+        resolved.size
+    );
 
     return {
         .buffer_offset       = (vk::DeviceSize)resolved.offset,
@@ -1637,7 +1647,6 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
     CommandRecord* commands,
     gpu::BufferTextureCopyDesc* desc,
 ) {
-    if (desc == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = commands;
     if (record.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
@@ -1648,9 +1657,7 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
         state:          state,
         span:           &desc.src,
         required:       0,
-        operation:      "cmd_copy_buffer_to_texture",
-        rejected_field: "GpuSpan",
-    )!;
+    );
     return {
         .buffer         = buffer,
         .texture        = texture,
@@ -1668,7 +1675,7 @@ fn PreparedBufferTextureCopy? lower_buffer_to_texture_copy(
             height:            desc.height,
             depth:             desc.depth,
             aspect:            desc.aspect,
-        )!,
+        ),
     };
 }
 
@@ -1676,7 +1683,6 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
     CommandRecord* commands,
     gpu::TextureBufferCopyDesc* desc,
 ) {
-    if (desc == null) return gpu::INVALID_ARGUMENT~;
     CommandRecord* record = commands;
     if (record.state != gpu::internal::CommandState.RECORDING) {
         return gpu::COMMAND_RECORDING_ERROR~;
@@ -1687,9 +1693,7 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
         state:          state,
         span:           &desc.dst,
         required:       0,
-        operation:      "cmd_copy_texture_to_buffer",
-        rejected_field: "GpuSpan",
-    )!;
+    );
     return {
         .buffer         = buffer,
         .texture        = texture,
@@ -1707,7 +1711,7 @@ fn PreparedBufferTextureCopy? lower_texture_to_buffer_copy(
             height:            desc.height,
             depth:             desc.depth,
             aspect:            desc.aspect,
-        )!,
+        ),
     };
 }
 
@@ -1794,8 +1798,8 @@ fn void? vk_cmd_copy_texture(
         dst:          &dst_shape,
         desc:         desc,
         same_texture: src == dst,
-    )!;
-    vk::ImageAspectFlags aspect_mask = resolve_aspect(src.format, desc.aspect)!;
+    );
+    vk::ImageAspectFlags aspect_mask = resolve_aspect(src.format, desc.aspect);
 
     vk::ImageCopy region = {
         .src_subresource = {
@@ -1838,14 +1842,14 @@ fn gpu::internal::TextureCopyShape texture_copy_shape(TextureSlot* slot) @privat
     };
 }
 
-fn ResolvedSpan? lower_indirect_span(
+fn ResolvedSpan lower_indirect_span(
     VkDeviceState* state,
     gpu::GpuSpan* span,
     usz arg_size,
     uint count,
 ) {
-    usz required = gpu::internal::indirect_argument_bytes(arg_size, count)!;
-    ResolvedSpan resolved = resolve_span_slot(state, span, required)!;
+    usz required = gpu::internal::indirect_argument_bytes(arg_size, count);
+    ResolvedSpan resolved = resolve_span_slot(state, span, required);
     return resolved;
 }
 
@@ -1872,7 +1876,7 @@ fn BoundPipeline? lower_bound_pipeline(
         return gpu::COMMAND_RECORDING_ERROR~;
     }
     VkDeviceState* state = commands.device_state;
-    validate_descriptor_heap_binding(state)!;
+    validate_descriptor_heap_binding(state);
     PipelineCell* cell = state.pipelines.get_cell(pipeline);
     PipelineSlot* slot = &cell.value;
     PipelineCacheEntry* entry = &state.pipeline_cache.entries[slot.entry];
@@ -1913,7 +1917,7 @@ fn void set_pipeline_topology_real(
     vk::cmd_set_primitive_topology(command_buffer, topology);
 }
 
-fn void? record_bound_pipeline_with_ops(
+fn void record_bound_pipeline_with_ops(
     CommandRecord* commands,
     BoundPipeline* bound,
     PipelineBindOps* ops,
@@ -1954,7 +1958,7 @@ fn void? record_bound_pipeline_with_ops(
         record:     record,
         layout:     bound.layout,
         bind_point: bind_point,
-    )!;
+    );
     if (bound.kind == PipelineKind.GRAPHICS
         && record.graphics_state_initialized
         && !record.raster_topology_emitted) {
@@ -1974,7 +1978,7 @@ fn void? vk_cmd_bind_pipeline_with_ops(
     PipelineBindOps* ops,
 ) {
     BoundPipeline bound = lower_bound_pipeline(commands, pipeline)!;
-    record_bound_pipeline_with_ops(commands, &bound, ops)!;
+    record_bound_pipeline_with_ops(commands, &bound, ops);
 }
 
 fn void? vk_cmd_bind_pipeline(
@@ -1985,21 +1989,12 @@ fn void? vk_cmd_bind_pipeline(
     return vk_cmd_bind_pipeline_with_ops(commands, pipeline, &ops);
 }
 
-<* Validate and borrow the inline payload for the next direct command. *>
-fn void? set_inline_root(
+<* Borrow the inline payload for the next direct command. *>
+fn void set_inline_root(
     CommandRecord* record,
     char[] inline_root,
 ) {
-    if (inline_root.len % 4 != 0 || inline_root.len > gpu::INLINE_ROOT_CAPACITY) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     record.inline_root = inline_root;
-    if (inline_root.len == 0) return;
-    BoundPipeline*? bound = borrow_bound_pipeline(record);
-    if (catch err = bound) return;
-    BoundPipeline* pipeline = bound;
-    uint needed = pipeline.inline_root_offset + (uint)inline_root.len;
-    if (needed > gpu::ROOT_PUSH_CAPACITY) return gpu::INVALID_ARGUMENT~;
 }
 
 <* One push of the header followed by the inline payload at the bound
@@ -2016,10 +2011,21 @@ fn void push_root_block(
     char[gpu::ROOT_PUSH_CAPACITY] block;
     mem::copy(&block[0], header, header_size);
     uint size = header_size;
-    if (inline_root.len > 0) {
-        mem::copy(&block[inline_offset], inline_root.ptr, inline_root.len);
-        size = inline_offset + (uint)inline_root.len;
+    if (inline_root.len > 0 && inline_offset < gpu::ROOT_PUSH_CAPACITY) {
+        sz room = (sz)(gpu::ROOT_PUSH_CAPACITY - inline_offset);
+        sz length = (sz)inline_root.len < room ? (sz)inline_root.len : room;
+        mem::copy(&block[inline_offset], inline_root.ptr, length);
+        size = inline_offset + (uint)length;
     }
+    // After the copy: unsafe builds assume asserts hold, which would drop the
+    // room bound if this came first.
+    assert(
+        inline_root.len == 0
+            || inline_offset + (uint)inline_root.len <= gpu::ROOT_PUSH_CAPACITY,
+        "inline_root must fit ROOT_PUSH_CAPACITY from the bound pipeline's payload offset: offset %s, length %s",
+        inline_offset,
+        inline_root.len
+    );
     vk::cmd_push_constants(
         command_buffer: command_buffer,
         layout:         layout,
@@ -2097,7 +2103,7 @@ fn PreparedDispatchIndirect? lower_dispatch_indirect(
             span:     &args,
             arg_size: gpu::DispatchIndirectCommand::size,
             count:    1,
-        )!,
+        ),
         .root      = root,
     };
 }
@@ -2128,14 +2134,14 @@ fn void? vk_cmd_dispatch_indirect(
     record_dispatch_indirect(commands, &dispatch);
 }
 
-fn ResolvedSpan? lower_generated_work_records(
+fn ResolvedSpan lower_generated_work_records(
     VkDeviceState* state,
     gpu::GpuSpan* records,
     usz record_size,
     uint max_count,
 ) {
-    usz required = gpu::internal::indirect_argument_bytes(record_size, max_count)!;
-    ResolvedSpan resolved = resolve_span_slot(state, records, required)!;
+    usz required = gpu::internal::indirect_argument_bytes(record_size, max_count);
+    ResolvedSpan resolved = resolve_span_slot(state, records, required);
     return resolved;
 }
 
@@ -2226,13 +2232,13 @@ fn PreparedGeneratedDispatch? lower_generated_dispatch_inputs(
         records:     &records,
         record_size: gpu::GeneratedDispatchRecord::size,
         max_count:   max_dispatch_count,
-    )!;
+    );
     dispatch.count = lower_indirect_span(
         state:    state,
         span:     &count_span,
         arg_size: uint::size,
         count:    1,
-    )!;
+    );
     return dispatch;
 }
 

@@ -85,7 +85,7 @@ fn void rendering_attachments_use_classic_layouts() @test {
     gpu::AttachmentViewHandle depth_view =
         create_test_attachment_view(&device, depth)!!;
     defer destroy_test_attachment_view(&device, &depth_view)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator =
         gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
@@ -205,7 +205,7 @@ fn void multisample_color_depth_resolves_to_readback() @test {
     gpu::Queue command_queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator command_allocator = gpu::create_command_allocator(
         &device,
         command_queue,
@@ -258,7 +258,7 @@ fn void multisample_color_depth_resolves_to_readback() @test {
         .compare      = gpu::CompareOp.LESS,
     };
     gpu::GraphicsState graphics_state =
-        gpu::render_geometry_state(DP_RT, DP_RT)!!;
+        gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = depth_state;
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
@@ -433,7 +433,7 @@ fn void record_to_sampled(
             .access = { .read, .write },
         },
         after:   gpu::sampled_at({ .compute }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(commands, &to_sampled)!!;
 }
 
@@ -549,7 +549,7 @@ fn void multisample_texture_reads_each_sample() @test {
         if (with_unsigned) free_sample_readback(&device, &unsigned_values);
     }
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
@@ -569,7 +569,7 @@ fn void multisample_texture_reads_each_sample() @test {
         .width  = DP_RT,
         .height = DP_RT,
     };
-    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT);
     gpu::ColorTargetState[1] color_targets = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
     graphics_state.color = { .targets = color_targets[..] };
     gpu::cmd_begin_render_pass(&commands, &pass)!!;
@@ -709,7 +709,7 @@ fn void record_depth_resolve_attach(
         texture: texture,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   depth_resolve_state(),
-    )!!;
+    );
     gpu::cmd_texture_barrier(commands, &to_attach)!!;
 }
 
@@ -721,7 +721,7 @@ fn void record_depth_resolve_order(
         texture: texture,
         before:  depth_resolve_state(),
         after:   depth_resolve_state(),
-    )!!;
+    );
     gpu::cmd_texture_barrier(commands, &order)!!;
 }
 
@@ -733,7 +733,7 @@ fn void record_depth_resolve_to_sampled(
         texture: texture,
         before:  depth_resolve_state(),
         after:   gpu::sampled_at({ .compute }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(commands, &to_sampled)!!;
 }
 
@@ -820,7 +820,7 @@ fn void check_depth_resolve(
     );
     defer free_sample_readback(device, &target_values);
 
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
@@ -829,7 +829,7 @@ fn void check_depth_resolve(
     record_depth_resolve_attach(&commands, targets.source);
     record_depth_resolve_attach(&commands, targets.target);
 
-    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT);
     graphics_state.depth = {
         .test_enable  = true,
         .write_enable = true,
@@ -906,7 +906,7 @@ fn fault begin_depth_resolve_fault(
     gpu::AttachmentViewHandle resolve_view,
     gpu::DepthResolveMode mode,
 ) {
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
@@ -961,40 +961,6 @@ fn void depth_resolve_writes_the_selected_sample() @test {
             == gpu::UNSUPPORTED_FEATURE,
         "an unreported MAX resolve faults UNSUPPORTED_FEATURE");
     state.caps.depth_resolve_modes = supported;
-
-    gpu::Format stencil_format = gpu::get_device_caps(&device).depth_stencil_format;
-    if (stencil_format == gpu::Format.UNDEFINED) {
-        io::eprintfn("no combined depth-stencil format on this adapter; skipping the stencil resolve fault");
-    } else {
-        gpu::TextureHandle stencil_source = make_multisample_target(
-            device:       &device,
-            format:       stencil_format,
-            usage:        { .depth_attach },
-            sample_count: gpu::SampleCount.ONE,
-            debug_name:   "depth_resolve_stencil_source",
-        );
-        defer gpu::destroy_texture(&device, stencil_source)!!;
-        gpu::AttachmentViewHandle stencil_source_view = create_test_attachment_view(&device, stencil_source)!!;
-        defer destroy_test_attachment_view(&device, &stencil_source_view)!!;
-        gpu::TextureHandle stencil_target = make_multisample_target(
-            device:       &device,
-            format:       stencil_format,
-            usage:        { .depth_attach },
-            sample_count: gpu::SampleCount.ONE,
-            debug_name:   "depth_resolve_stencil_target",
-        );
-        defer gpu::destroy_texture(&device, stencil_target)!!;
-        gpu::AttachmentViewHandle stencil_target_view = create_test_attachment_view(&device, stencil_target)!!;
-        defer destroy_test_attachment_view(&device, &stencil_target_view)!!;
-
-        assert(begin_depth_resolve_fault(
-                &device,
-                stencil_source_view,
-                stencil_target_view,
-                gpu::DepthResolveMode.SAMPLE_ZERO,
-            ) == gpu::INVALID_ARGUMENT,
-            "a depth resolve view on a format with a stencil aspect faults INVALID_ARGUMENT");
-    }
 
     assert(validation.errors == 0, "resolving multisample depth is validation-clean");
 }
@@ -1055,7 +1021,7 @@ fn void check_sample_coverage(
     );
     defer free_sample_readback(device, &values);
 
-    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
@@ -1072,7 +1038,7 @@ fn void check_sample_coverage(
         .width  = DP_RT,
         .height = DP_RT,
     };
-    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT)!!;
+    gpu::GraphicsState graphics_state = gpu::render_geometry_state(DP_RT, DP_RT);
     gpu::ColorTargetState[1] color_targets = {{ .write_mask = gpu::COLOR_WRITE_ALL }};
     graphics_state.color = { .targets = color_targets[..] };
     gpu::cmd_begin_render_pass(&commands, &pass)!!;

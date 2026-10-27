@@ -248,6 +248,31 @@ fn bool texture_desc_valid(TextureDesc* desc) @private {
     return true;
 }
 
+<* Rules on a view description that read no texture state: a defined aspect and
+   a mip and layer range whose end is representable. A null description selects
+   the default view. *>
+fn bool texture_view_desc_valid(TextureViewDesc* desc) @private {
+    if (desc == null) return true;
+    if (!texture_aspect_valid(desc.aspect)) return false;
+    uint mips = desc.mip_count == 0 ? 1 : desc.mip_count;
+    uint layers = desc.layer_count == 0 ? 1 : desc.layer_count;
+    return desc.base_mip <= uint::max - mips && desc.base_layer <= uint::max - layers;
+}
+
+fn bool texture_view_descs_valid(TextureViewDesc[] descs) @private {
+    foreach (&desc : descs) {
+        if (!texture_view_desc_valid(desc)) return false;
+    }
+    return true;
+}
+
+fn bool texture_view_create_descs_valid(TextureViewCreateDesc[] descs) @private {
+    foreach (&desc : descs) {
+        if (!texture_view_desc_valid(&desc.view)) return false;
+    }
+    return true;
+}
+
 <* Shape of one texture as a texture-to-texture copy sees it. A positive
    depth marks a three-dimensional texture; counts are normalized. *>
 struct TextureCopyShape {
@@ -289,35 +314,45 @@ fn bool texture_copy_ranges_overlap(
     return first < second + second_size && second < first + first_size;
 }
 
-<* Validate a texture-to-texture copy region against both texture shapes.
-   Regions inside one texture must not overlap. *>
-fn TextureCopyExtent? resolve_texture_copy(
+<* Resolve a texture-to-texture copy region against both texture shapes. The
+   region must fit both textures, and regions inside one texture must not
+   overlap; these rules read texture state, so a violation panics in safe
+   builds. `desc.aspect` must be a defined `TextureAspect`, which the public
+   entry point requires. *>
+fn TextureCopyExtent resolve_texture_copy(
     TextureCopyShape* src,
     TextureCopyShape* dst,
     TextureCopyDesc* desc,
     bool same_texture,
 ) @private {
-    if (src.format != dst.format || src.sample_count != dst.sample_count) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (!src.usage.transfer_src || !dst.usage.transfer_dst) return gpu::INVALID_ARGUMENT~;
-    if (desc.src_mip >= src.mip_levels || desc.dst_mip >= dst.mip_levels) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        src.format == dst.format && src.sample_count == dst.sample_count,
+        "source and destination textures must share format and sample count"
+    );
+    assert(
+        src.usage.transfer_src && dst.usage.transfer_dst,
+        "source needs transfer_src usage and destination needs transfer_dst usage"
+    );
+    assert(
+        desc.src_mip < src.mip_levels && desc.dst_mip < dst.mip_levels,
+        "desc.src_mip and desc.dst_mip must be below each texture's mip count"
+    );
 
     TextureAspect aspect = desc.aspect;
-    if (!texture_aspect_valid(aspect)) return gpu::INVALID_ARGUMENT~;
-    if (aspect == TextureAspect.DEPTH && !format_has_depth(src.format)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (aspect == TextureAspect.STENCIL && !format_has_stencil(src.format)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(texture_aspect_valid(aspect), "desc.aspect must be a defined TextureAspect");
+    assert(
+        aspect != TextureAspect.DEPTH || format_has_depth(src.format),
+        "DEPTH aspect needs a source format with depth"
+    );
+    assert(
+        aspect != TextureAspect.STENCIL || format_has_stencil(src.format),
+        "STENCIL aspect needs a source format with stencil"
+    );
     FormatBlock block = format_aspect_block(src.format, aspect);
-    if (block.bytes == 0) return gpu::INVALID_ARGUMENT~;
+    assert(block.bytes != 0, "a combined depth-stencil copy must select DEPTH or STENCIL");
 
     bool is_3d = src.depth > 0;
-    if (is_3d != (dst.depth > 0)) return gpu::INVALID_ARGUMENT~;
+    assert(is_3d == (dst.depth > 0), "source and destination must both be 3D or both be non-3D");
 
     uint src_width = gpu::texture_mip_dimension(src.width, desc.src_mip);
     uint src_height = gpu::texture_mip_dimension(src.height, desc.src_mip);
@@ -326,47 +361,59 @@ fn TextureCopyExtent? resolve_texture_copy(
     uint src_depth = is_3d ? gpu::texture_mip_dimension(src.depth, desc.src_mip) : 1;
     uint dst_depth = is_3d ? gpu::texture_mip_dimension(dst.depth, desc.dst_mip) : 1;
 
-    if (desc.src_x > src_width || desc.src_y > src_height) return gpu::INVALID_ARGUMENT~;
+    assert(
+        desc.src_x <= src_width && desc.src_y <= src_height,
+        "desc.src_x and desc.src_y must lie within the source mip"
+    );
     uint width = desc.width == 0 ? src_width - desc.src_x : desc.width;
     uint height = desc.height == 0 ? src_height - desc.src_y : desc.height;
 
     uint layers = 1;
     uint depth = 1;
     if (is_3d) {
-        if (desc.src_base_layer != 0 || desc.dst_base_layer != 0 || desc.layer_count > 1) {
-            return gpu::INVALID_ARGUMENT~;
-        }
-        if (desc.src_z > src_depth) return gpu::INVALID_ARGUMENT~;
+        assert(
+            desc.src_base_layer == 0 && desc.dst_base_layer == 0 && desc.layer_count <= 1,
+            "3D copies must not select array layers"
+        );
+        assert(desc.src_z <= src_depth, "desc.src_z must lie within the source mip depth");
         depth = desc.depth == 0 ? src_depth - desc.src_z : desc.depth;
-        if (depth == 0 || depth > src_depth - desc.src_z
-            || desc.dst_z > dst_depth || depth > dst_depth - desc.dst_z) {
-            return gpu::INVALID_ARGUMENT~;
-        }
+        assert(
+            depth != 0 && depth <= src_depth - desc.src_z
+                && desc.dst_z <= dst_depth && depth <= dst_depth - desc.dst_z,
+            "copy depth must be nonzero and fit both mips"
+        );
     } else {
-        if (desc.src_z != 0 || desc.dst_z != 0 || desc.depth > 1) return gpu::INVALID_ARGUMENT~;
+        assert(
+            desc.src_z == 0 && desc.dst_z == 0 && desc.depth <= 1,
+            "non-3D copies must use zero z offsets and depth at most 1"
+        );
         layers = desc.layer_count == 0 ? 1 : desc.layer_count;
-        if (desc.src_base_layer > src.array_layers
-            || layers > src.array_layers - desc.src_base_layer
-            || desc.dst_base_layer > dst.array_layers
-            || layers > dst.array_layers - desc.dst_base_layer) {
-            return gpu::INVALID_ARGUMENT~;
-        }
+        assert(
+            desc.src_base_layer <= src.array_layers
+                && layers <= src.array_layers - desc.src_base_layer
+                && desc.dst_base_layer <= dst.array_layers
+                && layers <= dst.array_layers - desc.dst_base_layer,
+            "layer range must fit both textures' array layers"
+        );
     }
 
-    if (width == 0 || height == 0) return gpu::INVALID_ARGUMENT~;
-    if (!texture_copy_axis_valid(desc.src_x, width, block.width, src_width)
-        || !texture_copy_axis_valid(desc.dst_x, width, block.width, dst_width)
-        || !texture_copy_axis_valid(desc.src_y, height, block.height, src_height)
-        || !texture_copy_axis_valid(desc.dst_y, height, block.height, dst_height)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(width != 0 && height != 0, "copy width and height must be nonzero");
+    assert(
+        texture_copy_axis_valid(desc.src_x, width, block.width, src_width)
+            && texture_copy_axis_valid(desc.dst_x, width, block.width, dst_width)
+            && texture_copy_axis_valid(desc.src_y, height, block.height, src_height)
+            && texture_copy_axis_valid(desc.dst_y, height, block.height, dst_height),
+        "copy regions must fit both mips and be block aligned"
+    );
 
-    if (same_texture && desc.src_mip == desc.dst_mip
-        && texture_copy_ranges_overlap(desc.src_x, width, desc.dst_x, width)
-        && texture_copy_ranges_overlap(desc.src_y, height, desc.dst_y, height)
-        && texture_copy_ranges_overlap(desc.src_z, depth, desc.dst_z, depth)
-        && texture_copy_ranges_overlap(desc.src_base_layer, layers, desc.dst_base_layer, layers)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        !(same_texture && desc.src_mip == desc.dst_mip
+            && texture_copy_ranges_overlap(desc.src_x, width, desc.dst_x, width)
+            && texture_copy_ranges_overlap(desc.src_y, height, desc.dst_y, height)
+            && texture_copy_ranges_overlap(desc.src_z, depth, desc.dst_z, depth)
+            && texture_copy_ranges_overlap(
+                desc.src_base_layer, layers, desc.dst_base_layer, layers)),
+        "copies within one texture and mip must not overlap"
+    );
     return { .width = width, .height = height, .depth = depth, .layers = layers };
 }

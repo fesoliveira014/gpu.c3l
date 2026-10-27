@@ -82,7 +82,7 @@ fn void generated_dispatch_requires_native_layout() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -247,7 +247,7 @@ fn void exercise_command_family_render(
 
     gpu::CommandList commands = gpu::begin_commands(allocator)!!;
     gpu::GraphicsState graphics =
-        gpu::render_geometry_state(pass.width, pass.height)!!;
+        gpu::render_geometry_state(pass.width, pass.height);
     gpu::ColorTargetState[1] color_targets = {{
         .write_mask = gpu::COLOR_WRITE_ALL,
     }};
@@ -357,7 +357,7 @@ fn void exercise_command_families(
     );
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,

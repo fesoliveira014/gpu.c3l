@@ -41,7 +41,7 @@ fn void unified_layouts_caps_and_general_rejection() @test {
         "the optimal cap needs the mode");
     gpu::TextureHandle texture = make_unified_heap_texture(&explicit_device, "explicit_general");
     defer gpu::destroy_texture(&explicit_device, texture)!!;
-    gpu::Queue queue = gpu::get_queue(&explicit_device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&explicit_device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&explicit_device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -72,7 +72,7 @@ fn void unified_barrier_lowers_to_general() @test {
     defer destroy_test_device(&device)!!;
     gpu::TextureHandle texture = make_unified_heap_texture(&device, "unified_barrier");
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -86,7 +86,7 @@ fn void unified_barrier_lowers_to_general() @test {
         texture: texture,
         before:  gpu::sampled_at({ .fragment_shader }),
         after:   gpu::storage_at({ .compute }, { .write }),
-    )!!;
+    );
     vk::vk_cmd_texture_barrier_with_ops(vk::resolve_command(&cmd), &barrier, &ops)!!;
     assert(capture.calls == 1
         && capture.native.old_layout == vk::ImageLayout.GENERAL
@@ -102,7 +102,7 @@ fn void unified_barrier_lowers_to_general() @test {
         texture: texture,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   gpu::storage_at({ .compute }, { .write }),
-    )!!;
+    );
     vk::vk_cmd_texture_barrier_with_ops(vk::resolve_command(&cmd), &discard, &ops)!!;
     assert(capture.calls == 2
         && capture.native.old_layout == vk::ImageLayout.UNDEFINED
@@ -113,7 +113,7 @@ fn void unified_barrier_lowers_to_general() @test {
         texture: texture,
         before:  gpu::storage_at({ .compute }, { .write }),
         after:   { .layout = gpu::TextureLayout.SAMPLED, .stages = { .compute }, .access = { .read, .write } },
-    )!!;
+    );
     vk::vk_cmd_texture_barrier_with_ops(vk::resolve_command(&cmd), &sampled_write, &ops)!!;
     assert(capture.calls == 3, "layout-specific access rules are lifted in the mode");
     assert(capture.native.dst_access_mask
@@ -176,7 +176,7 @@ fn void unified_storage_write_then_sampled_read() @test {
     };
     gpu::flush_mapped_span(&device, roots.span)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -192,12 +192,12 @@ fn void unified_storage_write_then_sampled_read() @test {
         texture: texture,
         before:  gpu::storage_at({ .compute }, { .write }),
         after:   gpu::sampled_at({ .compute }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&cmd, &write_to_sample)!!;
     bind_test_compute_pipeline(&cmd, sample_pipe);
     gpu::cmd_dispatch(
         commands: &cmd,
-        root:     test_span_address(&device, roots.span.checked_subspan(WriteRoot::size, SampleRoot::size)!!),
+        root:     test_span_address(&device, roots.span.subspan(WriteRoot::size, SampleRoot::size)),
         groups:   { GROUPS, GROUPS, 1 },
     )!!;
     gpu::Barrier to_host = { .before = { .compute }, .after = { .host } };
@@ -224,7 +224,7 @@ fn void unified_textures_initialize_at_submit() @test {
     gpu::destroy_texture(&device, dropped)!!;
     assert(state.pending_init_count == 0, "destruction dequeues it");
 
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator graphics_allocator = gpu::create_command_allocator(&device, graphics)!!;
     defer gpu::destroy_command_allocator(&graphics_allocator)!!;
     gpu::CommandList first = gpu::begin_commands(&graphics_allocator)!!;
@@ -254,7 +254,7 @@ fn void unified_textures_initialize_at_submit() @test {
         { .texture_index = view.index, .width = TEX_SIZE, .height = TEX_SIZE };
     gpu::flush_mapped_span(&device, root.span)!!;
 
-    gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+    gpu::Queue compute = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     gpu::CommandAllocator compute_allocator = gpu::create_command_allocator(&device, compute)!!;
     defer gpu::destroy_command_allocator(&compute_allocator)!!;
     gpu::CommandList second = gpu::begin_commands(&compute_allocator)!!;
@@ -302,7 +302,7 @@ fn void unified_failed_submit_keeps_textures_pending() @test {
     gpu::internal::vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
     gpu::TextureHandle texture = make_unified_heap_texture(&device, "unified_retry_texture");
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;

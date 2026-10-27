@@ -1182,7 +1182,7 @@ fn void semantic_texture_barrier_maps_partial_ranges_and_aspects() @test {
     vk::ImageSubresourceRange color = gpu::internal::vk::resolve_texture_barrier_range(
         color_barrier.view,
         &color_slot,
-    )!!;
+    );
     assert(color.aspect_mask == vk::ImageAspectFlagBits.COLOR_BIT);
     assert(color.base_mip_level == 2);
     assert(color.level_count == 4);
@@ -1205,36 +1205,9 @@ fn void semantic_texture_barrier_maps_partial_ranges_and_aspects() @test {
     vk::ImageSubresourceRange depth = gpu::internal::vk::resolve_texture_barrier_range(
         depth_barrier.view,
         &depth_slot,
-    )!!;
+    );
     ulong expected_aspects = (ulong)vk::ImageAspectFlagBits.DEPTH_BIT;
     assert((ulong)depth.aspect_mask == expected_aspects);
-}
-
-fn void texture_barrier_range_rejects_invalid_ranges() @test {
-    gpu::internal::vk::TextureSlot slot = {
-        .format       = gpu::Format.RGBA8_UNORM,
-        .mip_levels   = 4,
-        .array_layers = 2,
-    };
-    gpu::TextureBarrier barrier = {
-        .before = { .layout = gpu::TextureLayout.UNDEFINED },
-        .after = {
-            .layout = gpu::TextureLayout.TRANSFER_DESTINATION,
-            .stages = { .transfer },
-            .access = { .write },
-        },
-    };
-
-    barrier.view.base_mip = 4;
-    assert(@catch(gpu::internal::vk::resolve_texture_barrier_range(barrier.view, &slot))
-            == gpu::INVALID_ARGUMENT,
-        "a mip base at the texture limit is invalid");
-
-    barrier.view = { .base_layer = 1, .layer_count = 2 };
-    assert(@catch(gpu::internal::vk::resolve_texture_barrier_range(barrier.view, &slot))
-            == gpu::INVALID_ARGUMENT,
-        "a layer range extending past the texture is invalid");
-
 }
 
 fn void semantic_barrier_stage_masks_map_exactly() @test {
@@ -1298,42 +1271,42 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
     assert((ulong)gpu::internal::vk::submit_wait_stages_to_vk(
             combined,
             graphics_only,
-        )!! == expected,
+        ) == expected,
         "submission waits preserve combined destination stage bits");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             { .all },
             transfer_only,
-        )!! == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
+        ) == vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
         "the explicit all stage remains available on transfer queues");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             { .transfer },
             compute_only,
-        )!! == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+        ) == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
         "compute queues support transfer destinations");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             { .transfer },
             graphics_only,
-        )!! == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
+        ) == vk::PipelineStageFlagBits2.STAGE_2_ALL_TRANSFER_BIT,
         "graphics queues support transfer destinations");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             { .compute },
             compute_only,
-        )!! == vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT,
+        ) == vk::PipelineStageFlagBits2.STAGE_2_COMPUTE_SHADER_BIT,
         "compute submission waits map exactly");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             { .vertex_shader },
             graphics_only,
-        )!! == vk::PipelineStageFlagBits2.STAGE_2_VERTEX_SHADER_BIT,
+        ) == vk::PipelineStageFlagBits2.STAGE_2_VERTEX_SHADER_BIT,
         "vertex submission waits map exactly");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             { .fragment_shader },
             graphics_only,
-        )!! == vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT,
+        ) == vk::PipelineStageFlagBits2.STAGE_2_FRAGMENT_SHADER_BIT,
         "fragment submission waits map exactly");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             { .color_output },
             graphics_only,
-        )!! == vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+        ) == vk::PipelineStageFlagBits2.STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
         "color-output submission waits map exactly");
     ulong depth =
         (ulong)vk::PipelineStageFlagBits2.STAGE_2_EARLY_FRAGMENT_TESTS_BIT
@@ -1341,24 +1314,24 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
     assert((ulong)gpu::internal::vk::submit_wait_stages_to_vk(
             { .depth_output },
             graphics_only,
-        )!! == depth,
+        ) == depth,
         "depth-output submission waits map to both test stages");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             { .indirect },
             graphics_only,
-        )!! == vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT,
+        ) == vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT,
         "graphics queues accept indirect completion waits");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             { .indirect },
             compute_only,
-        )!! == vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT,
+        ) == vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT,
         "compute queues accept indirect completion waits");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             stages:           { .acceleration_structure_build },
             flags:            graphics_only,
             generated_work:   false,
             ray_queries:      true,
-        )!! == vk::PipelineStageFlagBits2
+        ) == vk::PipelineStageFlagBits2
             .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
         "graphics queues accept acceleration-structure build waits");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
@@ -1366,13 +1339,10 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
             flags:            compute_only,
             generated_work:   false,
             ray_queries:      true,
-        )!! == vk::PipelineStageFlagBits2
+        ) == vk::PipelineStageFlagBits2
             .STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
         "compute queues accept acceleration-structure build waits");
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-        { .acceleration_structure_build },
-        compute_only,
-    )) == gpu::INVALID_ARGUMENT,
+    assert(!gpu::internal::vk::barrier_stage_mask_supported({ .acceleration_structure_build }, compute_only),
         "acceleration-structure waits require the ray-query feature family");
     ulong generated_indirect =
         (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT
@@ -1381,58 +1351,25 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
             { .indirect },
             graphics_only,
             true,
-        )!! == generated_indirect,
+        ) == generated_indirect,
         "generated work adds command preprocessing to indirect waits");
     ulong shader_indirect = (ulong)vk::PipelineStageFlagBits2.STAGE_2_VERTEX_SHADER_BIT
         | (ulong)vk::PipelineStageFlagBits2.STAGE_2_DRAW_INDIRECT_BIT;
     assert((ulong)gpu::internal::vk::submit_wait_stages_to_vk(
             { .vertex_shader, .indirect },
             graphics_only,
-        )!! == shader_indirect,
+        ) == shader_indirect,
         "ordinary and indirect completion stages compose exactly");
 
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk({}, graphics_only))
-            == gpu::INVALID_ARGUMENT,
-        "empty submission wait stages are invalid");
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            { .all = true, .compute = true },
-            graphics_only,
-        )) == gpu::INVALID_ARGUMENT,
-        "all cannot be combined with a specific submission wait stage");
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            { .host },
-            graphics_only,
-        )) == gpu::INVALID_ARGUMENT,
-        "host is not a submission wait destination stage");
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            { .present },
-            graphics_only,
-        )) == gpu::INVALID_ARGUMENT,
-        "present is not a submission wait destination stage");
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            { .compute },
-            transfer_only,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(!gpu::internal::vk::barrier_stage_mask_supported({ .compute }, transfer_only),
         "submission wait stages must be supported by the target queue");
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            { .compute },
-            graphics_only,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(!gpu::internal::vk::barrier_stage_mask_supported({ .compute }, graphics_only),
         "graphics-only queues reject compute destinations");
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            { .vertex_shader },
-            compute_only,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(!gpu::internal::vk::barrier_stage_mask_supported({ .vertex_shader }, compute_only),
         "compute-only queues reject graphics destinations");
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            { .indirect },
-            transfer_only,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(!gpu::internal::vk::barrier_stage_mask_supported({ .indirect }, transfer_only),
         "transfer-only queues reject indirect destinations");
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            { .acceleration_structure_build },
-            transfer_only,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(!gpu::internal::vk::barrier_stage_mask_supported({ .acceleration_structure_build }, transfer_only),
         "transfer-only queues reject acceleration-structure build waits");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             { .ray_tracing },
@@ -1440,47 +1377,37 @@ fn void submit_wait_stage_masks_validate_and_map_exactly() @test {
             false,
             false,
             true,
-        )!! == vk::PipelineStageFlagBits2
+        ) == vk::PipelineStageFlagBits2
             .STAGE_2_RAY_TRACING_SHADER_BIT_KHR,
         "enabled ray tracing is a graphics/compute wait destination");
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            { .ray_tracing },
-            graphics_only,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(!gpu::internal::vk::barrier_stage_mask_supported({ .ray_tracing }, graphics_only),
         "ray tracing waits require pipeline opt-in");
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            { .ray_tracing },
-            transfer_only,
-            false,
-            false,
-            true,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(!gpu::internal::vk::barrier_stage_mask_supported(
+            stages:                { .ray_tracing },
+            flags:                 transfer_only,
+            ray_queries:           false,
+            ray_tracing_pipelines: true,
+        ),
         "transfer-only queues reject ray tracing waits");
     gpu::StageMask mesh = { .mesh_shader };
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            mesh,
-            graphics_only,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(!gpu::internal::vk::barrier_stage_mask_supported(mesh, graphics_only),
         "mesh stage waits need the mesh shader feature");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             stages:       mesh,
             flags:        graphics_only,
             mesh_shaders: true,
             task_shaders: true,
-        )!! == (vk::PipelineStageFlags2)(
+        ) == (vk::PipelineStageFlags2)(
             (ulong)vk::PipelineStageFlagBits2.STAGE_2_MESH_SHADER_BIT_EXT
             | (ulong)vk::PipelineStageFlagBits2.STAGE_2_TASK_SHADER_BIT_EXT),
         "mesh stage waits lower to the mesh and task stages when enabled");
     assert(gpu::internal::vk::submit_wait_stages_to_vk(
             { .index_input },
             graphics_only,
-        )!! == (vk::PipelineStageFlags2)
+        ) == (vk::PipelineStageFlags2)
             vk::PipelineStageFlagBits2.STAGE_2_INDEX_INPUT_BIT,
         "index input waits lower to the index-input stage");
-    assert(@catch(gpu::internal::vk::submit_wait_stages_to_vk(
-            { .index_input },
-            compute_only,
-        )) == gpu::INVALID_ARGUMENT,
+    assert(!gpu::internal::vk::barrier_stage_mask_supported({ .index_input }, compute_only),
         "compute-only queues reject index input waits");
 }
 
@@ -1690,9 +1617,7 @@ fn void sparse_texture_feature_plan_is_exact() @test {
     }
 }
 
-fn void sparse_texture_feature_plan_rejects_null_requested_features() @test {
-    assert(@catch(vk::resolve_sparse_texture_feature_plan(true, null))
-        == gpu::INVALID_ARGUMENT);
+fn void sparse_texture_feature_plan_ignores_features_when_not_requested() @test {
     vk::SparseTextureFeaturePlan plan =
         vk::resolve_sparse_texture_feature_plan(false, null)!!;
     assert(!plan.enabled && !plan.image_2d && !plan.image_3d);

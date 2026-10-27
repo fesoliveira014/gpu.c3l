@@ -183,7 +183,6 @@ fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
     state.config.debug_callback = desc.debug_callback;
     state.config.debug_user_data = desc.debug_user_data;
     if (desc.pipeline_cache_data.len > 0) {
-        if (desc.pipeline_cache_data.ptr == null) return gpu::INVALID_ARGUMENT~;
         state.config.pipeline_cache_data = mem::new_array(
             char,
             desc.pipeline_cache_data.len,

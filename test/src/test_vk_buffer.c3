@@ -29,11 +29,11 @@ fn void allocation_spans_expose_mapping_address_and_liveness() @test {
         debug_name:   "upload_data",
     )!!;
     defer free_owned_span(&device, &upload)!!;
-    char[] upload_mapping = gpu::get_span_mapping(&device, upload.span)!!;
+    char[] upload_mapping = gpu::get_span_mapping(&device, upload.span);
     assert(upload_mapping.ptr != null && upload_mapping.len == 256,
         "CPU_WRITE span exposes its exact mapping");
 
-    gpu::GpuAddress address = gpu::get_span_address(&device, device_data.span)!!;
+    gpu::GpuAddress address = gpu::get_span_address(&device, device_data.span);
     assert((ulong)address != 0, "allocation span has a non-zero GPU address");
 
     free_owned_span(&device, &device_data)!!;
@@ -69,13 +69,6 @@ fn void span_ranges_preserve_native_bounds() @test {
     gpu::Device device = create_test_device(&device_desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::AllocationDesc zero = {
-        .memory_class = gpu::MemoryClass.CPU_WRITE,
-        .access       = { .graphics, .compute, .transfer },
-    };
-    assert(@catch(gpu::allocate_memory(&device, &zero)) == gpu::INVALID_ARGUMENT,
-        "zero-size allocation faults");
-
     OwnedSpan mapped = allocate_owned_span(
         device:       &device,
         size:         256,
@@ -85,18 +78,7 @@ fn void span_ranges_preserve_native_bounds() @test {
     )!!;
     defer free_owned_span(&device, &mapped)!!;
 
-    gpu::GpuSpan past_end = mapped.span.unchecked_subspan(300, 1);
-    assert(@catch(gpu::flush_mapped_span(&device, past_end)) == gpu::INVALID_ARGUMENT,
-        "flush range past the end faults");
-    gpu::GpuSpan overflow = mapped.span.unchecked_subspan(200, usz::max);
-    assert(@catch(gpu::flush_mapped_span(&device, overflow)) == gpu::INVALID_ARGUMENT,
-        "overflowing flush range faults");
-    gpu::GpuSpan oversized_mapping = mapped.span.unchecked_subspan(0, 512);
-    assert(@catch(gpu::invalidate_mapped_span(&device, oversized_mapping))
-        == gpu::INVALID_ARGUMENT,
-        "oversized invalidate range faults");
-
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,
@@ -105,43 +87,23 @@ fn void span_ranges_preserve_native_bounds() @test {
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
     defer discard_test_commands(&commands)!!;
 
-    gpu::GpuSpan oversized = mapped.span.unchecked_subspan(0, 512);
-    assert(@catch(gpu::cmd_fill_buffer(&commands, oversized, 0xAB))
-        == gpu::INVALID_ARGUMENT,
-        "oversized fill faults");
-    gpu::GpuSpan zero_span = mapped.span.unchecked_subspan(0, 0);
-    assert(@catch(gpu::cmd_fill_buffer(&commands, zero_span, 0xAB))
-        == gpu::INVALID_ARGUMENT,
-        "zero-size fill span faults");
     gpu::cmd_fill_buffer(&commands, mapped.span, 0xAB)!!;
 
     gpu::BufferCopyDesc touching = {
-        .src = mapped.span.checked_subspan(0, 64)!!,
-        .dst = mapped.span.checked_subspan(64, 64)!!,
+        .src = mapped.span.subspan(0, 64),
+        .dst = mapped.span.subspan(64, 64),
     };
     gpu::cmd_copy_buffer(&commands, &touching)!!;
     gpu::BufferCopyDesc reverse_touching = {
-        .src = mapped.span.checked_subspan(64, 64)!!,
-        .dst = mapped.span.checked_subspan(0, 64)!!,
+        .src = mapped.span.subspan(64, 64),
+        .dst = mapped.span.subspan(0, 64),
     };
     gpu::cmd_copy_buffer(&commands, &reverse_touching)!!;
     gpu::BufferCopyDesc disjoint = {
-        .src = mapped.span.checked_subspan(0, 64)!!,
-        .dst = mapped.span.checked_subspan(128, 64)!!,
+        .src = mapped.span.subspan(0, 64),
+        .dst = mapped.span.subspan(128, 64),
     };
     gpu::cmd_copy_buffer(&commands, &disjoint)!!;
-    gpu::BufferCopyDesc unequal = {
-        .src = mapped.span.checked_subspan(0, 64)!!,
-        .dst = mapped.span.checked_subspan(128, 32)!!,
-    };
-    assert(@catch(gpu::cmd_copy_buffer(&commands, &unequal)) == gpu::INVALID_ARGUMENT,
-        "a copy cannot exceed the destination span");
-    gpu::BufferCopyDesc zero_copy = {
-        .src = zero_span,
-        .dst = mapped.span.checked_subspan(128, 64)!!,
-    };
-    assert(@catch(gpu::cmd_copy_buffer(&commands, &zero_copy)) == gpu::INVALID_ARGUMENT,
-        "zero-size copy span faults");
 
     gpu::ExecutableCommandList executable = gpu::end_commands(&commands)!!;
     defer discard_test_executable(&executable)!!;

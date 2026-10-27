@@ -49,6 +49,11 @@ Set `enable_vulkan_validation` explicitly during development. The
 descriptor is borrowed for the call; `debug_user_data` must stay valid until
 the runtime is destroyed.
 
+`create_runtime` rules: `desc` is not null, every capacity is at most
+`MAX_SHADER_HEAP_CAPACITY`, and a nonempty `pipeline_cache_data` has a
+pointer. A call that breaks a rule panics in a safe build (`-O0`, `-O1`, or
+`--safe=yes`); other builds do not check it.
+
 `destroy_runtime` fails with `RESOURCE_IN_USE` while a device or surface is
 live. Runtime and surface creation and destruction are externally
 synchronized process-wide.
@@ -58,7 +63,7 @@ synchronized process-wide.
 ```c3
 gpu::AdapterList adapters = gpu::enumerate_adapters(&runtime);
 for (uint i = 0; i < adapters.count; i++) {
-    gpu::Adapter adapter = adapters.get(i)!;
+    gpu::Adapter adapter = adapters.get(i);
     gpu::AdapterInfo info = gpu::get_adapter_info(&adapter);
     gpu::AdapterDiagnostics diag = gpu::get_adapter_diagnostics(&adapter);
     io::printfn("%s (%s) driver %s", info.name, info.device_class, diag.driver_name);
@@ -66,8 +71,9 @@ for (uint i = 0; i < adapters.count; i++) {
 ```
 
 `AdapterList` and `Adapter` are borrowed from the runtime and cost nothing
-to copy. Strings in `AdapterInfo` and `AdapterDiagnostics` are valid until
-the runtime is destroyed. `AdapterInfo` reports class, memory totals
+to copy. `get` takes an index below `count`; a runtime can have no adapters.
+Strings in `AdapterInfo` and `AdapterDiagnostics` are valid until the
+runtime is destroyed. `AdapterInfo` reports class, memory totals
 (including `device_local_host_visible_bytes`, the size of the heaps that
 back `CPU_WRITE_GPU_LOCAL` placement), available queue roles, and limits.
 `AdapterDiagnostics` reports backend and driver identity for logs.
@@ -114,16 +120,23 @@ Queue request rules:
   required role.
 - `single_queue = true` demands one native queue for every required role
   and for presentation. `distinct_roles` must be empty and `required` must
-  be nonempty, or the request is `INVALID_ARGUMENT`. A valid request with no
-  matching topology reports `supported = false` and `UNSUPPORTED_FEATURE`
-  on creation.
+  be nonempty.
+- A nonzero request names only the three roles, and includes graphics when
+  `surface` is set.
+
+These rules apply to both `supports_device_desc` and `create_device`;
+breaking one panics in a safe build. A valid request with no matching
+topology reports `supported = false`, and `create_device` returns
+`UNSUPPORTED_FEATURE`.
 
 Ray queries and ray-tracing pipelines are separate opt-ins. Either enables
-acceleration structures; neither enables the other's shader model.
+acceleration structures; neither enables the other's shader model. Either
+requires a runtime created with a nonzero
+`acceleration_structure_heap_capacity`.
 
 Creation is transactional and externally synchronized per runtime. Faults:
-`UNSUPPORTED_FEATURE`, `INVALID_ARGUMENT`, `OUT_OF_HOST_MEMORY`,
-`OUT_OF_DEVICE_MEMORY`, `SLOT_TABLE_FULL`, `BACKEND_ERROR`.
+`UNSUPPORTED_FEATURE`, `OUT_OF_HOST_MEMORY`, `OUT_OF_DEVICE_MEMORY`,
+`SLOT_TABLE_FULL`, `BACKEND_ERROR`.
 
 `destroy_device` never waits. It returns `RESOURCE_IN_USE` while any child
 is live and `DEVICE_BUSY` while submitted work is running. Destroy children
@@ -171,15 +184,15 @@ keep GPU operations within the reported limits.
 ## Queues
 
 ```c3
-gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!;
-gpu::Queue compute  = gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!;
+gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
+gpu::Queue compute  = gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
 if (graphics == compute) { /* roles alias one native queue */ }
 gpu::QueueInfo info = gpu::get_queue_info(&device, compute);
 ```
 
-`Queue` is a borrowed value: copy it freely, compare it with `==`. A
-`QueueKind` that was not selected returns `UNSUPPORTED_FEATURE`. Compute may
-alias graphics; transfer may alias either.
+`Queue` is a borrowed value: copy it freely, compare it with `==`. `kind`
+must be a role listed in `DeviceCaps.queues`. Compute may alias graphics;
+transfer may alias either.
 
 Submission, presentation, and sparse binding are externally synchronized on
 the native queue. Two aliased roles share that boundary.

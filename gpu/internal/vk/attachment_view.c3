@@ -105,16 +105,16 @@ fn gpu::AttachmentViewHandle? vk_create_attachment_view(
     VkDeviceState* state,
     gpu::AttachmentViewDesc* desc,
 ) {
-    if (desc == null) return gpu::INVALID_ARGUMENT~;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     TextureSlot* texture = state.textures.get(desc.texture);
-    if (texture_slot_is_3d(texture)
-        || (!texture.usage.color_attach && !texture.usage.depth_attach)
-        || desc.mip_level >= texture.mip_levels
-        || desc.array_layer >= texture.array_layers) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        !texture_slot_is_3d(texture)
+            && (texture.usage.color_attach || texture.usage.depth_attach)
+            && desc.mip_level < texture.mip_levels
+            && desc.array_layer < texture.array_layers,
+        "desc.texture must be a 2D texture with attachment usage and desc.mip_level/array_layer must be in range"
+    );
 
     MipExtent extent = texture_mip_extent(texture, desc.mip_level);
     bool owns_native = texture.mip_levels != 1

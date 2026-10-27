@@ -65,9 +65,9 @@ A direct command may carry a payload in the same push. `cmd_dispatch`,
 a trailing `char[] inline_root` (default empty). `@inline_root(&value)`
 borrows a value as bytes for the call; the command copies them immediately.
 The length must be a multiple of 4, at most `INLINE_ROOT_CAPACITY`, and fit
-`ROOT_PUSH_CAPACITY` after the bound pipeline's header, else
-`INVALID_ARGUMENT`. The application must also fit the payload within the
-bound pipeline's reflected push block. Payload byte `n` is block byte `header + n`; a member that
+`ROOT_PUSH_CAPACITY` after the bound pipeline's header. These are
+contracts: a violation panics in safe builds. The application must also fit
+the payload within the bound pipeline's reflected push block. Payload byte `n` is block byte `header + n`; a member that
 needs 16-byte alignment in a compute block therefore sits after 8 bytes of
 payload padding.
 
@@ -192,7 +192,7 @@ gpu::flush_mapped_span(&device, root_span)!;
 ```
 
 Alignment: the macros use the extension default of 16-byte reference
-alignment. A whole allocation is 16-aligned, but a `checked_subspan` is not.
+alignment. A whole allocation is 16-aligned, but a `subspan` is not.
 For a single record at a smaller offset, declare the block yourself with
 `buffer_reference_align`. Array accesses use the element's own alignment and
 are unaffected.

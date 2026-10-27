@@ -153,25 +153,15 @@ fn void? check_swapchain_present_contract(
         provided_completion:  render_completion,
     ));
     if (guard_fault) {
-        bool wrong_completion = guard_fault == gpu::INVALID_ARGUMENT;
         return report_wsi_contract(
             context:        context,
             public_fault:   guard_fault,
-            rejected_field: wrong_completion
-                ? "render_completion"
-                : "acquired image readiness",
-            invariant:      wrong_completion
-                ? "must be returned by the readiness-consuming submission"
-                : "must match the pending acquisition after readiness submission",
+            rejected_field: "acquired image readiness",
+            invariant:      "must match the pending acquisition after readiness submission",
         )~;
     }
     if (image.index != slot.pending_image
         || image.texture != slot.textures[slot.pending_image]) {
-        return report_wsi_contract(
-            context:        context,
-            public_fault:   gpu::INVALID_ARGUMENT,
-            rejected_field: "AcquiredImage",
-            invariant:      "must match the current acquired swapchain image",
-        )~;
+        abort("gpu: mismatched AcquiredImage");
     }
 }

@@ -26,7 +26,7 @@ fn void direct_command_tokens_fit_two_machine_words() @test {
 fn void discard_consumes_recording_and_executable_lists() @test {
     gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
 
     gpu::CommandList recording = gpu::begin_commands(&allocator)!!;
@@ -56,7 +56,7 @@ fn void copy_upload_to_readback() @test {
     };
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
 
@@ -79,7 +79,7 @@ fn void copy_upload_to_readback() @test {
 
     gpu::GpuSpan up_span = upload.span;
     gpu::GpuSpan rb_span = readback.span;
-    char[] up_mapping = gpu::get_span_mapping(&device, up_span)!!;
+    char[] up_mapping = gpu::get_span_mapping(&device, up_span);
     char* src = up_mapping.ptr;
     for (uint i = 0; i < 256; i++) src[i] = (char)i;
     gpu::flush_mapped_span(&device, upload.span)!!;
@@ -106,7 +106,7 @@ fn void copy_upload_to_readback() @test {
     gpu::wait_completion(completion, 1_000_000_000)!!;
 
     gpu::invalidate_mapped_span(&device, readback.span)!!;
-    char[] rb_mapping = gpu::get_span_mapping(&device, rb_span)!!;
+    char[] rb_mapping = gpu::get_span_mapping(&device, rb_span);
     char* dst = rb_mapping.ptr;
     for (uint i = 0; i < 256; i++) assert(dst[i] == (char)i, "readback byte matches uploaded byte");
 }
@@ -115,7 +115,7 @@ fn void empty_command_list_submits() @test {
     gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -135,7 +135,7 @@ fn void command_record_owns_its_device_token_value() @test {
     defer destroy_test_device(&device)!!;
 
     gpu::Device temporary = device;
-    gpu::Queue queue = gpu::get_queue(&temporary, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&temporary, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&temporary, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
@@ -155,9 +155,9 @@ fn void aliased_queue_roles_share_the_authoritative_queue() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
     gpu::Queue graphics =
-        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+        gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::Queue compute =
-        gpu::get_queue(&device, gpu::QueueKind.COMPUTE)!!;
+        gpu::get_queue(&device, gpu::QueueKind.COMPUTE);
     if (graphics != compute) return;
 
     gpu::CommandAllocator allocator =
@@ -179,7 +179,7 @@ fn void copied_alias_cannot_resubmit_after_success() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList original = gpu::begin_commands(&allocator)!!;
@@ -223,7 +223,7 @@ fn void command_generation_exhaustion_retires_slot() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList final_generation = gpu::begin_commands(&allocator)!!;
@@ -267,7 +267,7 @@ fn void duplicate_token_batch_rejects_without_consuming() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
@@ -296,7 +296,7 @@ fn void submit_duplicate_positions_preserve_batch() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity = BATCH_SIZE,
     };
@@ -355,7 +355,7 @@ fn void duplicate_fault_allows_subset_retry_and_remaining_discards() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::ExecutableCommandList[3] lists;
@@ -390,7 +390,7 @@ fn void submit_accepts_valid_batch_sizes() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity = MAX_BATCH_SIZE,
     };
@@ -422,7 +422,7 @@ fn void submit_epoch_rollover_clears_allocated_cells_once() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::ExecutableCommandList[3] lists;
@@ -481,7 +481,7 @@ fn void empty_submit_preserves_duplicate_epoch() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     vk::VkDeviceState* state =
         gpu::internal::device_slots[device.index].data.state;
     state.next_submit_visit_epoch = 73;
@@ -500,7 +500,7 @@ fn void simultaneous_devices_submit_independently() @test {
     gpu::Device second = create_test_device(&desc)!!;
     defer destroy_test_device(&second)!!;
 
-    gpu::Queue first_queue = gpu::get_queue(&first, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue first_queue = gpu::get_queue(&first, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator first_allocator = gpu::create_command_allocator(&first, first_queue)!!;
     gpu::CommandList first_cmd = gpu::begin_commands(&first_allocator)!!;
     defer discard_test_commands(&first_cmd)!!;
@@ -515,7 +515,7 @@ fn void simultaneous_devices_submit_independently() @test {
 
     assert(!gpu::get_device_caps(&second).presentation_enabled,
         "destroying one device leaves the other live");
-    gpu::Queue second_queue = gpu::get_queue(&second, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue second_queue = gpu::get_queue(&second, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator second_allocator = gpu::create_command_allocator(&second, second_queue)!!;
     defer gpu::destroy_command_allocator(&second_allocator)!!;
     gpu::CommandList second_cmd = gpu::begin_commands(&second_allocator)!!;
@@ -533,7 +533,7 @@ fn void discarded_command_buffer_is_reused_by_recording_owner() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList abandoned = gpu::begin_commands(&allocator)!!;
@@ -558,7 +558,7 @@ fn void submitted_command_buffer_recycles_at_completion() @test {
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
 
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
     gpu::CommandList commands = gpu::begin_commands(&allocator)!!;
@@ -585,7 +585,7 @@ fn void command_recording_requires_no_lifecycle_boundary() @test {
     gpu::RuntimeDesc desc = {};
     gpu::Device device = create_test_device(&desc)!!;
     defer destroy_test_device(&device)!!;
-    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue queue = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, queue)!!;
     defer gpu::destroy_command_allocator(&allocator)!!;
 
@@ -609,7 +609,7 @@ fn void mixed_allocators_submit_and_retire_to_exact_owners() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity = 1,
     };
@@ -686,7 +686,7 @@ fn void later_completion_observation_retires_multi_allocator_prefix_once() @test
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity = 1,
     };
@@ -760,7 +760,7 @@ fn void submit_uses_record_queue_without_allocator_queue_reproof() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.GRAPHICS,
-    )!!;
+    );
     gpu::CommandAllocator allocator = gpu::create_command_allocator(
         &device,
         queue,

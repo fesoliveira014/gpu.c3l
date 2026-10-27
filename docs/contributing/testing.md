@@ -81,6 +81,18 @@ for example `assert(table.find(stale) == null)`. A test that aborts by
 mistake can leave locks and device pins held, so read the first failure of a
 run, not the ones that follow.
 
+Argument rules are `@require` contracts and state rules are asserts, so a
+violation panics instead of returning a fault. Test a rule through its
+predicate (for example a `*_valid` function) rather than the public call, and
+test the faults that remain through inputs that still return them. The
+contract probe builds a consumer that violates one rule per case, at the
+default level and at `-O1`, and checks that the process panics with the
+contract message:
+
+```sh
+python3 -B -m unittest scripts.test_contract_probe -v
+```
+
 Compiler visibility and type checking define the public surface; there is no
 symbol inventory.
 
@@ -179,6 +191,7 @@ c3c build command_wrapper_bench --path test/cpu -O1
 c3c test unit --path test/cpu
 c3c test shader_abi --path test/cpu
 c3c test unit --path tools/gpu_shaders
+python3 -B -m unittest scripts.test_contract_probe
 python3 -B -m unittest scripts.test_build_shaders
 python3 scripts/build_shaders.py --check
 c3c build hello_gpu --path examples/getting_started

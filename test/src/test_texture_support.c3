@@ -196,8 +196,8 @@ fn void texture_mip_helpers_count_whole_blocks() @test {
 
     gpu::TextureDesc rgba = valid_texture_desc();
     rgba.mip_levels = 5;
-    assert(gpu::texture_mip_bytes(&rgba, 0)!! == 16 * 8 * 4
-            && gpu::texture_mip_bytes(&rgba, 4)!! == 4,
+    assert(gpu::texture_mip_bytes(&rgba, 0) == 16 * 8 * 4
+            && gpu::texture_mip_bytes(&rgba, 4) == 4,
         "uncompressed mips are texel counts times texel bytes");
 
     gpu::TextureDesc bc7 = valid_texture_desc();
@@ -205,9 +205,9 @@ fn void texture_mip_helpers_count_whole_blocks() @test {
     bc7.height = 18;
     bc7.mip_levels = 5;
     bc7.format = gpu::Format.BC7_SRGB;
-    assert(gpu::texture_mip_bytes(&bc7, 0)!! == 8 * 5 * 16
-            && gpu::texture_mip_bytes(&bc7, 2)!! == 2 * 1 * 16
-            && gpu::texture_mip_bytes(&bc7, 4)!! == 16,
+    assert(gpu::texture_mip_bytes(&bc7, 0) == 8 * 5 * 16
+            && gpu::texture_mip_bytes(&bc7, 2) == 2 * 1 * 16
+            && gpu::texture_mip_bytes(&bc7, 4) == 16,
         "block-compressed mips round every edge up to whole blocks");
 
     gpu::TextureDesc volume = valid_texture_desc();
@@ -215,14 +215,6 @@ fn void texture_mip_helpers_count_whole_blocks() @test {
     volume.height = 4;
     volume.depth = 4;
     volume.mip_levels = 3;
-    assert(gpu::texture_mip_bytes(&volume, 1)!! == 2 * 2 * 2 * 4,
+    assert(gpu::texture_mip_bytes(&volume, 1) == 2 * 2 * 2 * 4,
         "3D mips include every depth slice");
-
-    assert(@catch(gpu::texture_mip_bytes(&bc7, 5)) == gpu::INVALID_ARGUMENT,
-        "a mip past the chain faults");
-    bc7.format = gpu::Format.UNDEFINED;
-    assert(@catch(gpu::texture_mip_bytes(&bc7, 0)) == gpu::INVALID_ARGUMENT,
-        "an undefined format has no footprint");
-    assert(@catch(gpu::texture_mip_bytes(null, 0)) == gpu::INVALID_ARGUMENT,
-        "a null description faults");
 }

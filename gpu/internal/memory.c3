@@ -62,10 +62,41 @@ fn bool memory_class_is_known(MemoryClass memory_class) @private {
     }
 }
 
-fn usz? normalized_allocation_alignment(usz alignment) @private {
+fn bool allocation_alignment_valid(usz alignment) @private {
+    return (alignment & (alignment - 1)) == 0;
+}
+
+<* A non-TEXTURE class has no texture requirements; a TEXTURE class has at
+   least one, each sized, power-of-two aligned and carrying a complete
+   compatibility value. *>
+fn bool texture_requirements_valid(AllocationDesc* desc) @private {
+    if (desc.memory_class != MemoryClass.TEXTURE) {
+        return desc.texture_requirements.len == 0;
+    }
+    if (desc.texture_requirements.len == 0) return false;
+    if (desc.texture_requirements.ptr == null) return false;
+    foreach (&requirements : desc.texture_requirements) {
+        if (requirements.size == 0
+            || requirements.alignment == 0
+            || !allocation_alignment_valid(requirements.alignment)
+            || !requirements.compatibility.is_valid()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+fn bool allocation_covers_texture_requirements(AllocationDesc* desc) @private {
+    if (desc.texture_requirements.len > 0 && desc.texture_requirements.ptr == null) return false;
+    foreach (&requirements : desc.texture_requirements) {
+        if (desc.size < requirements.size) return false;
+    }
+    return true;
+}
+
+fn usz normalized_allocation_alignment(usz alignment) @private {
     const usz MIN_ALLOCATION_ALIGNMENT = 16;
     if (alignment == 0) return MIN_ALLOCATION_ALIGNMENT;
-    if ((alignment & (alignment - 1)) != 0) return gpu::INVALID_ARGUMENT~;
     return max(alignment, MIN_ALLOCATION_ALIGNMENT);
 }
 
@@ -75,22 +106,11 @@ fn void? validate_texture_allocation(
     usz* alignment,
     bool allow_dedicated = false,
 ) @private {
-    if (desc.memory_class != MemoryClass.TEXTURE) {
-        if (desc.texture_requirements.len != 0) return gpu::INVALID_ARGUMENT~;
-        return;
-    }
-    if (desc.texture_requirements.len == 0) return gpu::INVALID_ARGUMENT~;
+    if (desc.memory_class != MemoryClass.TEXTURE) return;
 
     uint compatibility = uint::max;
     foreach (&requirements : desc.texture_requirements) {
-        if (requirements.size == 0 || requirements.alignment == 0) {
-            return gpu::INVALID_ARGUMENT~;
-        }
         compatibility &= texture_compatibility_value(requirements.compatibility);
-        if ((requirements.alignment & (requirements.alignment - 1)) != 0
-            || !requirements.compatibility.is_valid()) {
-            return gpu::INVALID_ARGUMENT~;
-        }
         gpu::internal::validate_reported_resource_owner(
             operation:   operation,
             owner:       texture_compatibility_owner(requirements.compatibility),
@@ -100,24 +120,21 @@ fn void? validate_texture_allocation(
         if (requirements.dedicated_only && !allow_dedicated) {
             return gpu::UNSUPPORTED_FEATURE~;
         }
-        if (desc.size < requirements.size) return gpu::INVALID_ARGUMENT~;
         *alignment = max(*alignment, requirements.alignment);
     }
-    if (compatibility == 0) return gpu::INVALID_ARGUMENT~;
+    if (compatibility == 0) return gpu::UNSUPPORTED_FEATURE~;
 }
 
 <* Validation shared by `allocate_memory` and `allocate_mapped_allocation`.
 
-   @return "A normalized descriptor, or a recoverable invalid-argument or unsupported-feature fault." *>
+   @return "A normalized descriptor, or a recoverable unsupported-feature fault." *>
 fn AllocationDesc? validated_allocation_desc(
     DeviceOperation* operation,
     AllocationDesc* desc,
 ) @private {
-    if (desc == null || desc.size == 0) return gpu::INVALID_ARGUMENT~;
-    if (!memory_class_is_known(desc.memory_class)) return gpu::INVALID_ARGUMENT~;
-    validate_queue_access(operation, desc.access)!;
+    validate_queue_access(operation, desc.access);
     AllocationDesc normalized = *desc;
-    normalized.alignment = normalized_allocation_alignment(desc.alignment)!;
+    normalized.alignment = normalized_allocation_alignment(desc.alignment);
     validate_texture_allocation(operation, desc, &normalized.alignment)!;
     return normalized;
 }
@@ -128,10 +145,10 @@ fn MappedGpuSpan? pinned_allocation_view(
     gpu::internal::vk::VkDeviceState* state,
     GpuAllocation allocation,
 ) @private {
-    GpuSpan span = gpu::internal::vk::vk_get_allocation_span(state, allocation)!;
-    char[] bytes = gpu::internal::vk::vk_get_span_mapping(state, span)!;
+    GpuSpan span = gpu::internal::vk::vk_get_allocation_span(state, allocation);
+    char[] bytes = gpu::internal::vk::vk_get_span_mapping(state, span);
     if (bytes.len != span.size) return gpu::BACKEND_ERROR~;
-    GpuAddress address = gpu::internal::vk::vk_get_span_address(state, span)!;
+    GpuAddress address = gpu::internal::vk::vk_get_span_address(state, span);
     return {
         .span    = span,
         .bytes   = bytes,
@@ -162,7 +179,7 @@ fn void discard_failed_mapped_allocation(
 <* Allocate a mapped class and borrow its complete span, mapping, and address
    under one device operation pin, so the create is transactional.
 
-   @return "Consistent borrowed views of the new allocation, or a recoverable invalid-argument, unsupported-feature, allocation, or backend fault." *>
+   @return "Consistent borrowed views of the new allocation, or a recoverable unsupported-feature, allocation, or backend fault." *>
 fn MappedGpuSpan? allocate_mapped_allocation(
     Device* device,
     AllocationDesc* desc,

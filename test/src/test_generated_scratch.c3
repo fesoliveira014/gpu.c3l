@@ -72,7 +72,7 @@ fn void generated_scratch_reservation_is_driver_compatible_and_bounded() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
-    )!!;
+    );
     gpu::GeneratedWorkReservationDesc reservation = {
         .pipeline              = pipeline,
         .kind                  = gpu::GeneratedWorkKind.DISPATCH,
@@ -216,7 +216,7 @@ fn void generated_scratch_replacement_capacity_and_allocator_isolation() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
-    )!!;
+    );
     gpu::GeneratedWorkReservationDesc reservation = {
         .pipeline              = pipeline,
         .kind                  = gpu::GeneratedWorkKind.DISPATCH,
@@ -378,7 +378,7 @@ fn void zero_size_generated_scratch_still_requires_reservation() @test {
     gpu::Queue queue = gpu::get_queue(
         &device,
         gpu::QueueKind.COMPUTE,
-    )!!;
+    );
     gpu::CommandAllocatorDesc allocator_desc = {
         .command_buffer_capacity = 1,
     };

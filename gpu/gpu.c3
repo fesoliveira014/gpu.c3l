@@ -174,13 +174,13 @@ fn bool Adapter.is_valid(self) => (ulong)self != 0;
 
 <* Return one borrowed adapter from this runtime-owned view.
    @param index : "Zero-based index within the view."
-   @return "A borrowed adapter valid until runtime destruction, or a recoverable range fault." *>
-fn Adapter? AdapterList.get(&self, uint index) {
+   @return "A borrowed adapter valid until runtime destruction."
+   @require self != null : "self must not be null"
+   @require index < self.count : "index must be less than the adapter count" *>
+fn Adapter AdapterList.get(&self, uint index) {
     gpu::internal::RuntimeData* data = gpu::internal::require_runtime(&self.runtime);
-    if (index >= self.count || index >= data.adapter_count || index > ushort::max) {
-        return INVALID_ARGUMENT~;
-    }
-    return (Adapter){
+    assert(index < data.adapter_count, "index must be less than the runtime adapter count");
+    return {
         .adapter_index      = (ushort)index,
         .runtime_index      = (ushort)self.runtime.index,
         .runtime_generation = self.runtime.generation,
@@ -207,9 +207,10 @@ fn bool Queue.equals(self, Queue other) @operator(==) {
    The descriptor is borrowed only for the call; callback user data must remain
    valid for every callback until runtime destruction.
    @param desc : "Borrowed runtime configuration."
-   @return "An owning runtime token, or a recoverable validation, initialization, or allocation fault." *>
+   @return "An owning runtime token, or a recoverable initialization or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::runtime_desc_valid(desc) : "desc capacities must not exceed MAX_SHADER_HEAP_CAPACITY and desc.pipeline_cache_data must have a pointer when nonempty" *>
 fn Runtime? create_runtime(RuntimeDesc* desc) {
-    gpu::internal::validate_runtime_desc(desc)!;
     return gpu::internal::vk::create_vk_runtime(desc);
 }
 
@@ -272,12 +273,15 @@ fn AdapterDiagnostics get_adapter_diagnostics(Adapter* adapter) {
 }
 
 <* Query semantic descriptor support without enabling device state.
-   `unmet_requirement` is a borrowed static label.
+   A requirement the adapter cannot meet is reported in the result, with
+   `unmet_requirement` as a borrowed static label. Ray queries and ray-tracing
+   pipelines need a nonzero `RuntimeDesc.acceleration_structure_heap_capacity`.
    @param adapter : "Borrowed adapter to evaluate."
    @param desc : "Borrowed requirements; null selects the zero-value defaults."
-   @return "The support result, or a recoverable invalid-argument fault." *>
+   @return "The support result, or a recoverable backend query fault."
+   @require gpu::internal::device_desc_valid(desc) : "desc.queues must be zero or a valid queue request that includes graphics when desc.surface is set" *>
 fn DeviceSupport? supports_device_desc(Adapter* adapter, DeviceDesc* desc = null) {
-    DeviceDesc normalized = gpu::internal::normalize_device_desc(desc)!;
+    DeviceDesc normalized = gpu::internal::normalize_device_desc(desc);
     gpu::internal::RuntimeData* data = gpu::internal::require_adapter(adapter);
     return gpu::internal::evaluate_device_desc_support(
         data,
@@ -332,12 +336,14 @@ fn DeviceCaps get_device_caps(Device* device) {
 
 <* Create a device from one exact borrowed adapter.
    The descriptor is borrowed only for the call. The caller owns the returned
-   token and releases it with `destroy_device`.
+   token and releases it with `destroy_device`. Ray queries and ray-tracing
+   pipelines need a nonzero `RuntimeDesc.acceleration_structure_heap_capacity`.
    @param adapter : "Borrowed adapter that owns the requested capabilities."
    @param desc : "Borrowed semantic requirements; null selects the documented defaults."
-   @return "An owning device token, or a recoverable support, capacity, allocation, or backend fault." *>
+   @return "An owning device token, or a recoverable support, capacity, allocation, or backend fault."
+   @require gpu::internal::device_desc_valid(desc) : "desc.queues must be zero or a valid queue request that includes graphics when desc.surface is set" *>
 fn Device? create_device(Adapter* adapter, DeviceDesc* desc = null) {
-    DeviceDesc normalized = gpu::internal::normalize_device_desc(desc)!;
+    DeviceDesc normalized = gpu::internal::normalize_device_desc(desc);
     gpu::internal::RuntimeData* runtime_data = gpu::internal::require_adapter(adapter);
     DeviceSupport support = gpu::internal::evaluate_device_desc_support(
         data:                 runtime_data,
@@ -445,15 +451,16 @@ fn void? destroy_device(Device* device) {
 }
 
 <* Return a device-owned queue identity for a semantic role. Aliased roles
-   return the same token. A dead device terminates; an unavailable
-   role faults INVALID_ARGUMENT. The token remains valid while the device is live.
+   return the same token. A dead device terminates. `kind` must be a role the
+   device exposes, as listed in `DeviceCaps.queues`. The token remains valid
+   while the device is live.
    @param device : "Live device whose selected queue is queried."
-   @param kind : "Semantic queue role."
-   @return "A device-owned queue token, or a recoverable unavailable-role fault." *>
-fn Queue? get_queue(Device* device, QueueKind kind) {
+   @param kind : "Semantic queue role the device exposes."
+   @return "A device-owned queue token." *>
+fn Queue get_queue(Device* device, QueueKind kind) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    gpu::internal::validate_selected_queue_kind(&operation, kind)!;
+    gpu::internal::validate_selected_queue_kind(&operation, kind);
     return {
         .device = *device,
         .id     = gpu::internal::selected_queue_id(&operation, kind),
@@ -499,12 +506,11 @@ fn GpuSpan GpuSpan.unchecked_subspan(self, usz offset, usz size) {
    The returned view inherits the allocation lifetime.
    @param offset : "Byte offset relative to this span."
    @param size : "Nonzero byte size of the derived span."
-   @return "A non-owning subspan, or a recoverable range or overflow fault." *>
-fn GpuSpan? GpuSpan.checked_subspan(self, usz offset, usz size) {
-    if (size == 0 || !gpu::internal::range_fits(self.size, offset, size)) {
-        return INVALID_ARGUMENT~;
-    }
-    if (offset > usz::max - self.offset) return INVALID_ARGUMENT~;
+   @return "A non-owning subspan."
+   @require size > 0 : "size must be greater than 0"
+   @require offset <= self.size && size <= self.size - offset : "offset + size must not exceed the span size"
+   @require offset <= usz::max - self.offset : "offset must not overflow the span base offset" *>
+fn GpuSpan GpuSpan.subspan(self, usz offset, usz size) {
     return self.unchecked_subspan(offset, size);
 }
 
@@ -521,13 +527,14 @@ fn GpuAllocation GpuSpan.allocation(self) {
    `char`.
    @param offset : "Byte offset relative to this mapped span."
    @param size : "Nonzero byte size of the derived mapped span."
-   @return "A consistent non-owning mapped subspan, or a recoverable invalid-argument range, representation, or address-overflow fault." *>
-fn MappedGpuSpan? MappedGpuSpan.checked_subspan(self, usz offset, usz size) {
-    if (self.bytes.len != self.span.size) return INVALID_ARGUMENT~;
-    GpuSpan child = self.span.checked_subspan(offset, size)!;
-    if ((ulong)offset > ulong::max - (ulong)self.address) {
-        return INVALID_ARGUMENT~;
-    }
+   @return "A consistent non-owning mapped subspan."
+   @require self.bytes.len == self.span.size : "bytes.len must equal span.size"
+   @require size > 0 : "size must be greater than 0"
+   @require offset <= self.span.size && size <= self.span.size - offset : "offset + size must not exceed the span size"
+   @require offset <= usz::max - self.span.offset : "offset must not overflow the span base offset"
+   @require (ulong)offset <= ulong::max - (ulong)self.address : "offset must not overflow the mapped GPU address" *>
+fn MappedGpuSpan MappedGpuSpan.subspan(self, usz offset, usz size) {
+    GpuSpan child = self.span.unchecked_subspan(offset, size);
     return {
         .span    = child,
         .bytes   = self.bytes[offset : size],
@@ -548,9 +555,18 @@ fn bool TextureCompatibility.is_valid(self) {
 <* Allocate caller-managed GPU storage.
    The descriptor is borrowed only for the call. The caller owns the returned
    allocation and frees it with `free_allocation` after GPU use is quiescent.
+   `desc.access` must name only queue roles the device selected; a violation
+   panics in safe builds.
    @param device : "Live device that will own the allocation."
    @param desc : "Borrowed size, memory-class, access, alignment, and debug-name description."
-   @return "An owning allocation token, or a recoverable invalid-argument, unsupported-feature, capacity, allocation, or backend fault." *>
+   @return "An owning allocation token, or a recoverable unsupported-feature, capacity, allocation, or backend fault."
+   @require desc != null : "desc must not be null"
+   @require desc.size > 0 : "desc.size must be greater than 0"
+   @require gpu::internal::memory_class_is_known(desc.memory_class) : "desc.memory_class must be a defined MemoryClass"
+   @require gpu::internal::allocation_alignment_valid(desc.alignment) : "desc.alignment must be zero or a power of two"
+   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles"
+   @require gpu::internal::texture_requirements_valid(desc) : "desc.texture_requirements must be empty unless desc.memory_class is TEXTURE, which needs at least one requirement with nonzero size, a power-of-two alignment and a complete compatibility value"
+   @require gpu::internal::allocation_covers_texture_requirements(desc) : "desc.size must cover every texture requirement" *>
 fn GpuAllocation? allocate_memory(Device* device, AllocationDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -602,10 +618,12 @@ fn AllocationInfo get_allocation_info(Device* device, GpuAllocation allocation) 
 
 <* Borrow the allocation's complete range.
    The returned non-owning span remains valid only while the allocation is live.
+   The allocation must not be texture memory (`MemoryClass.TEXTURE`); a
+   violation panics in safe builds.
    @param device : "Live device that owns the allocation."
-   @param allocation : "Allocation whose complete range is borrowed."
-   @return "A non-owning span, or a recoverable invalid-argument fault." *>
-fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
+   @param allocation : "Buffer allocation whose complete range is borrowed."
+   @return "A non-owning span." *>
+fn GpuSpan get_allocation_span(Device* device, GpuAllocation allocation) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_resource_owner(
@@ -618,10 +636,13 @@ fn GpuSpan? get_allocation_span(Device* device, GpuAllocation allocation) {
 
 <* Borrow the CPU mapping for a live host-visible span.
    The slice inherits the allocation lifetime; callers synchronize CPU access.
+   The span must be nonempty, lie within its buffer allocation, and belong to a
+   host-mapped class; a violation panics in safe builds.
    @param device : "Live device that owns the span."
    @param span : "Non-owning host-visible allocation range."
-   @return "A borrowed mapped byte slice, or a recoverable mapping or range fault." *>
-fn char[]? get_span_mapping(Device* device, GpuSpan span) {
+   @return "A borrowed mapped byte slice."
+   @require span.size > 0 : "span.size must be greater than 0" *>
+fn char[] get_span_mapping(Device* device, GpuSpan span) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_span_mapping(operation.state, span);
@@ -629,10 +650,13 @@ fn char[]? get_span_mapping(Device* device, GpuSpan span) {
 
 <* Return the stable nonzero address of a live span.
    The address inherits the allocation lifetime.
+   The span must be nonempty and lie within its buffer allocation; a violation
+   panics in safe builds.
    @param device : "Live device that owns the span."
    @param span : "Non-owning allocation range."
-   @return "The span's GPU address, or a recoverable range fault." *>
-fn GpuAddress? get_span_address(Device* device, GpuSpan span) {
+   @return "The span's GPU address."
+   @require span.size > 0 : "span.size must be greater than 0" *>
+fn GpuAddress get_span_address(Device* device, GpuSpan span) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     return gpu::internal::vk::vk_get_span_address(operation.state, span);
@@ -641,14 +665,17 @@ fn GpuAddress? get_span_address(Device* device, GpuSpan span) {
 <* Borrow consistent CPU and GPU views of a live host-visible span.
    The mapping and address are independent public queries; the caller must keep
    the owning allocation live for the complete call and result lifetime. The
-   result performs no synchronization.
+   result performs no synchronization. The span must be nonempty, lie within
+   its buffer allocation, and belong to a host-mapped class; a violation
+   panics in safe builds.
    @param device : "Live device that owns the span."
    @param span : "Non-owning host-visible allocation range."
-   @return "Consistent borrowed views, or a recoverable fault from the public mapping or address query." *>
+   @return "Consistent borrowed views, or a recoverable backend fault if the mapping does not cover the span."
+   @require span.size > 0 : "span.size must be greater than 0" *>
 fn MappedGpuSpan? mapped_gpu_span(Device* device, GpuSpan span) {
-    char[] bytes = get_span_mapping(device, span)!;
+    char[] bytes = get_span_mapping(device, span);
     if (bytes.len != span.size) return BACKEND_ERROR~;
-    GpuAddress address = get_span_address(device, span)!;
+    GpuAddress address = get_span_address(device, span);
     return {
         .span    = span,
         .bytes   = bytes,
@@ -657,26 +684,32 @@ fn MappedGpuSpan? mapped_gpu_span(Device* device, GpuSpan span) {
 }
 
 <* Allocate a mapped class and borrow its complete span, mapping, and address.
-   A class without a host mapping faults before any allocation. Free with
-   `free_allocation` on `span.allocation()`.
+   `desc.memory_class` must be a host-mapped class, never `GPU_PRIVATE` or
+   `TEXTURE`, and `desc.access` must name only queue roles the device selected;
+   a violation panics in safe builds. Free with `free_allocation` on `span.allocation()`.
    @param device : "Live device that will own the allocation."
    @param desc : "Borrowed allocation description with a mapped memory class."
-   @return "Consistent borrowed views of the new allocation, or a recoverable invalid-argument, access, or allocation fault. A failed view frees the allocation and returns the view fault; a rollback that cannot free the allocation is unrecoverable and panics after reporting the allocation as abandoned." *>
+   @return "Consistent borrowed views of the new allocation, or a recoverable unsupported-feature or allocation fault. A failed view frees the allocation and returns the view fault; a rollback that cannot free the allocation is unrecoverable and panics after reporting the allocation as abandoned."
+   @require desc != null : "desc must not be null"
+   @require desc.size > 0 : "desc.size must be greater than 0"
+   @require desc.memory_class != MemoryClass.GPU_PRIVATE && desc.memory_class != MemoryClass.TEXTURE : "desc.memory_class must be a host-mapped class"
+   @require gpu::internal::memory_class_is_known(desc.memory_class) : "desc.memory_class must be a defined MemoryClass"
+   @require gpu::internal::allocation_alignment_valid(desc.alignment) : "desc.alignment must be zero or a power of two"
+   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles"
+   @require desc.texture_requirements.len == 0 : "desc.texture_requirements must be empty for a host-mapped class" *>
 fn MappedGpuSpan? allocate_mapped_memory(Device* device, AllocationDesc* desc) {
-    if (desc == null) return INVALID_ARGUMENT~;
-    if (desc.memory_class == MemoryClass.GPU_PRIVATE
-        || desc.memory_class == MemoryClass.TEXTURE) {
-        return INVALID_ARGUMENT~;
-    }
     return gpu::internal::allocate_mapped_allocation(device, desc);
 }
 
 <* Make CPU writes to a live mapped allocation range visible to the GPU.
    Required unless `AllocationInfo.coherent` is true; coherent ranges are
-   no-ops. This call does not submit or wait.
+   no-ops. This call does not submit or wait. The span must be nonempty, lie
+   within its buffer allocation, and belong to a host-mapped class; a
+   violation panics in safe builds.
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose CPU writes become visible."
-   @return "Success, or a recoverable mapping or range fault." *>
+   @return "Success, or a recoverable backend fault."
+   @require span.size > 0 : "span.size must be greater than 0" *>
 fn void? flush_mapped_span(Device* device, GpuSpan span) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -690,10 +723,13 @@ fn void? flush_mapped_span(Device* device, GpuSpan span) {
 
 <* After the relevant GPU completion point, make its writes visible to CPU
    reads. Required unless `AllocationInfo.coherent` is true; coherent ranges
-   are no-ops. This call does not wait.
+   are no-ops. This call does not wait. The span must be nonempty, lie within
+   its buffer allocation, and belong to a host-mapped class; a violation
+   panics in safe builds.
    @param device : "Live device that owns the span."
    @param span : "Mapped range whose GPU writes become visible."
-   @return "Success, or a recoverable mapping or range fault." *>
+   @return "Success, or a recoverable backend fault."
+   @require span.size > 0 : "span.size must be greater than 0" *>
 fn void? invalidate_mapped_span(Device* device, GpuSpan span) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -744,31 +780,29 @@ fn uint texture_mip_dimension(uint size, uint mip) {
    whole blocks per row, block rows per slice, 3D slices back to back.
    @param desc : "Borrowed texture description."
    @param mip : "Zero-based mip level below the description's mip count."
-   @return "The byte footprint, or INVALID_ARGUMENT for a null or undefined-format description or a missing mip." *>
-fn usz? texture_mip_bytes(TextureDesc* desc, uint mip) {
+   @return "The byte footprint."
+   @require desc != null : "desc must not be null"
+   @require mip < gpu::internal::texture_mip_levels(desc) : "mip must be below the description's mip count"
+   @require gpu::internal::format_aspect_block(desc.format, TextureAspect.AUTO).bytes != 0 : "desc.format must be defined and must not be a combined depth-stencil format" *>
+fn usz texture_mip_bytes(TextureDesc* desc, uint mip) {
     return texture_mip_aspect_bytes(desc, mip, TextureAspect.AUTO);
 }
 
 <* Tightly packed bytes of one aspect of one array layer of a mip. The depth
    aspect of a combined format is 4 bytes per texel and stencil is 1; `AUTO`
-   faults for a combined format.
+   must not be used with a combined format.
    @param desc : "Borrowed texture description."
    @param mip : "Zero-based mip level below the description's mip count."
    @param aspect : "Aspect to size; AUTO for single-aspect formats."
-   @return "The byte footprint, or INVALID_ARGUMENT for a null description, a missing mip, or an aspect the format cannot select." *>
-fn usz? texture_mip_aspect_bytes(TextureDesc* desc, uint mip, TextureAspect aspect) {
-    if (desc == null || mip >= gpu::internal::texture_mip_levels(desc)) {
-        return INVALID_ARGUMENT~;
-    }
-    if (!gpu::internal::texture_aspect_valid(aspect)) return INVALID_ARGUMENT~;
-    if (aspect == TextureAspect.DEPTH && !gpu::internal::format_has_depth(desc.format)) {
-        return INVALID_ARGUMENT~;
-    }
-    if (aspect == TextureAspect.STENCIL && !gpu::internal::format_has_stencil(desc.format)) {
-        return INVALID_ARGUMENT~;
-    }
+   @return "The byte footprint."
+   @require desc != null : "desc must not be null"
+   @require mip < gpu::internal::texture_mip_levels(desc) : "mip must be below the description's mip count"
+   @require gpu::internal::texture_aspect_valid(aspect) : "aspect must be a defined TextureAspect"
+   @require aspect != TextureAspect.DEPTH || gpu::internal::format_has_depth(desc.format) : "aspect DEPTH needs desc.format with depth"
+   @require aspect != TextureAspect.STENCIL || gpu::internal::format_has_stencil(desc.format) : "aspect STENCIL needs desc.format with stencil"
+   @require gpu::internal::format_aspect_block(desc.format, aspect).bytes != 0 : "desc.format must be defined and AUTO must not be used for a combined depth-stencil format" *>
+fn usz texture_mip_aspect_bytes(TextureDesc* desc, uint mip, TextureAspect aspect) {
     gpu::internal::FormatBlock block = gpu::internal::format_aspect_block(desc.format, aspect);
-    if (block.bytes == 0) return INVALID_ARGUMENT~;
     usz row_blocks = ((usz)texture_mip_dimension(desc.width, mip) + block.width - 1)
         / block.width;
     usz block_rows = ((usz)texture_mip_dimension(desc.height, mip) + block.height - 1)
@@ -797,11 +831,11 @@ fn TextureFormatSupport? get_texture_format_support(Device* device, Format forma
    This checks capabilities only; allocation can still fail for lack of memory.
    @param device : "Live device to query."
    @param desc : "Borrowed exact texture description."
-   @return "Whether the descriptor is supported, or a recoverable invalid-argument fault." *>
+   @return "Whether the descriptor is supported, or a recoverable backend query fault."
+   @require desc != null : "desc must not be null" *>
 fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     if (!gpu::internal::queue_access_is_valid(&operation, desc.access)) return false;
     return gpu::internal::vk::vk_supports_texture_desc(operation.state, desc);
 }
@@ -809,12 +843,14 @@ fn bool? supports_texture_desc(Device* device, TextureDesc* desc) {
 <* Return exact storage requirements for a texture descriptor.
    @param device : "Live device to query."
    @param desc : "Borrowed texture description."
-   @return "Placement requirements, or a recoverable validation or unsupported-feature fault." *>
+   @return "Placement requirements, or a recoverable unsupported-feature or backend fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles"
+   @require gpu::internal::texture_desc_valid(desc) : "desc must have nonzero width and height, a mip chain no longer than the full chain, a supported format, at least one usage, a defined sample count, and valid multisample, 3D, cube, depth and block-compressed combinations" *>
 fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
-    gpu::internal::validate_queue_access(&operation, desc.access)!;
+    gpu::internal::validate_queue_access(&operation, desc.access);
     return gpu::internal::vk::vk_get_texture_requirements(operation.state, desc);
 }
 
@@ -824,12 +860,14 @@ fn TextureRequirements? get_texture_requirements(Device* device, TextureDesc* de
    `destroy_texture`.
    @param device : "Live device that will own the texture."
    @param desc : "Borrowed texture description."
-   @return "An owning texture handle, or a recoverable validation, support, capacity, or allocation fault." *>
+   @return "An owning texture handle, or a recoverable support, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles"
+   @require gpu::internal::texture_desc_valid(desc) : "desc must have nonzero width and height, a mip chain no longer than the full chain, a supported format, at least one usage, a defined sample count, and valid multisample, 3D, cube, depth and block-compressed combinations" *>
 fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
-    gpu::internal::validate_queue_access(&operation, desc.access)!;
+    gpu::internal::validate_queue_access(&operation, desc.access);
     TextureHandle texture =
         gpu::internal::vk::vk_create_texture(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
@@ -838,11 +876,18 @@ fn TextureHandle? create_texture(Device* device, TextureDesc* desc) {
 
 <* Create a texture in caller-owned texture memory.
    The texture borrows the placement allocation, which must outlive it.
+   `offset` must be a multiple of the texture's required alignment, and the
+   allocation must be non-dedicated texture memory with enough alignment and
+   access, compatible with the texture, hold the range at `offset`, and not
+   overlap another placed texture; a violation panics in safe builds.
    @param device : "Live device that owns the placement allocation."
    @param desc : "Borrowed texture description."
    @param allocation : "Caller-owned compatible texture-memory allocation."
    @param offset : "Aligned byte offset within the allocation."
-   @return "An owning texture handle, or a recoverable validation, compatibility, overlap, or capacity fault." *>
+   @return "An owning texture handle, or a recoverable support, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles"
+   @require gpu::internal::texture_desc_valid(desc) : "desc must have nonzero width and height, a mip chain no longer than the full chain, a supported format, at least one usage, a defined sample count, and valid multisample, 3D, cube, depth and block-compressed combinations" *>
 fn TextureHandle? create_placed_texture(
     Device* device,
     TextureDesc* desc,
@@ -851,8 +896,7 @@ fn TextureHandle? create_placed_texture(
 ) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
-    gpu::internal::validate_queue_access(&operation, desc.access)!;
+    gpu::internal::validate_queue_access(&operation, desc.access);
     gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
@@ -871,27 +915,34 @@ fn TextureHandle? create_placed_texture(
 <* Create a texture and independently owned dedicated storage atomically.
    Both descriptors are borrowed only for the call. On success the caller owns
    both returned tokens and destroys the texture before freeing the allocation.
+   `allocation_desc.size` must equal the texture's requirements and its
+   alignment must cover them, and the texture's memory types must intersect
+   those of `allocation_desc.texture_requirements`; a violation panics in safe
+   builds.
    @param device : "Live device that will own both resources."
    @param desc : "Borrowed texture description."
    @param allocation_desc : "Borrowed compatible dedicated-allocation description."
-   @return "The owning texture and allocation pair, or a recoverable validation, support, capacity, or allocation fault." *>
+   @return "The owning texture and allocation pair, or a recoverable support, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles"
+   @require gpu::internal::texture_desc_valid(desc) : "desc must have nonzero width and height, a mip chain no longer than the full chain, a supported format, at least one usage, a defined sample count, and valid multisample, 3D, cube, depth and block-compressed combinations"
+   @require allocation_desc != null : "allocation_desc must not be null"
+   @require allocation_desc.memory_class == MemoryClass.TEXTURE : "allocation_desc.memory_class must be TEXTURE"
+   @require allocation_desc.size > 0 : "allocation_desc.size must be greater than 0"
+   @require gpu::internal::allocation_alignment_valid(allocation_desc.alignment) : "allocation_desc.alignment must be zero or a power of two"
+   @require gpu::internal::queue_access_shape_valid(allocation_desc.access) : "allocation_desc.access must be nonzero and name only known queue roles"
+   @require gpu::internal::texture_requirements_valid(allocation_desc) : "allocation_desc.texture_requirements must be nonempty with nonzero sizes, power-of-two alignments and complete compatibility values"
+   @require gpu::internal::allocation_covers_texture_requirements(allocation_desc) : "allocation_desc.size must cover every texture requirement"
+   @require gpu::internal::queue_roles_are_subset(desc.access, allocation_desc.access) : "desc.access must be a subset of allocation_desc.access" *>
 fn DedicatedTexture? create_dedicated_texture(Device* device, TextureDesc* desc, AllocationDesc* allocation_desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null || allocation_desc == null
-        || allocation_desc.size == 0
-        || allocation_desc.memory_class != MemoryClass.TEXTURE) {
-        return INVALID_ARGUMENT~;
-    }
-    gpu::internal::validate_queue_access(&operation, desc.access)!;
-    gpu::internal::validate_queue_access(&operation, allocation_desc.access)!;
-    if (!gpu::internal::queue_roles_are_subset(desc.access, allocation_desc.access)) {
-        return INVALID_ARGUMENT~;
-    }
+    gpu::internal::validate_queue_access(&operation, desc.access);
+    gpu::internal::validate_queue_access(&operation, allocation_desc.access);
     AllocationDesc normalized = *allocation_desc;
     normalized.alignment = gpu::internal::normalized_allocation_alignment(
         allocation_desc.alignment,
-    )!;
+    );
     gpu::internal::validate_texture_allocation(
         operation:       &operation,
         desc:            allocation_desc,
@@ -910,9 +961,11 @@ fn DedicatedTexture? create_dedicated_texture(Device* device, TextureDesc* desc,
 <* Destroy a texture after its descriptors and command use complete.
    Always checked: live identity, ownership, and detected dependents.
    Runtime failures: faults preserve the handle; placed storage stays caller-owned.
+   A swapchain-owned texture must not be destroyed; a violation panics in safe
+   builds.
    @param device : "Live device that owns the texture."
    @param texture : "Owning texture handle to destroy. The zero handle is a no-op."
-   @return "Success, or a recoverable in-use, invalid-argument (swapchain-owned texture), or backend fault." *>
+   @return "Success, or a recoverable in-use or backend fault." *>
 fn void? destroy_texture(Device* device, TextureHandle texture) {
     if (texture == (TextureHandle){}) return;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
@@ -922,13 +975,19 @@ fn void? destroy_texture(Device* device, TextureHandle texture) {
     gpu::internal::release_device_children(&operation);
 }
 
-<* Publish one texture view in the shader-visible heap. The texture must carry
-   sampled or storage usage. The returned
+<* Publish one texture view in the shader-visible heap. The returned
    owner-bearing view contains the raw generation-free index stored in shader data.
+   The texture must carry sampled or storage usage, the view range must lie
+   inside the texture, a cube view needs a cube-compatible sampled texture and
+   exactly six layers, and a combined depth-stencil texture needs a description
+   that selects one aspect. A `DEPTH` or `STENCIL` aspect must name an aspect the
+   format has. These rules read texture state, so a violation panics in safe
+   builds.
    @param device : "Live device that owns the texture."
    @param texture : "Texture whose subresources are exposed."
    @param desc : "Borrowed view description; null selects the full default view."
-   @return "An owning view token, or a recoverable validation, capacity, or allocation fault." *>
+   @return "An owning view token, or a recoverable capacity or allocation fault."
+   @require gpu::internal::texture_view_desc_valid(desc) : "desc.aspect must be a defined TextureAspect and the end of desc's mip and layer ranges must not overflow" *>
 fn TextureView? create_texture_view(Device* device, TextureHandle texture, TextureViewDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -942,23 +1001,18 @@ fn TextureView? create_texture_view(Device* device, TextureHandle texture, Textu
 <* Batch-publish texture views.
    `out_views.len` must equal `descs.len`; an empty batch succeeds. A fault leaves
    heap allocation, generations, cached native views, and outputs unchanged.
+   Every texture must carry sampled or storage usage, and each view must satisfy
+   the rules of `create_texture_view`; those rules read texture state, so a
+   violation panics in safe builds.
    @param device : "Live device that owns every input texture."
    @param descs : "Borrowed batch of texture and view descriptions."
    @param out_views : "Caller-owned output slice with exactly the input length."
-   @return "Success, or a recoverable validation, capacity, or allocation fault." *>
+   @return "Success, or a recoverable capacity or allocation fault."
+   @require out_views.len == descs.len : "out_views.len must equal descs.len"
+   @require gpu::internal::texture_view_create_descs_valid(descs) : "descs[].view.aspect must be a defined TextureAspect and the end of each mip and layer range must not overflow" *>
 fn void? create_texture_views(Device* device, TextureViewCreateDesc[] descs, TextureView[] out_views) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (out_views.len != descs.len) {
-        return gpu::internal::report_device_contract_failure(
-            operation:      &operation,
-            operation_name: "create_texture_views",
-            public_fault:   INVALID_ARGUMENT,
-            resource_kind:  DebugResourceKind.TEXTURE_DESCRIPTOR,
-            rejected_field: "out_views",
-            invariant:      "output count must match descriptor count",
-        )~;
-    }
     if (descs.len == 0) return;
     foreach (&desc : descs) {
         gpu::internal::validate_resource_owner(
@@ -998,22 +1052,25 @@ fn void destroy_texture_view(Device* device, TextureView view) {
    top of the heap; the general region ends where reservations begin.
    @param device : "Live device that owns the heap."
    @param count : "Nonzero number of slots."
-   @return "The reserved range, or a recoverable invalid-argument or capacity fault." *>
+   @return "The reserved range, or a recoverable capacity fault."
+   @require count > 0 : "count must be greater than 0" *>
 fn TextureIndexRange? reserve_texture_indices(Device* device, uint count) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (count == 0) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_reserve_texture_indices(operation.state, count);
 }
 
-<* Release a whole reservation. Every slot must be empty. Releasing the lowest
+<* Release a whole reservation. Every slot must be empty. The range must lie
+   inside the reserved region and every slot in it must be reserved; those rules
+   read heap state, so a violation panics in safe builds. Releasing the lowest
    reservation returns it and any released reservations above it to the
    general region; releasing a higher one leaves a hole until those below go.
    A slot whose generation is exhausted stays reserved and out of both
    regions.
    @param device : "Live device that owns the heap."
    @param range : "A range returned by `reserve_texture_indices`. The zero handle is a no-op."
-   @return "Success, or a recoverable invalid-argument or in-use fault." *>
+   @return "Success, or a recoverable in-use fault."
+   @require (range.count == 0) == !range.base.is_valid() : "range must be the zero value or have a valid base and a nonzero count" *>
 fn void? release_texture_indices(Device* device, TextureIndexRange range) {
     if (range.count == 0 && !range.base.is_valid()) return;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
@@ -1021,13 +1078,17 @@ fn void? release_texture_indices(Device* device, TextureIndexRange range) {
     return gpu::internal::vk::vk_release_texture_indices(operation.state, range);
 }
 
-<* Publish a view into one reserved slot. Same validation and hazard rule as
-   `create_texture_view`; the returned index equals `slot`.
+<* Publish a view into one reserved slot. Same rules and hazard rule as
+   `create_texture_view`; the returned index equals `slot`. The slot must lie
+   inside a live reservation; that rule reads heap state, so a violation panics
+   in safe builds.
    @param device : "Live device that owns the texture."
    @param slot : "A slot inside a live reservation."
    @param texture : "Texture whose subresources are exposed."
    @param desc : "Borrowed view description; null selects the full default view."
-   @return "An owning view token, or a recoverable invalid-argument, in-use, or allocation fault." *>
+   @return "An owning view token, or a recoverable in-use or allocation fault."
+   @require slot.is_valid() : "slot must be a valid TextureIndex"
+   @require gpu::internal::texture_view_desc_valid(desc) : "desc.aspect must be a defined TextureAspect and the end of desc's mip and layer ranges must not overflow" *>
 fn TextureView? create_texture_view_at(Device* device, TextureIndex slot, TextureHandle texture, TextureViewDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -1042,14 +1103,18 @@ fn TextureView? create_texture_view_at(Device* device, TextureIndex slot, Textur
     return view;
 }
 
-<* Rewrite the descriptor behind a live view without changing its index.
+<* Rewrite the descriptor behind a live view without changing its index. The
+   texture and description follow the rules of `create_texture_view`: sampled or
+   storage usage, a range inside the texture, cube and aspect rules; a violation
+   panics in safe builds.
    The token is rewritten with a new generation; older copies are stale. The
    slot must not be read by executing commands.
    @param device : "Live device that owns the view."
    @param view : "Live view token, rewritten on success."
    @param texture : "Texture the slot will expose."
    @param desc : "Borrowed view description; null selects the full default view."
-   @return "Success, or a recoverable capacity or allocation fault." *>
+   @return "Success, or a recoverable capacity or allocation fault."
+   @require gpu::internal::texture_view_desc_valid(desc) : "desc.aspect must be a defined TextureAspect and the end of desc's mip and layer ranges must not overflow" *>
 fn void? update_texture_view(Device* device, TextureView* view, TextureHandle texture, TextureViewDesc* desc) {
     if (view == null) abort("gpu: null TextureView");
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
@@ -1068,24 +1133,28 @@ fn void? update_texture_view(Device* device, TextureView* view, TextureHandle te
    Creation binds no memory; sparse page allocations remain caller-owned.
    @param device : "Live sparse-enabled device that will own the texture."
    @param desc : "Borrowed sparse texture description."
-   @return "An owning texture handle, or a recoverable validation, support, capacity, or allocation fault." *>
+   @return "An owning texture handle, or a recoverable support, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::sparse_texture_desc_valid(desc) : "desc must be a valid single-layer, uncompressed, non-depth texture description with no attachment usage"
+   @require gpu::internal::queue_access_shape_valid(desc.access) : "desc.access must be nonzero and name only known queue roles" *>
 fn TextureHandle? create_sparse_texture(Device* device, TextureDesc* desc) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
-    gpu::internal::validate_queue_access(&operation, desc.access)!;
+    gpu::internal::validate_queue_access(&operation, desc.access);
     TextureHandle texture =
         gpu::internal::vk::vk_create_sparse_texture(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
     return texture;
 }
 
-<* Return the immutable requirements cached for a live sparse texture.
+<* Return the immutable requirements cached for a live sparse texture. The
+   texture must have been created by `create_sparse_texture`; that rule reads
+   texture state, so a violation panics in safe builds.
    @param device : "Live device that owns the texture."
    @param texture : "Live sparse texture handle."
-   @return "The cached requirements, or a recoverable argument fault." *>
-fn SparseTextureRequirements? get_sparse_texture_requirements(Device* device, TextureHandle texture) {
+   @return "The cached requirements." *>
+fn SparseTextureRequirements get_sparse_texture_requirements(Device* device, TextureHandle texture) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -1107,14 +1176,31 @@ fn SparseTextureRequirements? get_sparse_texture_requirements(Device* device, Te
    live through completion and keeps resident bytes exclusive until an ordered
    unbind or replacement and every prior GPU user complete. The library retains
    no residency map. The caller externally synchronizes submit, present, and
-   sparse-bind host calls on the same native queue, including aliased roles. *>
+   sparse-bind host calls on the same native queue, including aliased roles.
+   The queue must be a sparse-binding queue named by
+   `DeviceCaps.sparse_textures.binding_queues` and `desc.texture` must be a
+   sparse texture. Tile binds must target mips below the aspect's
+   `mip_tail_first_lod`, be tile-aligned and inside the mip extent, end
+   partial tiles at the mip edge, and use z offset 0 and z extent 1 on 2D
+   textures. Opaque binds must name an aspect listed in the texture's sparse
+   requirements, be page-aligned, and lie inside that aspect's mip tail. Each
+   backing allocation must be non-dedicated texture memory compatible with
+   `get_sparse_texture_requirements`, admit the texture's queue access, hold
+   the bound range, and be addressed at an `allocation_offset` that is a
+   multiple of the sparse page alignment; backing ranges in one call must not
+   overlap each other or the memory of a placed texture. Those rules read
+   device and texture state, so a violation panics in safe builds.
+   @param queue : "Sparse-binding queue that executes the bind."
+   @param desc : "Borrowed texture, tile and opaque binds, and completion waits."
+   @return "The completion point of the bind, or a recoverable capacity, allocation, or device fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::sparse_bind_desc_valid(desc) : "desc.tiles, desc.opaque and desc.waits must hold at most MAX_SPARSE_TILE_BINDS, MAX_SPARSE_OPAQUE_BINDS and MAX_SPARSE_BIND_WAITS entries, desc.tiles and desc.opaque must hold at least one bind in total, tile binds must use the color aspect with a nonzero extent and an offset no greater than int::max, opaque binds must use a defined aspect with a nonzero size, an unbind must use allocation_offset 0, and tile boxes of one mip and opaque ranges of one aspect must not overlap" *>
 fn CompletionPoint? bind_sparse_texture_memory(Queue queue, SparseTextureBindDesc* desc) {
     Device device = queue.device;
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(&device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_queue(&operation, &device, queue);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_bind_sparse_texture_memory(
         operation.state,
         queue,
@@ -1125,23 +1211,31 @@ fn CompletionPoint? bind_sparse_texture_memory(Queue queue, SparseTextureBindDes
 <* Intern and publish an immutable device-lifetime sampler index. Identical
    semantic descriptions return the same value; debug_name is not semantic.
    Active anisotropy must be within the exact range reported by DeviceCaps;
-   values above the maximum are rejected rather than clamped.
+   values above the maximum are not clamped. `desc.mip_lod_bias` magnitude and
+   `desc.max_anisotropy` must not exceed the device caps; those rules read the
+   device, so a violation panics in safe builds.
    @param device : "Live device whose sampler heap owns the index."
    @param desc : "Borrowed semantic sampler description."
-   @return "A stable device-lifetime sampler index, or a recoverable validation, support, capacity, or allocation fault." *>
+   @return "A stable device-lifetime sampler index, or a recoverable support, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::sampler_desc_valid(desc) : "desc filters, address modes and compare op must be defined values, desc.mip_lod_bias, desc.min_lod and desc.max_lod must be finite, desc.min_lod must not exceed desc.max_lod, and desc.max_anisotropy must be finite and at least 1.0 when anisotropy is enabled" *>
 fn SamplerIndex? intern_sampler(Device* device, SamplerDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_sampler_desc(&operation, desc)!;
     return gpu::internal::vk::vk_intern_sampler(operation.state, desc);
 }
 
 <* Return persistent and caller-owned scratch requirements for an acceleration
    structure capacity descriptor.
+   `desc.geometries.len` of a bottom-level description must not exceed
+   `DeviceCaps.acceleration_structures.max_geometry_count`; that rule reads
+   device caps, so a violation panics in safe builds.
    @param device : "Live ray-query-enabled device to query."
    @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
-   @return "Storage and scratch requirements, or a recoverable validation or support fault." *>
+   @return "Storage and scratch requirements, or a recoverable support fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_desc_valid(desc) : "desc must have known flags without both prefer_fast_trace and prefer_fast_build, a defined kind, geometries of one defined kind with nonzero counts, a defined index type and a primitive total that fits in uint for a bottom-level structure, and a nonzero max_instance_count with no geometries for a top-level structure" *>
 fn AccelerationStructureRequirements? get_acceleration_structure_requirements(
     Device* device,
     AccelerationStructureDesc* desc,
@@ -1149,7 +1243,6 @@ fn AccelerationStructureRequirements? get_acceleration_structure_requirements(
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_get_acceleration_structure_requirements(
         operation.state,
         desc,
@@ -1157,14 +1250,18 @@ fn AccelerationStructureRequirements? get_acceleration_structure_requirements(
 }
 
 <* Create an acceleration structure with internally managed persistent storage.
+   `desc.geometries.len` of a bottom-level description must not exceed
+   `DeviceCaps.acceleration_structures.max_geometry_count`; that rule reads
+   device caps, so a violation panics in safe builds.
    @param device : "Live ray-query-enabled device that will own the structure."
    @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
-   @return "An owning handle, or a recoverable validation, support, capacity, or allocation fault." *>
+   @return "An owning handle, or a recoverable support, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_desc_valid(desc) : "desc must have known flags without both prefer_fast_trace and prefer_fast_build, a defined kind, geometries of one defined kind with nonzero counts, a defined index type and a primitive total that fits in uint for a bottom-level structure, and a nonzero max_instance_count with no geometries for a top-level structure" *>
 fn AccelerationStructureHandle? create_acceleration_structure(Device* device, AccelerationStructureDesc* desc) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     AccelerationStructureHandle acceleration_structure =
         gpu::internal::vk::vk_create_acceleration_structure(
             operation.state,
@@ -1175,12 +1272,21 @@ fn AccelerationStructureHandle? create_acceleration_structure(Device* device, Ac
 }
 
 <* Create an acceleration structure in caller-owned compatible GPU memory.
-   The allocation must outlive the structure.
+   The allocation must outlive the structure. The allocation must be buffer
+   memory with acceleration-structure storage usage, `offset` must be aligned
+   to the reported storage alignment, the storage must fit inside the
+   allocation, and the range must not overlap another placed structure; those
+   rules read allocation state, so a violation panics in safe builds.
+   `desc.geometries.len` of a bottom-level description must not exceed
+   `DeviceCaps.acceleration_structures.max_geometry_count`; that rule reads
+   device caps, so a violation panics in safe builds.
    @param device : "Live device that owns the placement allocation."
    @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
    @param allocation : "Caller-owned compatible allocation."
    @param offset : "Aligned byte offset within the allocation."
-   @return "An owning handle, or a recoverable validation, compatibility, capacity, or allocation fault." *>
+   @return "An owning handle, or a recoverable support, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_desc_valid(desc) : "desc must have known flags without both prefer_fast_trace and prefer_fast_build, a defined kind, geometries of one defined kind with nonzero counts, a defined index type and a primitive total that fits in uint for a bottom-level structure, and a nonzero max_instance_count with no geometries for a top-level structure" *>
 fn AccelerationStructureHandle? create_placed_acceleration_structure(
     Device* device,
     AccelerationStructureDesc* desc,
@@ -1190,7 +1296,6 @@ fn AccelerationStructureHandle? create_placed_acceleration_structure(
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_resource_owner(
         &operation,
         allocation.owner,
@@ -1209,9 +1314,14 @@ fn AccelerationStructureHandle? create_placed_acceleration_structure(
 
 <* Create an acceleration structure and dedicated persistent allocation
    atomically. Destroy the structure before freeing the returned allocation.
+   `desc.geometries.len` of a bottom-level description must not exceed
+   `DeviceCaps.acceleration_structures.max_geometry_count`; that rule reads
+   device caps, so a violation panics in safe builds.
    @param device : "Live ray-query-enabled device that will own both resources."
    @param desc : "Borrowed immutable BLAS or TLAS capacity descriptor."
-   @return "The owning structure and allocation pair, or a recoverable validation, support, capacity, or allocation fault." *>
+   @return "The owning structure and allocation pair, or a recoverable support, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_desc_valid(desc) : "desc must have known flags without both prefer_fast_trace and prefer_fast_build, a defined kind, geometries of one defined kind with nonzero counts, a defined index type and a primitive total that fits in uint for a bottom-level structure, and a nonzero max_instance_count with no geometries for a top-level structure" *>
 fn DedicatedAccelerationStructure? create_dedicated_acceleration_structure(
     Device* device,
     AccelerationStructureDesc* desc,
@@ -1219,7 +1329,6 @@ fn DedicatedAccelerationStructure? create_dedicated_acceleration_structure(
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     DedicatedAccelerationStructure created =
         gpu::internal::vk::vk_create_dedicated_acceleration_structure(
             operation.state,
@@ -1252,10 +1361,12 @@ fn void? destroy_acceleration_structure(Device* device, AccelerationStructureHan
 }
 
 <* Return the ordinary GPU address of a live bottom-level acceleration
-   structure. Top-level structures are not address inputs to instances.
+   structure. Top-level structures are not address inputs to instances; the
+   structure must be bottom-level, and that rule reads structure state, so a
+   violation panics in safe builds.
    @param device : "Live device that owns the BLAS."
    @param acceleration_structure : "Live bottom-level structure handle."
-   @return "A nonzero BLAS address, or a recoverable argument fault." *>
+   @return "A nonzero BLAS address, or a recoverable support or backend fault." *>
 fn GpuAddress? get_acceleration_structure_address(Device* device, AccelerationStructureHandle acceleration_structure) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
@@ -1271,10 +1382,14 @@ fn GpuAddress? get_acceleration_structure_address(Device* device, AccelerationSt
     );
 }
 
-<* Validate a bottom-level structure and pack one exact 64-byte TLAS instance.
+<* Pack one exact 64-byte TLAS instance for a bottom-level structure. The
+   referenced structure must be bottom-level; that rule reads structure state,
+   so a violation panics in safe builds.
    @param device : "Live device that owns the referenced BLAS."
    @param desc : "Borrowed transform, BLAS, mask, index, and flag values."
-   @return "A packed instance, or a recoverable argument fault." *>
+   @return "A packed instance, or a recoverable support or backend fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_instance_desc_valid(desc) : "desc.custom_index must fit 24 bits, desc.mask must fit 8 bits, and desc.flags must use known bits and not combine force_opaque with force_non_opaque" *>
 fn AccelerationStructureInstance? make_acceleration_structure_instance(
     Device* device,
     AccelerationStructureInstanceDesc* desc,
@@ -1282,7 +1397,6 @@ fn AccelerationStructureInstance? make_acceleration_structure_instance(
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_resource_owner(
         &operation,
         desc.bottom_level.owner,
@@ -1299,10 +1413,11 @@ fn AccelerationStructureInstance? make_acceleration_structure_instance(
     );
 }
 
-<* Publish a live TLAS in the shader-visible acceleration-structure heap.
+<* Publish a live TLAS in the shader-visible acceleration-structure heap. The
+   structure must be top-level; a violation panics in safe builds.
    @param device : "Live ray-query-enabled device that owns the TLAS."
    @param acceleration_structure : "Live top-level structure to publish."
-   @return "An owning view containing its raw shader index, or a recoverable validation, capacity, or allocation fault." *>
+   @return "An owning view containing its raw shader index, or a recoverable capacity or allocation fault." *>
 fn AccelerationStructureView? create_acceleration_structure_view(
     Device* device,
     AccelerationStructureHandle acceleration_structure,
@@ -1420,11 +1535,12 @@ fn ColorState uniform_color_state(ColorTargetState[] targets, ColorTargetState s
    call.
    @param device : "Live device that will own the pipeline handle."
    @param desc : "Borrowed compute pipeline description."
-   @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, or compilation fault." *>
+   @return "An owning pipeline handle, or a recoverable invalid-shader, support, capacity, allocation, or compilation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::shader_entry_point_valid(desc.shader.entry_point) : "desc.shader.entry_point must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long" *>
 fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline =
         gpu::internal::vk::vk_create_compute_pipeline(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
@@ -1438,15 +1554,25 @@ fn PipelineHandle? create_compute_pipeline(Device* device, ComputePipelineDesc* 
    At most MAX_COLOR_ATTACHMENTS color targets. Ownership:
    release with destroy_pipeline, once per create. The descriptor, shaders, and
    color-format slice are borrowed only for the call. `min_sample_shading`
-   outside [0, 1] is invalid. `min_sample_shading` above 0, and a stage that
+   must lie in [0, 1]. `min_sample_shading` above 0, and a stage that
    declares SampleRateShading, need DeviceCaps.sample_rate_shading.
    @param device : "Live device that will own the pipeline handle."
    @param desc : "Borrowed graphics pipeline description."
-   @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, or compilation fault." *>
+   @return "An owning pipeline handle, or a recoverable invalid-shader, support, capacity, allocation, or compilation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::shader_entry_point_valid(desc.vertex_shader.entry_point) : "desc.vertex_shader.entry_point must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long"
+   @require gpu::internal::shader_entry_point_valid(desc.fragment_shader.entry_point) : "desc.fragment_shader.entry_point must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long"
+   @require desc.color_formats.len <= MAX_COLOR_ATTACHMENTS : "desc.color_formats.len must not exceed MAX_COLOR_ATTACHMENTS"
+   @require desc.color_formats.len == 0 || desc.color_formats.ptr != null : "desc.color_formats must not be a null slice with nonzero length"
+   @require gpu::internal::color_formats_valid(desc.color_formats) : "each desc.color_formats entry must be a defined color format"
+   @require gpu::internal::depth_format_valid(desc.depth_format) : "desc.depth_format must be UNDEFINED or a depth-stencil format"
+   @require desc.color_formats.len > 0 || desc.depth_format != Format.UNDEFINED : "desc needs at least one color format or a depth format"
+   @require gpu::internal::sample_count_valid(desc.sample_count) : "desc.sample_count must be a defined SampleCount"
+   @require gpu::internal::min_sample_shading_valid(desc.min_sample_shading) : "desc.min_sample_shading must be in [0, 1]"
+   @require gpu::internal::polygon_mode_valid(desc.polygon_mode) : "desc.polygon_mode must be a defined PolygonMode" *>
 fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline =
         gpu::internal::vk::vk_create_graphics_pipeline(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
@@ -1458,11 +1584,21 @@ fn PipelineHandle? create_graphics_pipeline(Device* device, GraphicsPipelineDesc
    in vertex_root_gpu; raster.topology is ignored.
    @param device : "Live device."
    @param desc : "Borrowed mesh pipeline description."
-   @return "Owning pipeline handle, or a recoverable validation, support, or capacity fault." *>
+   @return "Owning pipeline handle, or a recoverable invalid-shader, support, or capacity fault."
+   @require desc != null : "desc must not be null"
+   @require desc.task_shader.spirv.len == 0 || gpu::internal::shader_entry_point_valid(desc.task_shader.entry_point) : "desc.task_shader.entry_point must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long"
+   @require gpu::internal::shader_entry_point_valid(desc.mesh_shader.entry_point) : "desc.mesh_shader.entry_point must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long"
+   @require gpu::internal::shader_entry_point_valid(desc.fragment_shader.entry_point) : "desc.fragment_shader.entry_point must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long"
+   @require desc.color_formats.len <= MAX_COLOR_ATTACHMENTS : "desc.color_formats.len must not exceed MAX_COLOR_ATTACHMENTS"
+   @require desc.color_formats.len == 0 || desc.color_formats.ptr != null : "desc.color_formats must not be a null slice with nonzero length"
+   @require gpu::internal::color_formats_valid(desc.color_formats) : "each desc.color_formats entry must be a defined color format"
+   @require gpu::internal::depth_format_valid(desc.depth_format) : "desc.depth_format must be UNDEFINED or a depth-stencil format"
+   @require desc.color_formats.len > 0 || desc.depth_format != Format.UNDEFINED : "desc needs at least one color format or a depth format"
+   @require gpu::internal::sample_count_valid(desc.sample_count) : "desc.sample_count must be a defined SampleCount"
+   @require gpu::internal::polygon_mode_valid(desc.polygon_mode) : "desc.polygon_mode must be a defined PolygonMode" *>
 fn PipelineHandle? create_mesh_pipeline(Device* device, MeshPipelineDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline =
         gpu::internal::vk::vk_create_mesh_pipeline(operation.state, desc)!;
     gpu::internal::retain_device_children(&operation);
@@ -1473,15 +1609,20 @@ fn PipelineHandle? create_mesh_pipeline(Device* device, MeshPipelineDesc* desc) 
    generation, miss, hit, then callable. A zero recursion depth selects one.
    Identical immutable descriptors may alias one backend pipeline under
    distinct owning handles. All descriptor slices and shader bytes are borrowed
-   only for the call.
+   only for the call. `desc.max_recursion_depth` must not exceed
+   `DeviceCaps` `ray_tracing_pipelines.max_recursion_depth`; that rule reads
+   device state, so a violation panics in safe builds.
    @param device : "Live device created with enable_ray_tracing_pipelines."
    @param desc : "Borrowed structured ray-tracing pipeline description."
-   @return "An owning pipeline handle, or a recoverable validation, support, capacity, allocation, or compilation fault." *>
+   @return "An owning pipeline handle, or a recoverable invalid-shader, support, capacity, allocation, or compilation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::ray_tracing_pipeline_desc_valid(desc) : "desc.ray_generation_shaders must be non-empty, no shader slice may be null with a nonzero length, and the shader group and stage counts must fit uint"
+   @require gpu::internal::ray_tracing_hit_groups_valid(desc.hit_groups) : "desc.hit_groups[].kind must be a defined RayTracingHitGroupKind, TRIANGLES groups must not have an intersection shader and PROCEDURAL groups must have one"
+   @require gpu::internal::ray_tracing_entry_points_valid(desc) : "every shader entry_point in desc must be null or between 1 and MAX_SHADER_ENTRY_POINT_BYTES bytes long" *>
 fn PipelineHandle? create_ray_tracing_pipeline(Device* device, RayTracingPipelineDesc* desc) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     PipelineHandle pipeline =
         gpu::internal::vk::vk_create_ray_tracing_pipeline(
             operation.state,
@@ -1493,10 +1634,12 @@ fn PipelineHandle? create_ray_tracing_pipeline(Device* device, RayTracingPipelin
 
 <* Return deterministic ray-generation, miss, hit, and callable group ranges
    for a live ray-tracing pipeline. The result contains no borrowed storage.
+   The pipeline must be a ray-tracing pipeline; that rule reads pipeline
+   state, so a violation panics in safe builds.
    @param device : "Live device that owns pipeline."
    @param pipeline : "Live ray-tracing pipeline handle."
-   @return "The pipeline group ranges, or a recoverable kind fault." *>
-fn RayTracingPipelineInfo? get_ray_tracing_pipeline_info(Device* device, PipelineHandle pipeline) {
+   @return "The pipeline group ranges." *>
+fn RayTracingPipelineInfo get_ray_tracing_pipeline_info(Device* device, PipelineHandle pipeline) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -1508,13 +1651,16 @@ fn RayTracingPipelineInfo? get_ray_tracing_pipeline_info(Device* device, Pipelin
 
 <* Copy exact native shader-group handles for a contiguous group range.
    `out.len` must equal `group_count * shader_group_handle_size`; zero groups
-   require an empty output and perform no backend call.
+   require an empty output and perform no backend call. The pipeline must be a
+   ray-tracing pipeline and `first_group + group_count` must not exceed its
+   total group count; these rules and the output length read pipeline and
+   device state, so a violation panics in safe builds.
    @param device : "Live device that owns pipeline."
    @param pipeline : "Live ray-tracing pipeline handle."
    @param first_group : "First group in the deterministic pipeline order."
    @param group_count : "Number of contiguous handles to copy."
    @param out : "Caller-owned exact-size output bytes."
-   @return "Success, or a recoverable kind, range, or output-size fault." *>
+   @return "Success, or a recoverable backend fault." *>
 fn void? get_ray_tracing_shader_group_handles(
     Device* device,
     PipelineHandle pipeline,
@@ -1535,12 +1681,16 @@ fn void? get_ray_tracing_shader_group_handles(
 }
 
 <* Return the byte requirement for one present shader role in a live
-   ray-tracing group. The role and group category must match.
+   ray-tracing group. The role and group category must match. The pipeline
+   must be a ray-tracing pipeline, `group` must be below its total group
+   count, and `group_shader` must name a shader present in the selected group;
+   these rules read pipeline state, so a violation panics in safe builds.
    @param device : "Live device that owns pipeline."
    @param pipeline : "Live ray-tracing pipeline handle."
    @param group : "Group index in the deterministic pipeline order."
    @param group_shader : "Shader role present in the selected group."
-   @return "The native byte requirement, or a recoverable kind, enum, range, or role fault." *>
+   @return "The native byte requirement, or a recoverable backend fault."
+   @require group_shader == RayTracingGroupShader.GENERAL || group_shader == RayTracingGroupShader.CLOSEST_HIT || group_shader == RayTracingGroupShader.ANY_HIT || group_shader == RayTracingGroupShader.INTERSECTION : "group_shader must be a defined RayTracingGroupShader" *>
 fn ulong? get_ray_tracing_shader_group_stack_size(
     Device* device,
     PipelineHandle pipeline,
@@ -1586,13 +1736,14 @@ fn usz? get_pipeline_cache_size(Device* device) {
 }
 
 <* Fill `out` with the driver pipeline cache blob and return the bytes
-   written; faults INVALID_ARGUMENT if `out` is smaller than the current
-   blob. Feed the blob to RuntimeDesc.pipeline_cache_data before creating a
+   written. `out.len` must be at least the size returned by
+   `get_pipeline_cache_size`; that rule reads cache state, so a violation
+   panics in safe builds. Feed the blob to RuntimeDesc.pipeline_cache_data before creating a
    later runtime and device. Must not be called concurrently with pipeline
    creation.
    @param device : "Live device whose cache is exported."
    @param out : "Caller-owned output storage sized from a fresh cache-size query."
-   @return "Bytes written, or a recoverable invalid-argument or backend fault." *>
+   @return "Bytes written, or a recoverable backend fault." *>
 fn usz? get_pipeline_cache_data(Device* device, char[] out) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -1605,12 +1756,19 @@ fn usz? get_pipeline_cache_data(Device* device, char[] out) {
    Zero command-buffer capacity defaults to 32; acceleration-structure geometry
    capacity stays disabled at zero. Storage scales with their product.
    Generated-work storage is sized by reserve_generated_work.
-   Creation may fault for invalid limits, host/device allocation failure, or a
-   full allocator table.
+   `command_buffer_capacity` must not exceed MAX_COMMAND_ALLOCATOR_CAPACITY and
+   its product with `max_acceleration_structure_geometries_per_build` must fit
+   `uint`. A nonzero `max_acceleration_structure_geometries_per_build` must not
+   exceed `DeviceCaps` `acceleration_structures.max_geometry_count`; that rule
+   reads device state, so a violation panics in safe builds. Creation may fault
+   for unsupported acceleration-structure recording, host/device allocation
+   failure, or a full allocator table.
    @param device : "Live device that will own the allocator."
    @param queue : "Exact selected queue the allocator records for."
    @param desc : "Borrowed capacity description; null or zero fields select defaults."
-   @return "An owning allocator, or a recoverable validation, unsupported-feature, capacity, or allocation fault." *>
+   @return "An owning allocator, or a recoverable unsupported-feature, capacity, or allocation fault."
+   @require desc == null || desc.command_buffer_capacity <= MAX_COMMAND_ALLOCATOR_CAPACITY : "desc.command_buffer_capacity must not exceed MAX_COMMAND_ALLOCATOR_CAPACITY"
+   @require desc == null || gpu::internal::command_allocator_geometry_capacity_fits(desc) : "desc.command_buffer_capacity times desc.max_acceleration_structure_geometries_per_build must fit in uint" *>
 fn CommandAllocator? create_command_allocator(Device* device, Queue queue, CommandAllocatorDesc* desc = null) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
@@ -1619,24 +1777,15 @@ fn CommandAllocator? create_command_allocator(Device* device, Queue queue, Comma
     if (normalized.command_buffer_capacity == 0) {
         normalized.command_buffer_capacity = DEFAULT_COMMAND_ALLOCATOR_CAPACITY;
     }
-    if (normalized.command_buffer_capacity > MAX_COMMAND_ALLOCATOR_CAPACITY) {
-        return INVALID_ARGUMENT~;
-    }
     if (normalized.max_acceleration_structure_geometries_per_build > 0) {
         if (!operation.data.caps.acceleration_structures.enabled) {
             return UNSUPPORTED_FEATURE~;
         }
-        if (normalized.max_acceleration_structure_geometries_per_build
-            > operation.data.caps.acceleration_structures.max_geometry_count) {
-            return INVALID_ARGUMENT~;
-        }
-    }
-    if (normalized.max_acceleration_structure_geometries_per_build > 0
-        && normalized.command_buffer_capacity
-            > uint::max
-                / normalized
-                    .max_acceleration_structure_geometries_per_build) {
-        return INVALID_ARGUMENT~;
+        assert(
+            normalized.max_acceleration_structure_geometries_per_build
+                <= operation.data.caps.acceleration_structures.max_geometry_count,
+            "desc.max_acceleration_structure_geometries_per_build must not exceed DeviceCaps.acceleration_structures.max_geometry_count"
+        );
     }
     CommandAllocator allocator = {
         .device = *device,
@@ -1689,28 +1838,34 @@ fn void? destroy_command_allocator(CommandAllocator* allocator) {
    requested command count and concurrency imply; the allocator's fixed
    reservation table bounds replacement. Reservation is transactional: on
    failure the previous matching reservation stays published and usable.
-   The caller externally synchronizes the allocator.
+   The caller externally synchronizes the allocator. `desc.kind` must be a
+   defined `GeneratedWorkKind`, `desc.max_commands_per_list` and
+   `desc.concurrent_lists` must be greater than 0, and the pipeline must match
+   the kind: graphics for DRAW and DRAW_INDEXED, compute for DISPATCH.
+   `desc.max_commands_per_list` must not exceed `DeviceCaps`
+   `max_generated_work_count`. The pipeline and limit rules read pipeline and
+   device state, so a violation panics in safe builds.
    @param allocator : "Live quiescent allocator that owns the reservation."
    @param desc : "Borrowed pipeline, work-kind, command-count, and concurrency description."
-   @return "Success, or a recoverable validation, capacity, or allocation fault." *>
+   @return "Success, or a recoverable unsupported-feature, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::generated_work_kind_valid(desc.kind) : "desc.kind must be a defined GeneratedWorkKind"
+   @require desc.max_commands_per_list > 0 : "desc.max_commands_per_list must be greater than 0"
+   @require desc.concurrent_lists > 0 : "desc.concurrent_lists must be greater than 0" *>
 fn void? reserve_generated_work(CommandAllocator* allocator, GeneratedWorkReservationDesc* desc) {
     if (allocator == null) abort("gpu: null CommandAllocator");
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_command_allocator(&operation, allocator);
-    if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_resource_owner(
         &operation,
         desc.pipeline.owner,
         gpu::internal::ResourceOwnerKind.PIPELINE,
     );
-    if (!gpu::internal::generated_work_kind_valid(desc.kind)
-        || desc.max_commands_per_list == 0
-        || desc.concurrent_lists == 0
-        || desc.max_commands_per_list
-            > operation.data.caps.max_generated_work_count) {
-        return INVALID_ARGUMENT~;
-    }
+    assert(
+        desc.max_commands_per_list <= operation.data.caps.max_generated_work_count,
+        "desc.max_commands_per_list must not exceed DeviceCaps.max_generated_work_count"
+    );
     return gpu::internal::vk::vk_reserve_generated_work(
         operation.state,
         allocator,
@@ -1724,7 +1879,8 @@ fn void? reserve_generated_work(CommandAllocator* allocator, GeneratedWorkReserv
    @param allocator : "Live quiescent allocator that owns the reservation."
    @param pipeline : "Exact pipeline named by the reservation."
    @param kind : "Generated-work record kind named by the reservation."
-   @return "Success, or a recoverable validation fault." *>
+   @return "Success, or a recoverable unsupported-feature, in-use, or resource-state fault."
+   @require gpu::internal::generated_work_kind_valid(kind) : "kind must be a defined GeneratedWorkKind" *>
 fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipeline, GeneratedWorkKind kind) {
     if (allocator == null) abort("gpu: null CommandAllocator");
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&allocator.device);
@@ -1735,7 +1891,6 @@ fn void? release_generated_work(CommandAllocator* allocator, PipelineHandle pipe
         pipeline.owner,
         gpu::internal::ResourceOwnerKind.PIPELINE,
     );
-    if (!gpu::internal::generated_work_kind_valid(kind)) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_release_generated_work(
         state:     operation.state,
         allocator: allocator,
@@ -1862,23 +2017,32 @@ fn void cmd_end_label(CommandList* commands) {
 
 <* Record a buffer-to-buffer copy; surrounding barriers are caller-owned.
    Preconditions: usage and queue access are valid.
-   Always checked: token phase, required pointer, identity, bounds, and safe lowering.
+   Always checked: token phase, identity, and safe lowering.
+   `desc.src.size` must not exceed `desc.dst.size`. `desc.src` and `desc.dst`
+   must each lie within its buffer allocation; a violation panics in safe
+   builds.
    @param commands : "Live recording token."
    @param desc : "Borrowed exact source and destination ranges."
-   @return "Success, or a recoverable command, validation, or bounds fault." *>
+   @return "Success, or a recoverable command fault."
+   @require desc != null : "desc must not be null"
+   @require desc.src.size > 0 : "desc.src.size must be greater than 0"
+   @require desc.dst.size > 0 : "desc.dst.size must be greater than 0"
+   @require desc.src.size <= desc.dst.size : "desc.src.size must not exceed desc.dst.size" *>
 fn void? cmd_copy_buffer(CommandList* commands, BufferCopyDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_copy_buffer(record, desc);
 }
 
 <* Record a 32-bit-pattern fill over dst.
    Preconditions: four-byte alignment, usage, queue access, and surrounding barriers are valid.
-   Always checked: token phase, identity, bounds, and safe lowering.
+   Always checked: token phase, identity, and safe lowering. `dst` must be
+   nonempty and lie within its buffer allocation; a violation panics in safe
+   builds.
    @param commands : "Live recording token."
    @param dst : "Destination GPU span."
    @param value : "Repeated 32-bit fill pattern."
-   @return "Success, or a recoverable command, validation, bounds, or alignment fault." *>
+   @return "Success, or a recoverable command fault."
+   @require dst.size > 0 : "dst.size must be greater than 0" *>
 fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_fill_buffer(record, dst, value);
@@ -1887,69 +2051,115 @@ fn void? cmd_fill_buffer(CommandList* commands, GpuSpan dst, uint value) {
 <* Record a dimension-aware buffer-to-texture copy; the effective layout is
    TRANSFER_DST and surrounding barriers remain caller-owned.
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
-   Always checked: token phase, required pointer, identities, format support,
-   dimension/subresource/extent bounds, byte-size overflow, and safe lowering.
+   Always checked: token phase, identities, and safe lowering.
+   `desc.aspect` must be a defined aspect the texture format has, and `AUTO` must
+   not select a combined depth-stencil format. `desc.mip` must be below the
+   texture's mip count and the region must lie within the mip extent and the
+   texture's array layers: a 3D texture uses layer 0 and selects depth through
+   `z` and `depth`, a 2D texture uses `z` 0 and depth at most 1, and a zero
+   extent selects the remainder from the origin. `desc.row_length_texels` must
+   be zero or at least the copy width, and the buffer span must hold the whole
+   copy. These rules read texture state, so a violation panics in safe builds.
    @param commands : "Live recording token."
    @param desc : "Borrowed source-span and destination-texture region."
-   @return "Success, or a recoverable command, validation, bounds, alignment, or support fault." *>
+   @return "Success, or a recoverable command fault."
+   @require desc != null : "desc must not be null"
+   @require desc.src.size > 0 : "desc.src.size must be greater than 0"
+   @require gpu::internal::texture_aspect_valid(desc.aspect) : "desc.aspect must be a defined TextureAspect" *>
 fn void? cmd_copy_buffer_to_texture(CommandList* commands, BufferTextureCopyDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_copy_buffer_to_texture(record, desc);
 }
 
 <* Record a dimension-aware texture-to-buffer copy; the effective layout is
    TRANSFER_SRC and surrounding barriers remain caller-owned.
    Preconditions: descriptor resources, usage, queue access, and barriers are valid.
-   Always checked: token phase, required pointer, identities, format support,
-   dimension/subresource/extent bounds, byte-size overflow, and safe lowering.
+   Always checked: token phase, identities, and safe lowering.
+   `desc.aspect` must be a defined aspect the texture format has, and `AUTO` must
+   not select a combined depth-stencil format. `desc.mip` must be below the
+   texture's mip count and the region must lie within the mip extent and the
+   texture's array layers: a 3D texture uses layer 0 and selects depth through
+   `z` and `depth`, a 2D texture uses `z` 0 and depth at most 1, and a zero
+   extent selects the remainder from the origin. `desc.row_length_texels` must
+   be zero or at least the copy width, and the buffer span must hold the whole
+   copy. These rules read texture state, so a violation panics in safe builds.
    @param commands : "Live recording token."
    @param desc : "Borrowed source-texture and destination-span region."
-   @return "Success, or a recoverable command, validation, bounds, alignment, or support fault." *>
+   @return "Success, or a recoverable command fault."
+   @require desc != null : "desc must not be null"
+   @require desc.dst.size > 0 : "desc.dst.size must be greater than 0"
+   @require gpu::internal::texture_aspect_valid(desc.aspect) : "desc.aspect must be a defined TextureAspect" *>
 fn void? cmd_copy_texture_to_buffer(CommandList* commands, TextureBufferCopyDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_copy_texture_to_buffer(record, desc);
 }
 
 <* Record a texture-to-texture copy; the effective layouts are TRANSFER_SRC
    for the source and TRANSFER_DST for the destination, and surrounding
    barriers remain caller-owned.
-   Always checked: token phase, required pointer, identities, equal formats
-   and sample counts, transfer usages, dimension/subresource/extent bounds
-   on both sides, block alignment, overlap within one texture, and safe
-   lowering.
+   Always checked: token phase and identities. The textures must have equal
+   formats and sample counts and the transfer usages; both must be 3D or both
+   not; a 3D copy selects no array layers; `desc.aspect` must be an aspect the
+   format has, and `AUTO` must not select a combined depth-stencil format; the
+   regions must fit both textures and be block aligned; and regions inside one
+   texture must not overlap. Those rules read texture state, so a violation
+   panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed source and destination region."
-   @return "Success, or a recoverable command, validation, bounds, alignment, or support fault." *>
+   @return "Success, or a recoverable command fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::texture_aspect_valid(desc.aspect) : "desc.aspect must be a defined TextureAspect" *>
 fn void? cmd_copy_texture(CommandList* commands, TextureCopyDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_copy_texture(record, desc);
 }
 
 <* Record one full BLAS or TLAS build using caller-owned input and scratch
-   spans. The command inserts no barrier.
+   spans. The command inserts no barrier. Each input span and the scratch span
+   must be nonempty, lie within its buffer allocation, and the scratch span
+   must cover the build scratch size reported by
+   `get_acceleration_structure_requirements`; a violation panics in safe builds.
+   `desc.destination` must match the build: a top-level destination takes no
+   geometries and between one and its `max_instance_count` instances; a
+   bottom-level destination takes exactly its geometries, each of its kind,
+   with vertex and primitive counts within its maxima, a transform exactly
+   when it has one, no indices and at least three vertices per primitive for
+   non-indexed triangles, and no instances. Those rules read destination
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, dynamic inputs, and build scratch."
-   @return "Success, or a recoverable command, validation, range, capacity, or support fault." *>
+   @return "Success, or a recoverable command, capacity, or support fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_build_desc_valid(desc) : "desc.geometries[] must have a defined kind, nonzero primitive and vertex counts, a vertex_stride of at least 12 or an aabbs stride of at least 24, and a stride times count that fits in usz" *>
 fn void? cmd_build_acceleration_structure(CommandList* commands, AccelerationStructureBuildDesc* desc) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_build_acceleration_structure(record, desc);
 }
 
 <* Record an in-place acceleration-structure update using caller-owned input
    and update scratch spans. The application orders a compatible update-enabled
    build before execution; recording needs no host wait and inserts no barrier.
+   Each input span and the scratch span must be nonempty, lie within its buffer
+   allocation, and the scratch span must cover the update scratch size reported
+   by `get_acceleration_structure_requirements`; a violation panics in safe
+   builds.
+   `desc.destination` must match the build: a top-level destination takes no
+   geometries and between one and its `max_instance_count` instances; a
+   bottom-level destination takes exactly its geometries, each of its kind,
+   with vertex and primitive counts within its maxima, a transform exactly
+   when it has one, no indices and at least three vertices per primitive for
+   non-indexed triangles, and no instances. An update destination must have been created with
+   `flags.allow_update`. Those rules read destination
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, matching dynamic inputs, and update scratch."
-   @return "Success, or a recoverable command, validation, range, capacity, or support fault." *>
+   @return "Success, or a recoverable command, capacity, or support fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_build_desc_valid(desc) : "desc.geometries[] must have a defined kind, nonzero primitive and vertex counts, a vertex_stride of at least 12 or an aabbs stride of at least 24, and a stride times count that fits in usz" *>
 fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationStructureBuildDesc* desc) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_update_acceleration_structure(record, desc);
 }
 
@@ -1965,11 +2175,24 @@ fn void? cmd_update_acceleration_structure(CommandList* commands, AccelerationSt
    queue and inserts no barrier. Order a GPU producer with a barrier whose
    destination contains both `indirect` and `acceleration_structure_build`.
    The caller keeps the destination, inputs, scratch, and range span alive and
-   unmodified as required through their final GPU use.
+   unmodified as required through their final GPU use. Every span must lie
+   within its buffer allocation and the scratch span must cover the build
+   scratch size reported by `get_acceleration_structure_requirements`; a
+   violation panics in safe builds.
+   `desc.destination` must match the build: a top-level destination takes no
+   geometries and between one and its `max_instance_count` instances; a
+   bottom-level destination takes exactly its geometries, each of its kind,
+   with vertex and primitive counts within its maxima, a transform exactly
+   when it has one, no indices and at least three vertices per primitive for
+   non-indexed triangles, and no instances. Those rules read destination
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, maximum-count inputs, and build scratch."
    @param ranges : "Caller-owned GPU-authored fixed-stride range records."
-   @return "Success, or a recoverable command, validation, range, capacity, or support fault." *>
+   @return "Success, or a recoverable command, capacity, or support fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_build_desc_valid(desc) : "desc.geometries[] must have a defined kind, nonzero primitive and vertex counts, a vertex_stride of at least 12 or an aabbs stride of at least 24, and a stride times count that fits in usz"
+   @require ranges.size > 0 : "ranges.size must be greater than 0" *>
 fn void? cmd_build_acceleration_structure_indirect(
     CommandList* commands,
     AccelerationStructureBuildDesc* desc,
@@ -1977,7 +2200,6 @@ fn void? cmd_build_acceleration_structure_indirect(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_build_acceleration_structure_indirect(
         record,
         desc,
@@ -1994,10 +2216,24 @@ fn void? cmd_build_acceleration_structure_indirect(
    GPU-authored actual count equals the corresponding actual count from its
    prior build or update, while remaining within the supplied CPU maximum and
    explicit input span. The library does not inspect or read back the packet.
+   Every span must lie within its buffer allocation and the scratch span must
+   cover the update scratch size reported by
+   `get_acceleration_structure_requirements`; a violation panics in safe builds.
+   `desc.destination` must match the build: a top-level destination takes no
+   geometries and between one and its `max_instance_count` instances; a
+   bottom-level destination takes exactly its geometries, each of its kind,
+   with vertex and primitive counts within its maxima, a transform exactly
+   when it has one, no indices and at least three vertices per primitive for
+   non-indexed triangles, and no instances. An update destination must have been created with
+   `flags.allow_update`. Those rules read destination
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed destination, maximum-count inputs, and update scratch."
    @param ranges : "Caller-owned GPU-authored fixed-stride range records."
-   @return "Success, or a recoverable command, validation, range, capacity, or support fault." *>
+   @return "Success, or a recoverable command, capacity, or support fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::acceleration_structure_build_desc_valid(desc) : "desc.geometries[] must have a defined kind, nonzero primitive and vertex counts, a vertex_stride of at least 12 or an aabbs stride of at least 24, and a stride times count that fits in usz"
+   @require ranges.size > 0 : "ranges.size must be greater than 0" *>
 fn void? cmd_update_acceleration_structure_indirect(
     CommandList* commands,
     AccelerationStructureBuildDesc* desc,
@@ -2005,7 +2241,6 @@ fn void? cmd_update_acceleration_structure_indirect(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    if (desc == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_update_acceleration_structure_indirect(
         record,
         desc,
@@ -2015,10 +2250,13 @@ fn void? cmd_update_acceleration_structure_indirect(
 
 <* Record one device clone into distinct compatible storage. The application
    orders source construction before execution; no host wait or implicit barrier.
+   The destination storage must be at least as large as the source storage;
+   that rule reads structure state, so a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param source : "Source constructed before clone execution and kept live through completion."
    @param destination : "Compatible destination with sufficient storage, kept live through completion."
-   @return "Success, or a recoverable command, validation, capacity, or support fault." *>
+   @return "Success, or a recoverable command, capacity, or support fault."
+   @require source != destination : "source and destination must be distinct acceleration structures" *>
 fn void? cmd_clone_acceleration_structure(
     CommandList* commands,
     AccelerationStructureHandle source,
@@ -2062,27 +2300,31 @@ macro char[] @inline_root(value) => ((char*)value)[:@sizeof(*value)];
    @param commands : "Live recording token."
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param groups : "Workgroup counts in X, Y, and Z."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, pipeline, or limit fault." *>
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
+   @return "Success, or a recoverable command or pipeline fault."
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_dispatch(CommandList* commands, GpuAddress root, Vec3u groups, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_dispatch(record, root, groups);
 }
 
 <* Dispatch indirectly with the root passed unchanged; zero is valid.
    Preconditions: compute state, args, queue access, barriers, and GPU-written
    group counts are valid; shaders make zero dereference safe.
-   Always checked: token phase, identities, bounds, a usable bound-pipeline
-   snapshot, and safe lowering.
+   Always checked: token phase, identities, a usable bound-pipeline snapshot,
+   and safe lowering. `args` must lie within its buffer allocation; a
+   violation panics in safe builds.
    @param commands : "Live recording token."
    @param root : "Root GPU address passed unchanged; zero is valid."
    @param args : "Non-owning span containing one GPU-written dispatch record."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, bounds, or pipeline fault." *>
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
+   @return "Success, or a recoverable command or pipeline fault."
+   @require gpu::internal::span_holds_bytes(args, DispatchIndirectCommand::size) : "args must be nonempty and hold one DispatchIndirectCommand"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_dispatch_indirect(record, root, args);
 }
 
@@ -2090,15 +2332,18 @@ fn void? cmd_dispatch_indirect(CommandList* commands, GpuAddress root, GpuSpan a
    zero roots are valid.
    Preconditions: compute state, spans, count, queue access, barriers, and
    shader zero paths are valid.
-   Always checked: token phase, identities, bounds, capacity, a usable
-   bound-pipeline snapshot, and safe lowering.
+   Always checked: token phase, identities, capacity, a usable bound-pipeline
+   snapshot, and safe lowering. When `max_dispatch_count` is nonzero,
+   `records` and `count_span` must each lie within its buffer allocation; a
+   violation panics in safe builds.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
    @param commands : "Live recording token."
    @param records : "Non-owning GPU-written generated-dispatch record range."
    @param count_span : "Non-owning span containing the GPU-written dispatch count."
    @param max_dispatch_count : "Maximum generated records to execute."
-   @return "Success, or a recoverable command, bounds, support, or scratch-capacity fault." *>
+   @return "Success, or a recoverable command, support, or scratch-capacity fault."
+   @require gpu::internal::generated_spans_hold(records, count_span, GeneratedDispatchRecord::size, max_dispatch_count) : "records must hold max_dispatch_count GeneratedDispatchRecord values and count_span one uint when max_dispatch_count is nonzero" *>
 fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_dispatch_count) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_dispatch_generated(
@@ -2112,13 +2357,17 @@ fn void? cmd_dispatch_generated(CommandList* commands, GpuSpan records, GpuSpan 
 <* Record one direct ray dispatch through the active ray-tracing pipeline.
    The caller owns, populates, uploads, synchronizes, and retains every SBT
    span. The command pushes one RootPush value and inserts no hidden barrier,
-   bind, upload, submission, or wait.
+   bind, upload, submission, or wait. Each nonempty SBT region span must lie
+   within its buffer allocation; a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address passed unchanged to all ray-tracing stages."
    @param shader_binding_table : "Borrowed caller-owned SBT regions."
    @param dimensions : "Nonzero direct trace width, height, and depth within the selected device limits."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, pipeline, SBT, range, or limit fault." *>
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
+   @return "Success, or a recoverable pipeline or support fault."
+   @require shader_binding_table != null : "shader_binding_table must not be null"
+   @require gpu::internal::ray_tracing_shader_binding_table_valid(shader_binding_table) : "shader_binding_table regions must each be the zero value with stride 0 or a span with a nonzero size"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_trace_rays(
     CommandList* commands,
     GpuAddress root,
@@ -2128,8 +2377,7 @@ fn void? cmd_trace_rays(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
-    if (shader_binding_table == null) return INVALID_ARGUMENT~;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_trace_rays(
         record,
         root,
@@ -2141,12 +2389,18 @@ fn void? cmd_trace_rays(
 <* Record one basic indirect ray dispatch through the active ray-tracing
    pipeline. The root and caller-owned SBT remain direct; only dimensions come
    from the GPU span. The command inserts no hidden synchronization or work.
+   Each nonempty SBT region span must lie within its buffer allocation; a
+   violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param shader_binding_table : "Borrowed caller-owned direct shader binding table regions."
    @param args : "Caller-owned span beginning with one GPU-written TraceRaysIndirectCommand, valid through completion."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, range, pipeline, or support fault." *>
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
+   @return "Success, or a recoverable command, pipeline, or support fault."
+   @require shader_binding_table != null : "shader_binding_table must not be null"
+   @require gpu::internal::ray_tracing_shader_binding_table_valid(shader_binding_table) : "shader_binding_table regions must each be the zero value with stride 0 or a span with a nonzero size"
+   @require gpu::internal::span_holds_bytes(args, TraceRaysIndirectCommand::size) : "args must be nonempty and hold one TraceRaysIndirectCommand"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_trace_rays_indirect(
     CommandList* commands,
     GpuAddress root,
@@ -2156,8 +2410,7 @@ fn void? cmd_trace_rays_indirect(
 ) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
-    if (shader_binding_table == null) return INVALID_ARGUMENT~;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_trace_rays_indirect(
         record,
         root,
@@ -2173,12 +2426,14 @@ fn void? cmd_trace_rays_indirect(
    @param commands : "Live recording token outside a render pass."
    @param root : "Root GPU address pushed unchanged; zero is valid."
    @param args : "Caller-owned span beginning with one GPU-written TraceRaysIndirectCommand2; the packet and every shader binding table allocation it addresses must remain valid through completion."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, range, pipeline, or support fault." *>
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
+   @return "Success, or a recoverable command, pipeline, or support fault."
+   @require gpu::internal::span_holds_bytes(args, TraceRaysIndirectCommand2::size) : "args must be nonempty and hold one TraceRaysIndirectCommand2"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpan args, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_trace_rays_indirect2(record, root, args);
 }
 
@@ -2186,7 +2441,8 @@ fn void? cmd_trace_rays_indirect2(CommandList* commands, GpuAddress root, GpuSpa
    The value must fit uint and cover every shader execution in later traces.
    @param commands : "Live recording token outside a render pass on a compute-capable graphics or compute family."
    @param pipeline_stack_size : "Sufficient byte count, which may be zero; must fit uint."
-   @return "Success, or a recoverable command, pipeline, queue, scope, range, or support fault." *>
+   @return "Success, or a recoverable command, pipeline, queue, scope, or support fault."
+   @require pipeline_stack_size <= uint::max : "pipeline_stack_size must fit uint" *>
 fn void? cmd_set_ray_tracing_pipeline_stack_size(CommandList* commands, ulong pipeline_stack_size) {
     gpu::internal::vk::CommandRecord* record =
         gpu::internal::recording_command(commands);
@@ -2197,14 +2453,17 @@ fn void? cmd_set_ray_tracing_pipeline_stack_size(CommandList* commands, ulong pi
 }
 
 <* Create immutable attachment metadata and any required subresource view
-   before recording. The returned handle retains its texture.
+   before recording. The returned handle retains its texture. The texture must
+   be two-dimensional with color or depth attachment usage, and `desc.mip_level`
+   and `desc.array_layer` must lie inside it; those rules read texture state, so
+   a violation panics in safe builds.
    @param device : "Live device that owns the texture."
    @param desc : "Borrowed texture subresource description."
-   @return "An owning attachment-view handle, or a recoverable validation, capacity, or allocation fault." *>
+   @return "An owning attachment-view handle, or a recoverable capacity or allocation fault."
+   @require desc != null : "desc must not be null" *>
 fn AttachmentViewHandle? create_attachment_view(Device* device, AttachmentViewDesc* desc) {
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::validate_resource_owner(
         &operation,
         desc.texture.owner,
@@ -2261,12 +2520,10 @@ fn StencilFaceState stencil_face(CompareOp compare, StencilOp pass, uint referen
    color pipeline. Dimensions must be in [1, int::max].
    @param width : "Positive render width representable as int."
    @param height : "Positive render height representable as int."
-   @return "A caller-owned graphics state, or a recoverable invalid-argument fault." *>
-fn GraphicsState? render_geometry_state(uint width, uint height) {
-    if (width == 0 || height == 0
-        || width > (uint)int::max || height > (uint)int::max) {
-        return INVALID_ARGUMENT~;
-    }
+   @return "A caller-owned graphics state."
+   @require width > 0 && width <= (uint)int::max : "width must be in [1, int::max]"
+   @require height > 0 && height <= (uint)int::max : "height must be in [1, int::max]" *>
+fn GraphicsState render_geometry_state(uint width, uint height) {
     return {
         .viewport = {
             .width     = (float)width,
@@ -2284,27 +2541,36 @@ fn GraphicsState? render_geometry_state(uint width, uint height) {
 
 <* Begin a render pass without changing command-buffer graphics state.
    Preconditions: attachments, layouts, queue access, dimensions, and pass phase are valid.
-   Always checked: token phase, host-safe descriptor shape, a render area zero in
-   exactly one dimension, identities, and safe lowering.
+   Always checked: token phase, identities, and safe lowering.
+   `desc.colors` must hold at most MAX_COLOR_ATTACHMENTS entries and not be a
+   null slice with nonzero length. `desc.width` and `desc.height` must be both
+   zero or both nonzero, and a zero extent needs at least one attachment.
+   `desc.depth.resolve_mode` must be a defined `DepthResolveMode` when a depth
+   resolve view is set. A depth resolve needs a depth-only attachment format;
+   that rule reads view state, so a violation panics in safe builds.
    @param commands : "Live recording token outside a render pass."
    @param desc : "Borrowed attachment and render-area description copied into the command stream; a zero extent selects the first attachment's extent."
-   @return "Success, or a recoverable command, validation, or compatibility fault." *>
+   @return "Success, or a recoverable command, resource-state, or compatibility fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::render_pass_desc_valid(desc) : "desc.colors must hold at most MAX_COLOR_ATTACHMENTS entries and not be a null slice with nonzero length, desc.width and desc.height must be both zero or both nonzero, a zero extent needs an attachment, and desc.depth.resolve_mode must be a defined DepthResolveMode when a depth resolve view is set" *>
 fn void? cmd_begin_render_pass(CommandList* commands, RenderPassDesc* desc) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    if (!gpu::internal::render_pass_desc_host_safe(desc)) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_begin_render_pass(record, desc);
 }
 
 <* Replace complete graphics state before or during a pass.
    Preconditions: a compatible graphics pipeline is bound, the queue is
    graphics-capable, and all state values are valid.
-   Always checked: token phase, required host-safe input, and safe lowering.
+   Always checked: token phase and safe lowering.
+   `state.color.targets` must hold at most MAX_COLOR_ATTACHMENTS entries and
+   not be a null slice with nonzero length.
    @param commands : "Live recording token."
    @param state : "Borrowed complete graphics state copied into the command stream."
-   @return "Success, or a recoverable command, validation, pipeline, or support fault." *>
+   @return "Success, or a recoverable command, pipeline, or support fault."
+   @require state != null : "state must not be null"
+   @require gpu::internal::color_state_valid(&state.color) : "state.color.targets must hold at most MAX_COLOR_ATTACHMENTS entries and not be a null slice with nonzero length" *>
 fn void? cmd_set_graphics_state(CommandList* commands, GraphicsState* state) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    if (!gpu::internal::graphics_state_host_safe(state)) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_set_graphics_state(record, state);
 }
 
@@ -2346,11 +2612,12 @@ fn void cmd_set_scissor(CommandList* commands, ScissorRect* scissor) {
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
    @param vertex_count : "Vertices drawn per instance."
    @param instance_count : "Instances to draw."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, pipeline, state, or limit fault." *>
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
+   @return "Success, or a recoverable command, pipeline, or state fault."
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, uint vertex_count, uint instance_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw(
         commands:        record,
         vertex_root:    vertex_root,
@@ -2363,8 +2630,9 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
 <* Draw indexed geometry with both roots passed unchanged; either may be zero.
    Preconditions: graphics state is valid, index_span and root data admit the
    queue, and shaders make zero dereference safe.
-   Always checked: token phase, identities, index bounds, a usable bound-pipeline
-   snapshot, and safe lowering.
+   Always checked: token phase, identities, a usable bound-pipeline snapshot,
+   and safe lowering. `index_span` must lie within its buffer allocation; a
+   violation panics in safe builds.
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
@@ -2372,11 +2640,13 @@ fn void? cmd_draw(CommandList* commands, GpuAddress vertex_root, GpuAddress frag
    @param index_count : "Indices drawn per instance."
    @param instance_count : "Instances to draw."
    @param index_type : "Index element width; defaults to U32."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, bounds, pipeline, or state fault." *>
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
+   @return "Success, or a recoverable command, pipeline, or state fault."
+   @require gpu::internal::index_span_holds_indices(index_span, index_type, index_count) : "index_span must be nonempty and hold index_count indices of index_type"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan index_span, uint index_count, uint instance_count, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_indexed(
         commands:        record,
         vertex_root:    vertex_root,
@@ -2396,10 +2666,11 @@ fn void? cmd_draw_indexed(CommandList* commands, GpuAddress vertex_root, GpuAddr
    @param fragment_root : "Fragment root address."
    @param groups : "Task work groups with a task shader, else mesh work groups."
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
-   @return "Success, or a recoverable command, pipeline, support, or limit fault." *>
+   @return "Success, or a recoverable command, pipeline, or support fault."
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, Vec3u groups, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_mesh_tasks(
         commands:        record,
         mesh_root:     mesh_root,
@@ -2417,10 +2688,12 @@ fn void? cmd_draw_mesh_tasks(CommandList* commands, GpuAddress mesh_root, GpuAdd
    @param args : "Non-owning record array kept alive by the caller through completion."
    @param draw_count : "Number of records to execute."
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
-   @return "Success, or a recoverable command, bounds, support, or pipeline fault." *>
+   @return "Success, or a recoverable command, support, or pipeline fault."
+   @require gpu::internal::span_holds_records(args, DrawMeshTasksIndirectCommand::size, draw_count) : "args must be nonempty and hold draw_count DrawMeshTasksIndirectCommand values"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_mesh_tasks_indirect(
         commands:        record,
         mesh_root:     mesh_root,
@@ -2439,10 +2712,13 @@ fn void? cmd_draw_mesh_tasks_indirect(CommandList* commands, GpuAddress mesh_roo
    @param count_span : "Non-owning span holding the GPU-written draw count."
    @param max_draw_count : "Maximum records the GPU count may select."
    @param inline_root : "Optional push payload borrowed for this call; see cmd_draw."
-   @return "Success, or a recoverable command, bounds, support, or pipeline fault." *>
+   @return "Success, or a recoverable command, support, or pipeline fault."
+   @require gpu::internal::span_holds_records(args, DrawMeshTasksIndirectCommand::size, max_draw_count) : "args must be nonempty and hold max_draw_count DrawMeshTasksIndirectCommand values"
+   @require gpu::internal::span_holds_bytes(count_span, uint::size) : "count_span must be nonempty and hold one uint"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress mesh_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_mesh_tasks_indirect_count(
         commands:         record,
         mesh_root:      mesh_root,
@@ -2456,18 +2732,21 @@ fn void? cmd_draw_mesh_tasks_indirect_count(CommandList* commands, GpuAddress me
 <* Draw indirectly with one root pair passed unchanged to every draw; zero is valid.
    Preconditions: graphics state, args, count, queue access, and barriers are valid;
    root data admits the queue and shaders make zero dereference safe.
-   Always checked: token phase, identities, bounds, overflow, a usable
-   bound-pipeline snapshot, and safe lowering.
+   Always checked: token phase, identities, a usable bound-pipeline snapshot,
+   and safe lowering. `args` must lie within its buffer allocation; a
+   violation panics in safe builds.
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
    @param args : "Non-owning array of indirect draw records kept alive by the caller through completion."
    @param draw_count : "Number of indirect records to execute."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, bounds, pipeline, or state fault." *>
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
+   @return "Success, or a recoverable command, pipeline, or state fault."
+   @require gpu::internal::span_holds_records(args, DrawIndirectCommand::size, draw_count) : "args must be nonempty and hold draw_count DrawIndirectCommand values"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_indirect(
         commands:       record,
         vertex_root:   vertex_root,
@@ -2480,8 +2759,9 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
 <* Indexed indirect draw with one unchanged root pair; zero is valid.
    Preconditions: graphics state, spans, count, queue access, and barriers are
    valid; shader zero paths and GPU-written index bounds are caller-owned.
-   Always checked: token phase, identities, host-visible bounds, overflow, a
-   usable bound-pipeline snapshot, and safe lowering.
+   Always checked: token phase, identities, a usable bound-pipeline snapshot,
+   and safe lowering. `args` and `index_span` must each lie within its buffer
+   allocation; a violation panics in safe builds.
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
    @param fragment_root : "Fragment root GPU address passed unchanged; zero is valid."
@@ -2489,11 +2769,14 @@ fn void? cmd_draw_indirect(CommandList* commands, GpuAddress vertex_root, GpuAdd
    @param draw_count : "Number of indirect records to execute."
    @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, bounds, pipeline, or state fault." *>
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
+   @return "Success, or a recoverable command, pipeline, or state fault."
+   @require gpu::internal::span_holds_records(args, DrawIndexedIndirectCommand::size, draw_count) : "args must be nonempty and hold draw_count DrawIndexedIndirectCommand values"
+   @require index_span.size > 0 : "index_span.size must be greater than 0"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, uint draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_indexed_indirect(
         commands:       record,
         vertex_root:   vertex_root,
@@ -2508,8 +2791,9 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
 <* Count-buffer indexed draw with one unchanged root pair; zero is valid.
    Preconditions: graphics state, spans, counts, queue access, barriers, shader
    zero paths, and GPU-written index bounds are valid.
-   Always checked: token phase, identities, host-visible bounds, overflow, a
-   usable bound-pipeline snapshot, and safe lowering.
+   Always checked: token phase, identities, a usable bound-pipeline snapshot,
+   and safe lowering. `args`, `count_span` and `index_span` must each lie
+   within its buffer allocation; a violation panics in safe builds.
    Runtime failures: unsupported count execution faults UNSUPPORTED_FEATURE.
    @param commands : "Live recording token inside a render pass."
    @param vertex_root : "Vertex root GPU address passed unchanged; zero is valid."
@@ -2519,11 +2803,15 @@ fn void? cmd_draw_indexed_indirect(CommandList* commands, GpuAddress vertex_root
    @param max_draw_count : "Maximum records the GPU count may select."
    @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
-   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four, at most INLINE_ROOT_CAPACITY, and fit ROOT_PUSH_CAPACITY from that offset, else INVALID_ARGUMENT; the payload must fit the reflected push block."
-   @return "Success, or a recoverable command, bounds, support, pipeline, or state fault." *>
+   @param inline_root : "Optional payload copied into the push block during this call at the bound pipeline's payload offset; empty pushes the header only. Length must be a multiple of four and at most INLINE_ROOT_CAPACITY. The payload must also fit ROOT_PUSH_CAPACITY from that offset and the reflected push block; that rule reads pipeline state, so a violation panics in safe builds."
+   @return "Success, or a recoverable command, support, pipeline, or state fault."
+   @require gpu::internal::span_holds_records(args, DrawIndexedIndirectCommand::size, max_draw_count) : "args must be nonempty and hold max_draw_count DrawIndexedIndirectCommand values"
+   @require gpu::internal::span_holds_bytes(count_span, uint::size) : "count_span must be nonempty and hold one uint"
+   @require index_span.size > 0 : "index_span.size must be greater than 0"
+   @require gpu::internal::inline_root_valid(inline_root) : "inline_root.len must be a multiple of 4 and at most INLINE_ROOT_CAPACITY" *>
 fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress vertex_root, GpuAddress fragment_root, GpuSpan args, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32, char[] inline_root = {}) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    gpu::internal::vk::set_inline_root(record, inline_root)!;
+    gpu::internal::vk::set_inline_root(record, inline_root);
     return gpu::internal::vk::vk_cmd_draw_indexed_indirect_count(
         commands:        record,
         vertex_root:    vertex_root,
@@ -2540,15 +2828,18 @@ fn void? cmd_draw_indexed_indirect_count(CommandList* commands, GpuAddress verte
    zero roots are valid.
    Preconditions: graphics state, spans, count, queue access, barriers, and
    shader zero paths are valid.
-   Always checked: token phase, identities, bounds, capacity, a usable
-   bound-pipeline snapshot, and safe lowering.
+   Always checked: token phase, identities, capacity, a usable bound-pipeline
+   snapshot, and safe lowering. When `max_draw_count` is nonzero, `records`
+   and `count_span` must each lie within its buffer allocation; a violation
+   panics in safe builds.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
    @param commands : "Live recording token inside a render pass."
    @param records : "Non-owning GPU-written generated-draw record range."
    @param count_span : "Non-owning span containing the GPU-written draw count."
    @param max_draw_count : "Maximum generated records to execute."
-   @return "Success, or a recoverable command, bounds, support, or scratch-capacity fault." *>
+   @return "Success, or a recoverable command, support, or scratch-capacity fault."
+   @require gpu::internal::generated_spans_hold(records, count_span, GeneratedDrawRecord::size, max_draw_count) : "records must hold max_draw_count GeneratedDrawRecord values and count_span one uint when max_draw_count is nonzero" *>
 fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_draw_generated(
@@ -2563,8 +2854,10 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
    zero roots are valid.
    Preconditions: graphics state, spans, count, queue access, barriers, shader
    zero paths, and GPU-written index bounds are valid.
-   Always checked: token phase, identities, bounds, capacity, a usable
-   bound-pipeline snapshot, and safe lowering.
+   Always checked: token phase, identities, capacity, a usable bound-pipeline
+   snapshot, and safe lowering. When `max_draw_count` is nonzero, `records`,
+   `count_span` and `index_span` must each lie within its buffer allocation; a
+   violation panics in safe builds.
    Runtime failures: missing capability faults UNSUPPORTED_FEATURE; unavailable
    reserved scratch faults GENERATED_SCRATCH_EXHAUSTED.
    @param commands : "Live recording token inside a render pass."
@@ -2573,7 +2866,9 @@ fn void? cmd_draw_generated(CommandList* commands, GpuSpan records, GpuSpan coun
    @param max_draw_count : "Maximum generated records to execute."
    @param index_span : "Non-owning index-data range kept alive by the caller through completion."
    @param index_type : "Index element width; defaults to U32."
-   @return "Success, or a recoverable command, bounds, support, or scratch-capacity fault." *>
+   @return "Success, or a recoverable command, support, or scratch-capacity fault."
+   @require gpu::internal::generated_spans_hold(records, count_span, GeneratedDrawIndexedRecord::size, max_draw_count) : "records must hold max_draw_count GeneratedDrawIndexedRecord values and count_span one uint when max_draw_count is nonzero"
+   @require max_draw_count == 0 || index_span.size > 0 : "index_span.size must be greater than 0 when max_draw_count is nonzero" *>
 fn void? cmd_draw_indexed_generated(CommandList* commands, GpuSpan records, GpuSpan count_span, uint max_draw_count, GpuSpan index_span, IndexType index_type = IndexType.U32) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
     return gpu::internal::vk::vk_cmd_draw_indexed_generated(
@@ -2629,18 +2924,16 @@ fn TextureState storage_at(StageMask stages, TextureAccess access) {
    @param view : "Selected subresource range; the zero value selects the full default view."
    @param before : "Prior semantic state."
    @param after : "Next semantic state."
-   @return "A caller-owned transition, or a recoverable invalid-layout fault." *>
-fn TextureBarrier? texture_view_transition(
+   @return "A caller-owned transition."
+   @require gpu::internal::texture_layout_valid(before.layout) : "before.layout must be a defined layout"
+   @require gpu::internal::texture_layout_valid(after.layout) : "after.layout must be a defined layout"
+   @require after.layout != TextureLayout.UNDEFINED : "after.layout must not be UNDEFINED" *>
+fn TextureBarrier texture_view_transition(
     TextureHandle texture,
     TextureViewDesc view,
     TextureState before,
     TextureState after,
 ) {
-    if (!gpu::internal::texture_layout_valid(before.layout)
-        || !gpu::internal::texture_layout_valid(after.layout)
-        || after.layout == TextureLayout.UNDEFINED) {
-        return INVALID_ARGUMENT~;
-    }
     return {
         .texture = texture,
         .view    = view,
@@ -2654,8 +2947,11 @@ fn TextureBarrier? texture_view_transition(
    @param texture : "Texture handle named by the transition."
    @param before : "Prior semantic state."
    @param after : "Next semantic state."
-   @return "A caller-owned full-range transition, or a recoverable invalid-layout fault." *>
-fn TextureBarrier? texture_transition(TextureHandle texture, TextureState before, TextureState after) {
+   @return "A caller-owned full-range transition."
+   @require gpu::internal::texture_layout_valid(before.layout) : "before.layout must be a defined layout"
+   @require gpu::internal::texture_layout_valid(after.layout) : "after.layout must be a defined layout"
+   @require after.layout != TextureLayout.UNDEFINED : "after.layout must not be UNDEFINED" *>
+fn TextureBarrier texture_transition(TextureHandle texture, TextureState before, TextureState after) {
     return texture_view_transition(
         texture: texture,
         view:    {},
@@ -2666,26 +2962,30 @@ fn TextureBarrier? texture_transition(TextureHandle texture, TextureState before
 
 <* Record a global semantic execution and memory barrier.
    Preconditions: stages are known, consistent, and queue-supported.
-   Always checked: token identity, authoritative phase, required pointer, and
+   Always checked: token identity, authoritative phase, and
    `index_input` on the source side.
    @param commands : "Live recording token."
    @param barrier : "Borrowed source and destination execution scopes."
-   @return "Success, or a recoverable command, validation, or queue-support fault." *>
+   @return "Success, or a recoverable command fault."
+   @require barrier != null : "barrier must not be null" *>
 fn void? cmd_barrier(CommandList* commands, Barrier* barrier) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    if (barrier == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_barrier(record, barrier);
 }
 
 <* Record an explicit semantic texture transition.
    Preconditions: the texture, range, states, usage, and queue access are valid.
-   Always checked: token phase, required pointer, texture identity, range, and safe lowering.
+   Always checked: token phase, texture identity, and safe lowering.
+   `barrier.view.aspect` must be `AUTO`. The view's base mip and layer and its
+   mip and layer counts must lie inside the texture; that rule reads texture
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token."
    @param barrier : "Borrowed texture, subresource range, and semantic states."
-   @return "Success, or a recoverable command, validation, range, or support fault." *>
+   @return "Success, or a recoverable command fault."
+   @require barrier != null : "barrier must not be null"
+   @require barrier.view.aspect == TextureAspect.AUTO : "barrier.view.aspect must be AUTO" *>
 fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
     gpu::internal::vk::CommandRecord* record = gpu::internal::recording_command(commands);
-    if (barrier == null) return INVALID_ARGUMENT~;
     return gpu::internal::vk::vk_cmd_texture_barrier(record, barrier);
 }
 
@@ -2693,12 +2993,13 @@ fn void? cmd_texture_barrier(CommandList* commands, TextureBarrier* barrier) {
    reset with `cmd_reset_timestamps` before their first write.
    @param device : "Live device that will own the pool."
    @param desc : "Borrowed pool capacity and debug-name description."
-   @return "An owning pool handle, or a recoverable invalid-argument, unsupported-feature, capacity, or allocation fault." *>
+   @return "An owning pool handle, or a recoverable unsupported-feature, capacity, or allocation fault."
+   @require desc != null : "desc must not be null"
+   @require desc.capacity > 0 : "desc.capacity must be greater than 0" *>
 fn TimestampPoolHandle? create_timestamp_pool(Device* device, TimestampPoolDesc* desc) {
     gpu::internal::DeviceOperation operation =
         gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
-    if (desc == null || desc.capacity == 0) return INVALID_ARGUMENT~;
     if ((uint)operation.data.caps.timestamps.queues == 0) {
         return UNSUPPORTED_FEATURE~;
     }
@@ -2726,11 +3027,14 @@ fn void destroy_timestamp_pool(Device* device, TimestampPoolHandle pool) {
 }
 
 <* Reset a nonempty pool range outside a render pass.
+   `first + count` must not exceed the pool capacity; that rule reads pool
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token."
    @param pool : "Pool whose slots will be reset."
    @param first : "First slot in the reset range."
    @param count : "Number of slots to reset."
-   @return "Success, or a recoverable command or range fault." *>
+   @return "Success, or a recoverable command fault."
+   @require count > 0 : "count must be greater than 0" *>
 fn void? cmd_reset_timestamps(
     CommandList* commands,
     TimestampPoolHandle pool,
@@ -2748,11 +3052,13 @@ fn void? cmd_reset_timestamps(
 }
 
 <* Write one timestamp at exactly one executable pipeline stage.
+   `index` must be less than the pool capacity; that rule reads pool state, so
+   a violation panics in safe builds.
    @param commands : "Live recording token."
    @param pool : "Pool that receives the timestamp."
    @param index : "Destination slot index."
    @param stage : "Single executable stage to timestamp."
-   @return "Success, or a recoverable command, range, or stage fault." *>
+   @return "Success, or a recoverable command fault." *>
 fn void? cmd_write_timestamp(
     CommandList* commands,
     TimestampPoolHandle pool,
@@ -2772,12 +3078,16 @@ fn void? cmd_write_timestamp(
 <* Resolve packed `ulong` values with a device-side wait into aligned caller
    storage. Every slot must have been reset and written; an unwritten slot can
    stall the queue indefinitely. This call never waits on the host.
+   `first + count` must not exceed the pool capacity; that rule reads pool
+   state, so a violation panics in safe builds.
    @param commands : "Live recording token."
    @param pool : "Pool containing the timestamp values."
    @param first : "First slot to resolve."
    @param count : "Number of slots to resolve."
    @param dst : "Destination GPU span, large and aligned enough for packed ulong values."
-   @return "Success, or a recoverable command, range, or alignment fault." *>
+   @return "Success, or a recoverable command or alignment fault."
+   @require count > 0 : "count must be greater than 0"
+   @require gpu::internal::span_holds_records(dst, ulong::size, count) : "dst must be nonempty and hold count packed ulong values" *>
 fn void? cmd_resolve_timestamps(
     CommandList* commands,
     TimestampPoolHandle pool,
@@ -2799,13 +3109,17 @@ fn void? cmd_resolve_timestamps(
 <* Read packed timestamp values without waiting.
    The caller orders this read after GPU completion and externally synchronizes
    mutation or destruction of the same pool. `DEVICE_BUSY` leaves
-   `out[0..count]` unspecified.
+   `out[0..count]` unspecified. `first + count` must not exceed the pool
+   capacity; that rule reads pool state, so a violation panics in safe builds.
    @param device : "Live device that owns the pool."
    @param pool : "Pool to read."
    @param first : "First slot to read."
    @param count : "Number of slots to read."
    @param out : "Caller-owned output slice with at least count elements."
-   @return "Success, or a recoverable invalid-argument, range, or busy fault." *>
+   @return "Success, or a recoverable busy or backend fault."
+   @require count > 0 : "count must be greater than 0"
+   @require out.len >= count : "out must hold at least count values"
+   @require out.ptr != null : "out must not be null" *>
 fn void? read_timestamps(
     Device* device,
     TimestampPoolHandle pool,
@@ -2821,9 +3135,6 @@ fn void? read_timestamps(
         owner:     pool.owner,
         kind:      gpu::internal::ResourceOwnerKind.TIMESTAMP_POOL,
     );
-    if (count == 0 || out.len < count || out.ptr == null) {
-        return INVALID_ARGUMENT~;
-    }
     return gpu::internal::vk::vk_read_timestamps(
         state: operation.state,
         pool:  pool,
@@ -2838,14 +3149,16 @@ fn void? read_timestamps(
    @param queue : "Semantic role for the native queue that produced both values."
    @param begin : "Earlier raw timestamp value."
    @param end : "Later raw timestamp value."
-   @return "Elapsed nanoseconds, or a recoverable fault for invalid capabilities or an unsupported role." *>
+   @return "Elapsed nanoseconds, or a recoverable unsupported-feature fault for a role the capabilities do not support."
+   @require caps != null : "caps must not be null"
+   @require gpu::internal::queue_kind_valid(queue) : "queue must be a defined QueueKind"
+   @require gpu::internal::timestamp_caps_valid(caps, queue) : "caps must report 1..64 valid bits for the role and a positive period_ns" *>
 fn double? timestamp_delta_ns(
     TimestampCaps* caps,
     QueueKind queue,
     ulong begin,
     ulong end,
 ) {
-    if (caps == null) return INVALID_ARGUMENT~;
     uint valid_bits;
     switch (queue) {
         case GRAPHICS:
@@ -2858,10 +3171,7 @@ fn double? timestamp_delta_ns(
             if (!caps.queues.transfer) return UNSUPPORTED_FEATURE~;
             valid_bits = caps.transfer_valid_bits;
         default:
-            return INVALID_ARGUMENT~;
-    }
-    if (valid_bits == 0 || valid_bits > 64 || caps.period_ns <= 0.0f) {
-        return INVALID_ARGUMENT~;
+            return UNSUPPORTED_FEATURE~;
     }
     ulong mask = valid_bits == 64
         ? ulong::max
@@ -2879,45 +3189,52 @@ fn double? timestamp_delta_ns(
    Keep them alive and unmodified as required through their last GPU use.
    Preconditions: externally synchronize the queue; every list targets it and
    waits/readiness name valid scopes and live same-device values.
-   Always checked: queue/point identity, limits, wait scopes, exact record queue,
-   authoritative executable phase, duplicates, and all-or-nothing claim/rollback.
+   Always checked: queue/point identity, exact record queue, authoritative
+   executable phase, duplicates, and all-or-nothing claim/rollback. Wait stages
+   the target queue or enabled features cannot execute panic in safe builds.
+   `desc` must be nonnull; `desc.command_lists` and `desc.completion_waits`
+   must not exceed `MAX_SUBMIT_COMMAND_LISTS` and `MAX_SUBMIT_COMPLETION_WAITS`;
+   every wait stage must be known and exclude host and present; and nonzero
+   readiness needs a graphics queue. Without unified layouts,
+   `desc.readiness_before` must be a valid wait mask without indirect or
+   index_input when readiness is set and empty when it is not; that rule reads
+   device state, so a violation panics in safe builds. With unified layouts,
+   `desc.readiness_before` is ignored. A command list recorded for a different
+   queue aborts.
    Runtime failures: capacity, busy, and backend faults preserve inputs;
    success consumes every list and any valid swapchain readiness. The caller
    externally synchronizes submit, present, and sparse-bind host calls on the
    same native queue, including aliased roles.
    @param queue : "Exact selected queue that executes the submission."
    @param desc : "Borrowed waits and mutable executable-token batch; success clears command tokens and invalidates valid readiness."
-   @return "A reusable completion point, or a recoverable validation, capacity, busy, or backend fault." *>
+   @return "A reusable completion point, or a recoverable capacity, busy, or backend fault."
+   @require desc != null : "desc must not be null"
+   @require gpu::internal::submit_desc_valid(desc) : "desc.command_lists and desc.completion_waits must not exceed MAX_SUBMIT_COMMAND_LISTS and MAX_SUBMIT_COMPLETION_WAITS, and every wait stage must be known and exclude host and present"
+   @require desc.readiness == SWAPCHAIN_READINESS_INVALID || queue.roles.graphics : "desc.readiness requires a graphics queue" *>
 fn CompletionPoint? submit(Queue queue, SubmitDesc* desc) {
     Device device = queue.device;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(&device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_queue(&operation, &device, queue);
-    if (desc == null) return INVALID_ARGUMENT~;
-    if (desc.command_lists.len > gpu::internal::MAX_SUBMIT_COMMAND_LISTS) {
-        return INVALID_ARGUMENT~;
-    }
-    if (desc.completion_waits.len > gpu::internal::MAX_SUBMIT_COMPLETION_WAITS) {
-        return INVALID_ARGUMENT~;
-    }
     foreach (wait : desc.completion_waits) {
         gpu::internal::validate_completion_point(&operation, &device, wait.point);
-        if (!gpu::internal::submit_wait_stage_mask_valid(wait.before)) {
-            return INVALID_ARGUMENT~;
-        }
     }
     if (desc.readiness != SWAPCHAIN_READINESS_INVALID) {
         if (!desc.readiness.is_valid()) abort("gpu: malformed SwapchainReadiness");
         if (desc.readiness.device != device) abort("gpu: foreign SwapchainReadiness");
-        if (!queue.roles.graphics) return INVALID_ARGUMENT~;
-        if (!operation.data.caps.unified_layouts
-            && (!gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)
-                || desc.readiness_before.indirect
-                || desc.readiness_before.index_input)) {
-            return INVALID_ARGUMENT~;
+        if (!operation.data.caps.unified_layouts) {
+            assert(
+                gpu::internal::submit_wait_stage_mask_valid(desc.readiness_before)
+                    && !desc.readiness_before.indirect
+                    && !desc.readiness_before.index_input,
+                "desc.readiness_before must be a valid wait mask without indirect or index_input when the device lacks unified layouts"
+            );
         }
-    } else if ((uint)desc.readiness_before != 0) {
-        return INVALID_ARGUMENT~;
+    } else if (!operation.data.caps.unified_layouts) {
+        assert(
+            (uint)desc.readiness_before == 0,
+            "desc.readiness_before must be empty when desc.readiness is not set"
+        );
     }
     CompletionPoint point = gpu::internal::vk::vk_submit(
         operation.state,
@@ -3015,12 +3332,12 @@ fn void? destroy_surface(Surface* surface) {
    @param device : "Live presentation-enabled device."
    @param surface : "Borrowed matching runtime-owned surface."
    @param desc : "Borrowed requested extent, format, image count, usage, and present mode."
-   @return "An owning swapchain handle, or a recoverable validation, support, capacity, allocation, or surface fault." *>
+   @return "An owning swapchain handle, or a recoverable support, capacity, allocation, or surface fault."
+   @require desc != null : "desc must not be null" *>
 fn SwapchainHandle? create_swapchain(Device* device, Surface* surface, SwapchainDesc* desc) {
     if (surface == null) {
         abort("gpu: null Surface");
     }
-    if (desc == null) return INVALID_ARGUMENT~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::DeviceData* device_data = operation.data;
@@ -3118,14 +3435,17 @@ fn AcquiredImage? acquire_next_image(Device* device, SwapchainHandle swapchain, 
    Externally synchronize submit, present, and sparse-bind host calls on the
    same native queue, including aliased roles.
    Always checked: image/point identity, ownership, publication, and lifecycle.
+   A stale or already-presented image returns INVALID_RESOURCE_STATE. An image
+   whose index or texture does not match the current acquisition, or a point
+   other than the one the readiness-consuming submit returned, aborts.
    Runtime failures: host/device out-of-memory and pre-submit WAIT_TIMEOUT
    preserve the image. Success and every other submitted result consume it.
    @param device : "Live device that owns the acquired image."
    @param image : "Externally synchronized acquired image; consumed results replace it with the zero value."
    @param render_completion : "Completion point returned by the readiness-consuming render submission."
-   @return "Success, or a recoverable timeout, lifecycle, surface, or backend fault." *>
+   @return "Success, or a recoverable timeout, lifecycle, surface, or backend fault."
+   @require image != null : "image must not be null" *>
 fn void? present(Device* device, AcquiredImage* image, CompletionPoint render_completion) {
-    if (image == null) return INVALID_ARGUMENT~;
     gpu::internal::DeviceOperation operation = gpu::internal::begin_device_operation(device);
     defer gpu::internal::end_device_operation(&operation);
     gpu::internal::validate_completion_point(&operation, device, render_completion);

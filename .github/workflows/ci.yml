@@ -114,6 +114,7 @@ jobs:
           c3c test consumer_compile --path test/cpu
           c3c build command_wrapper_bench --path test/cpu -O1
           c3c test unit --path test/cpu
+          python3 -B -m unittest scripts.test_contract_probe -v
           c3c test shader_abi --path test/cpu
 
       - name: Shader tool tests
@@ -315,6 +316,8 @@ jobs:
           c3c test consumer_compile --path test/cpu
           c3c build command_wrapper_bench --path test/cpu -O1
           c3c test unit --path test/cpu
+          C3C="$(cygpath -w "$(command -v c3c)")" \
+          python -B -m unittest scripts.test_contract_probe -v
           c3c test shader_abi --path test/cpu
 
       - name: Install lavapipe (mesa-dist-win)

@@ -82,15 +82,15 @@ struct ResolvedCompletionWait {
 }
 
 struct QueueSubmitScratch {
-    ResolvedCompletionWait[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS]
+    ResolvedCompletionWait[gpu::MAX_SUBMIT_COMPLETION_WAITS]
         completion_waits;
-    CommandRecord*[gpu::internal::MAX_SUBMIT_COMMAND_LISTS]
+    CommandRecord*[gpu::MAX_SUBMIT_COMMAND_LISTS]
         records;
-    CommandRecord*[gpu::internal::MAX_SUBMIT_COMMAND_LISTS + 2]
+    CommandRecord*[gpu::MAX_SUBMIT_COMMAND_LISTS + 2]
         batch;
-    vk::CommandBufferSubmitInfo[gpu::internal::MAX_SUBMIT_COMMAND_LISTS + 2]
+    vk::CommandBufferSubmitInfo[gpu::MAX_SUBMIT_COMMAND_LISTS + 2]
         command_buffer_infos;
-    vk::SemaphoreSubmitInfo[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS + 2]
+    vk::SemaphoreSubmitInfo[gpu::MAX_SUBMIT_COMPLETION_WAITS + 2]
         wait_infos;
 }
 
@@ -482,12 +482,6 @@ fn QueueFamilies? pick_queue_families_impl(
     bool require_sparse_binding,
     gpu::QueueRequest request,
 ) @private {
-    if (!gpu::internal::queue_request_is_valid(request)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-    if (require_presentation && !request.required.graphics) {
-        return gpu::INVALID_ARGUMENT~;
-    }
     if ((request.required.graphics
             && !queue_role_is_available(families, gpu::QueueKind.GRAPHICS))
         || (request.required.compute
@@ -496,9 +490,10 @@ fn QueueFamilies? pick_queue_families_impl(
             && !queue_role_is_available(families, gpu::QueueKind.TRANSFER))) {
         return gpu::UNSUPPORTED_FEATURE~;
     }
-    if (require_presentation && presentation_support.len != families.len) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        !require_presentation || presentation_support.len == families.len,
+        "presentation support must cover every queue family"
+    );
 
     QueueFamilies base = {
         .selected = request.required,
@@ -903,9 +898,10 @@ fn void? create_queue_completions(
     VkDeviceState* state,
     gpu::internal::QueueSelection* selection,
 ) @private {
-    if (state == null || selection == null || selection.identity_count == 0) {
-        return gpu::INVALID_ARGUMENT~;
-    }
+    assert(
+        state != null && selection != null && selection.identity_count > 0,
+        "queue selection must name at least one queue"
+    );
     state.queue_completions = mem::new_array(
         QueueCompletionState,
         (usz)selection.identity_count,
@@ -1293,7 +1289,7 @@ fn CommandRecord*[]? claim_submit_records_locked(
         }
         gpu::internal::executable_record_phase(record)!;
         CommandRecord* backend = record;
-        if (backend.queue != queue) return gpu::INVALID_ARGUMENT~;
+        if (backend.queue != queue) abort("gpu: mismatched Queue");
         if (backend.submit_visit_epoch == epoch) {
             return gpu::COMMAND_RECORDING_ERROR~;
         }
@@ -1398,13 +1394,6 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
     SubmitInputs inputs;
     gpu::Device device = queue.device;
     bool has_readiness = desc.readiness != gpu::SWAPCHAIN_READINESS_INVALID;
-    bool has_readiness_stages = (uint)desc.readiness_before != 0;
-    if (state.unified_layouts
-        ? (has_readiness_stages && !has_readiness)
-        : (has_readiness != has_readiness_stages)) {
-        return gpu::INVALID_ARGUMENT~;
-    }
-
     if (has_readiness) {
         if (!desc.readiness.is_valid()
             || desc.readiness.device != device) {
@@ -1414,9 +1403,6 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
             inputs.readiness_stages =
                 vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT;
         } else {
-            if (desc.readiness_before.indirect || desc.readiness_before.index_input) {
-                return gpu::INVALID_ARGUMENT~;
-            }
             inputs.readiness_stages = submit_wait_stages_to_vk(
                 stages:         desc.readiness_before,
                 flags:          target.queue_flags,
@@ -1425,7 +1411,7 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
                 ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
                 mesh_shaders:   state.mesh_shaders_enabled,
                 task_shaders:   state.task_shaders_enabled,
-            )!;
+            );
         }
         gpu::SwapchainHandle handle = swapchain_handle_from_readiness(
             state,
@@ -1439,7 +1425,6 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
             provided_acquisition: swapchain_readiness_acquisition(
                 desc.readiness,
             ),
-            roles:                queue.roles,
         )!;
     }
 
@@ -1464,7 +1449,7 @@ fn SubmitInputs? resolve_and_claim_submit_inputs(
                 ray_tracing_pipelines: state.ray_tracing_pipelines_enabled,
                 mesh_shaders:   state.mesh_shaders_enabled,
                 task_shaders:   state.task_shaders_enabled,
-            )!;
+            );
             inputs.completion_waits[i] = {
                 .source   = source,
                 .stages   = stages,

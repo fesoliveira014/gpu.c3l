@@ -94,7 +94,7 @@ fn OwnedSpan? allocate_trace_span(
     defer catch (void)gpu::free_allocation(device, &allocation);
     return {
         .allocation = allocation,
-        .span       = gpu::get_allocation_span(device, allocation)!,
+        .span       = gpu::get_allocation_span(device, allocation),
     };
 }
 
@@ -116,7 +116,7 @@ fn gpu::Device? create_ray_tracing_test_device(
         .enable_ray_tracing_pipelines = true,
     };
     for (uint i = 0; i < adapters.count; i++) {
-        gpu::Adapter adapter = adapters.get(i)!;
+        gpu::Adapter adapter = adapters.get(i);
         gpu::DeviceSupport support =
             gpu::supports_device_desc(&adapter, &device_desc)!;
         if (!support.supported) continue;
@@ -351,19 +351,19 @@ fn OwnedSpan? create_functional_sbt(
     gpu::flush_mapped_span(device, sbt.span)!;
 
     table.ray_generation = {
-        .span   = sbt.span.checked_subspan(ray_generation_offset, stride)!,
+        .span   = sbt.span.subspan(ray_generation_offset, stride),
         .stride = stride,
     };
     table.miss = {
-        .span   = sbt.span.checked_subspan(miss_offset, 2 * stride)!,
+        .span   = sbt.span.subspan(miss_offset, 2 * stride),
         .stride = stride,
     };
     table.hit = {
-        .span   = sbt.span.checked_subspan(hit_offset, 2 * stride)!,
+        .span   = sbt.span.subspan(hit_offset, 2 * stride),
         .stride = stride,
     };
     table.callable = {
-        .span   = sbt.span.checked_subspan(callable_offset, stride)!,
+        .span   = sbt.span.subspan(callable_offset, stride),
         .stride = stride,
     };
     return sbt;
@@ -456,7 +456,7 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         "ray-tracing pipelines require a selected compute queue");
     gpu::QueueKind queue_kind = gpu::QueueKind.COMPUTE;
     gpu::QueueRoles access = { .compute };
-    gpu::Queue queue = gpu::get_queue(&device, queue_kind)!!;
+    gpu::Queue queue = gpu::get_queue(&device, queue_kind);
 
     OwnedSpan aabbs = allocate_trace_span(
         device:       &device,
@@ -753,7 +753,7 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         create_trace_indirect_build_pipeline(&device)!!;
     defer gpu::destroy_pipeline(&device, indirect_build_pipeline)!!;
     gpu::RayTracingPipelineInfo pipeline_info =
-        gpu::get_ray_tracing_pipeline_info(&device, pipeline)!!;
+        gpu::get_ray_tracing_pipeline_info(&device, pipeline);
     assert(pipeline_info.ray_generation.group_count == 1
             && pipeline_info.miss.group_count == 2
             && pipeline_info.hit.group_count == 2
@@ -905,7 +905,7 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         texture: texture,
         before:  { .layout = gpu::TextureLayout.UNDEFINED },
         after:   gpu::storage_at({ .ray_tracing }, { .read, .write }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&trace_commands, &texture_to_storage)!!;
     if (caps.ray_tracing_pipelines.indirect_dispatch
         || caps.ray_tracing_pipelines.indirect2_dispatch
@@ -1011,7 +1011,7 @@ fn void ray_tracing_triangle_aabb_and_miss_round_trip() @test {
         texture: texture,
         before:  texture_to_storage.after,
         after:   gpu::sampled_at({ .ray_tracing }),
-    )!!;
+    );
     gpu::cmd_texture_barrier(&trace_commands, &texture_to_sampled)!!;
     gpu::Barrier trace_to_host = {
         .before = { .ray_tracing },
