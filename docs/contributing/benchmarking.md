@@ -8,7 +8,7 @@ number.
 
 ## Setup
 
-C3 0.8.3, submodules initialized, shader assets built, and the Vulkan and VMA
+C3 0.8.5_1, submodules initialized, shader assets built, and the Vulkan and VMA
 setup from [testing](testing.md#toolchain).
 
 ```sh
