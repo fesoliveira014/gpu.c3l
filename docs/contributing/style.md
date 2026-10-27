@@ -4,7 +4,7 @@
 
 ## 1. Language target
 
-C3 0.8.3. C3 is pre-1.0; check syntax against the installed compiler, not
+C3 0.8.5_1. C3 is pre-1.0; check syntax against the installed compiler, not
 memory.
 
 ## 2. Modules and files

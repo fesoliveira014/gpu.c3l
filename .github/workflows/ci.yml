@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  C3C_VERSION: "0.8.3"
+  C3C_VERSION: "0.8.5_1"
   VULKAN_SDK_VERSION: "1.4.357.0"
   MESA_DIST_WIN_VERSION: "25.1.5"
 
