@@ -12,8 +12,8 @@ from pathlib import Path
 VMA_PATH = "lib/vma.c3l"
 # The vma.c3l release built from the commit lib/vma.c3l pins. Update the tag,
 # commit, and checksums together whenever the submodule moves.
-VMA_RELEASE_TAG = "v0.2.0"
-VMA_RELEASE_COMMIT = "b9962af789efd95e3d87d139ccf4d25d53ecdf42"
+VMA_RELEASE_TAG = "v0.2.1"
+VMA_RELEASE_COMMIT = "adc0f7d0118fb5176f14b1c188beeb318d02d392"
 RELEASE_URL = f"https://github.com/fesoliveira014/vma.c3l/releases/download/{VMA_RELEASE_TAG}"
 
 # Per platform: the packed artifact, its checksum from the release SHA256SUMS,
@@ -21,15 +21,15 @@ RELEASE_URL = f"https://github.com/fesoliveira014/vma.c3l/releases/download/{VMA
 LIBRARIES = {
     "linux-x64": {
         "asset": f"vma-{VMA_RELEASE_TAG}-linux-x64.c3l",
-        "asset_sha256": "09d461cfa3b064a6f3a670fc69374864799e85a198c2241c5e722f73f04547db",
+        "asset_sha256": "6f7f047383ef2c461df5c05c0a36b13383cdaf3d2b71486aecb4221ed4966f8e",
         "file": "libVulkanMemoryAllocator.a",
         "sha256": "0ef10119c7848c82605637fbf9d6a6d7bef471ff625bf601232662459afbb2f6",
     },
     "windows-x64": {
         "asset": f"vma-{VMA_RELEASE_TAG}-windows-x64.c3l",
-        "asset_sha256": "3cd84f562ae3f9242be9e05f8c1f95a3d0d5b40657bf1f68df33af7299136af8",
+        "asset_sha256": "15cc9cc7d842855b6f34376eba46fd72b0fe763f978cbb30685d3fa56733d17a",
         "file": "VulkanMemoryAllocator.lib",
-        "sha256": "69b867e1720816a3ac65aab9e8864ea0e5170f309561c71cb3c3ed9c3577ada0",
+        "sha256": "e9cfba1c3fb757088ae18cc058367101cad5fce37e03cd2807b30ed925fffa7d",
     },
 }
 

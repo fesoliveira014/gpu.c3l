@@ -12,8 +12,8 @@ from pathlib import Path
 SPVREFLECT_PATH = "lib/spvreflect.c3l"
 # The spvreflect.c3l release built from the commit lib/spvreflect.c3l pins.
 # Update the tag, commit, and checksums together whenever the submodule moves.
-SPVREFLECT_RELEASE_TAG = "v0.1.0"
-SPVREFLECT_RELEASE_COMMIT = "dae8224602f547628a7b1f4ac0632e97582c92ee"
+SPVREFLECT_RELEASE_TAG = "v0.1.1"
+SPVREFLECT_RELEASE_COMMIT = "320f1a882e64da070b5d70dc663dd34b9213d3ac"
 RELEASE_URL = (
     "https://github.com/fesoliveira014/spvreflect.c3l/releases/download/"
     f"{SPVREFLECT_RELEASE_TAG}"
@@ -22,9 +22,9 @@ RELEASE_URL = (
 # The Windows import library is not committed; Linux keeps linux/libspvreflect.a in git.
 LIBRARY = {
     "asset": f"spvreflect-{SPVREFLECT_RELEASE_TAG}-windows-x64.c3l",
-    "asset_sha256": "a1db1eae44710d6f41f5dc7ef7028c60e141933fe9996f7d216838f2b0a7f03f",
+    "asset_sha256": "5126b037edcb00fc63aee7e9883361033ff0bfcc913c3f86678317f449b3a12b",
     "member": "windows/spvreflect.lib",
-    "sha256": "f91c0050fda4019f9de1b95623cd472bcf1f560a77c0ec1092025d9dd830c171",
+    "sha256": "040750b92f4515b10e7dd5eafc31a0eb0850abd1b4e55b3e8009dfe60dde7343",
 }
 
 
