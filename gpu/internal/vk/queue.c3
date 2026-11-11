@@ -27,6 +27,8 @@ enum SubmissionCheckpoint : uint @feat(TESTING) {
     NATIVE_ACCEPTED,
     BATCHES_PUBLISHED,
     TOKEN_PUBLISHED,
+    // Unified mode: a texture initialization batch and its point are published.
+    INIT_PUBLISHED,
 }
 
 struct QueueSubmitOps @private {
@@ -1339,7 +1341,7 @@ fn void rollback_submit_claim(
 <* Unified mode: prepend the acquire transition and append the present
    transition as library-recorded lists; every created list is discarded on
    failure. Texture initialization goes in its own batch
-   (`submit_pending_texture_inits`). *>
+   (`submit_texture_init_batch_locked`). *>
 fn CommandRecord*[]? record_unified_batch(
     VkDeviceState* state,
     QueueCompletionState* completion,
@@ -1391,84 +1393,61 @@ fn CommandRecord*[]? record_unified_batch(
     return scratch.batch[:count];
 }
 
-<* Unified mode: before the caller's batch, take every pending texture this
-   queue may access and submit its UNDEFINED -> GENERAL transition as a batch
-   of its own, which waits on nothing but an earlier sparse bind on the same
-   queue, so other queues that wait for it wait only for this queue's earlier
-   work. A failure puts the textures back and leaves the caller's batch
-   untouched.
-
-   init_submit_mutex is held from the take through publishing the point in
-   `init_sequence_for` (or restoring the textures), so the take and the
-   publication look atomic to other submits. Lock order: device operation pin
-   > init submit > device/resource > pending init, and init submit > queue
-   submission. Only this path takes it, never with a resource, queue or
-   retirement lock held.
+<* Unified mode: take every pending texture a queue with `roles` may access
+   into `take` and return whether init_submit_mutex is now held: it is held
+   exactly while the take is non-empty, from the take until the take is
+   submitted (`submit_texture_init_batch_locked`) or restored
+   (`restore_pending_texture_inits`), so the two look atomic to other
+   submits. Lock order: device operation pin > init submit > device/resource
+   > pending init, and init submit > queue submission. Only the submit path
+   takes it, never with a resource, queue or retirement lock held.
 
    Fast path, without the mutex: a texture created before this call counts in
    `pending_inits.outstanding` for each of its roles until its initialization
-   is published in `init_sequence_for` (a seq_cst store before the seq_cst
+   point is stored in `init_sequence_for` (a seq_cst store before the seq_cst
    decrement) or it is destroyed. A zero load for every role of this queue
-   therefore means each such texture is already published, so the wait
+   therefore means each such texture's point is already stored, so the wait
    computed later from a seq_cst load of `init_sequence_for` covers it. A
-   non-zero load takes the mutex, which waits for an in-flight publisher. *>
-fn void? submit_pending_texture_inits(
+   non-zero load takes the mutex, which waits for an in-flight submitter.
+   @param [&out] take
+*>
+fn bool take_pending_texture_inits(
     VkDeviceState* state,
-    QueueCompletionState* completion,
-    gpu::Queue queue,
-    QueueSubmitOps* ops,
+    gpu::QueueRoles roles,
+    PendingInitTake* take,
 ) @private {
-    if (!state.pending_inits.has_outstanding(completion.roles)) return;
+    *take = {};
+    if (!state.pending_inits.has_outstanding(roles)) return false;
     state.init_submit_mutex.lock()!!;
-    defer state.init_submit_mutex.unlock();
-    gpu::QueueRoles initialized;
-    gpu::TextureHandle[] pending = retain_pending_texture_inits(
-        state,
-        completion.roles,
-        &initialized,
-    );
-    if (pending.len == 0) return;
-    // Registered after the unlock, so the restore runs with the mutex held.
-    defer catch restore_pending_texture_inits(state, pending);
-    gpu::CompletionPoint point = submit_texture_init_batch(
-        state:      state,
-        completion: completion,
-        queue:      queue,
-        pending:    pending,
-        ops:        ops,
-    )!;
-    ulong sequence = gpu::internal::completion_point_sequence(point);
-    gpu::QueueRoles[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] identity_roles;
-    foreach (i, &other : state.queue_completions) {
-        if (other.bound) identity_roles[i] = other.roles;
-    }
-    uint targets = texture_init_targets(
-        identity_roles[:state.queue_completions.len],
-        queue.id,
-        initialized,
-    );
-    foreach (i, &sequence_for : completion.init_sequence_for) {
-        if ((targets & (1u << (uint)i)) == 0) continue;
-        sequence_for.store(sequence, AtomicOrdering.SEQ_CONSISTENT);
-    }
-    settle_pending_texture_inits(state, pending);
+    *take = retain_pending_texture_inits(state, roles);
+    if (take.handles.len > 0) return true;
+    state.init_submit_mutex.unlock();
+    return false;
 }
 
-<* Record and submit one initialization list for `pending` under the queue's
-   submission lock and publish its point. The record owns `pending` once the
-   native submit succeeds. *>
-fn gpu::CompletionPoint? submit_texture_init_batch(
+<* Unified mode: record one initialization list for the textures of `take`
+   and submit it as a batch of its own, which waits on nothing but an earlier
+   sparse bind on the same queue, so other queues that wait for it wait only
+   for this queue's earlier work. Requires the queue's submission lock and
+   init_submit_mutex.
+
+   Once the native submit succeeds, its point is stored in
+   `init_sequence_for` for every other queue identity that may access the
+   textures and the take is settled, both before the record and the point are
+   published: from then on a retirement on any thread may unpin the textures
+   and free the array, which the record owns. Waiting on the point is valid
+   as soon as its signal is submitted. On success the take is emptied; on
+   failure it is unchanged and the caller restores it. *>
+fn void? submit_texture_init_batch_locked(
     VkDeviceState* state,
     QueueCompletionState* completion,
     gpu::Queue queue,
-    gpu::TextureHandle[] pending,
+    PendingInitTake* take,
     QueueSubmitOps* ops,
 ) @private {
-    completion.submission_mutex.lock()!!;
-    defer completion.submission_mutex.unlock();
     CommandRecord* record = begin_internal_commands(state, completion, queue)!;
     defer catch discard_internal_commands(state, record);
-    record_texture_init_barriers(state, record, pending);
+    record_texture_init_barriers(state, record, take.handles);
     end_internal_commands(state, record)!;
 
     vk::CommandBufferSubmitInfo command_info = vk::command_buffer_submit_info()
@@ -1501,7 +1480,8 @@ fn gpu::CompletionPoint? submit_texture_init_batch(
         state,
         queue,
     )!;
-    signal_info.value = gpu::internal::completion_point_sequence(point);
+    ulong sequence = gpu::internal::completion_point_sequence(point);
+    signal_info.value = sequence;
     submit = submit.set_signal_semaphore_infos((&signal_info)[:1]);
     vk::Result result = ops.submit(
         completion.queue,
@@ -1518,7 +1498,23 @@ fn gpu::CompletionPoint? submit_texture_init_batch(
         )!;
     }
 
-    record.init_textures = pending;
+    gpu::QueueRoles[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] identity_roles;
+    foreach (i, &other : state.queue_completions) {
+        if (other.bound) identity_roles[i] = other.roles;
+    }
+    uint targets = texture_init_targets(
+        identity_roles[:state.queue_completions.len],
+        queue.id,
+        take.roles(),
+    );
+    foreach (i, &sequence_for : completion.init_sequence_for) {
+        if ((targets & (1u << (uint)i)) == 0) continue;
+        sequence_for.store(sequence, AtomicOrdering.SEQ_CONSISTENT);
+    }
+    state.pending_inits.settle(take);
+
+    record.init_textures = take.handles;
+    *take = {};
     completion.retirement_mutex.lock()!!;
     publish_pending_commands_locked(
         state,
@@ -1529,13 +1525,18 @@ fn gpu::CompletionPoint? submit_texture_init_batch(
     completion.retirement_mutex.unlock();
     record.state = gpu::internal::CommandState.SUBMITTED;
     publish_queue_completion_locked(state, point)!!;
-    return point;
+    $if env::TESTING:
+        reach_submission_checkpoint(
+            ops,
+            SubmissionCheckpoint.INIT_PUBLISHED,
+        );
+    $endif
 }
 
 <* Unified mode: wait for other queues' published texture initializations
    that this queue may touch and that neither retired nor an application
    wait at every stage already covers. Requires the queue's submission lock;
-   `submit_pending_texture_inits` explains why the loads see every
+   `take_pending_texture_inits` explains why the loads see every
    initialization of a texture created before the submit call. *>
 fn usz append_texture_init_wait_infos(
     VkDeviceState* state,
@@ -1714,14 +1715,21 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     )!;
     QueueSubmitScratch* scratch = completion.submit_scratch;
     if (scratch == null) unreachable();
-    if (state.unified_layouts) {
-        submit_pending_texture_inits(
-            state:      state,
-            completion: completion,
-            queue:      queue,
-            ops:        ops,
-        )!;
+    // Unified mode: pending textures are taken before the queue lock, since
+    // the take pins them under the resource lock, but initialized only once
+    // the caller's inputs are valid, so a rejected submit leaves no GPU work.
+    // The unlock is registered before the restore, so a restore runs with
+    // init_submit_mutex held.
+    PendingInitTake init_take;
+    bool init_locked = state.unified_layouts && take_pending_texture_inits(
+        state,
+        completion.roles,
+        &init_take,
+    );
+    defer {
+        if (init_locked) state.init_submit_mutex.unlock();
     }
+    defer catch restore_pending_texture_inits(state, &init_take);
     completion.submission_mutex.lock()!!;
     defer completion.submission_mutex.unlock();
 
@@ -1738,6 +1746,17 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     bool claimed = records.len > 0;
     defer catch {
         if (claimed) rollback_submit_claim(state, records);
+    }
+    if (init_locked) {
+        submit_texture_init_batch_locked(
+            state:      state,
+            completion: completion,
+            queue:      queue,
+            take:       &init_take,
+            ops:        ops,
+        )!;
+        state.init_submit_mutex.unlock();
+        init_locked = false;
     }
     if (state.unified_layouts) {
         records = record_unified_batch(

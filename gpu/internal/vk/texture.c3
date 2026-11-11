@@ -556,82 +556,88 @@ fn void forget_pending_texture_init(
 }
 
 <* Unified mode: move the pending textures a queue with `roles` may access
-   into a new heap array, pinning each until its initialization retires, and
-   report the union of their access in `initialized`. The textures stay
-   outstanding until `settle_pending_texture_inits` or
-   `restore_pending_texture_inits`. Takes resource_mutex, so callers must not
-   hold a queue lock. The array belongs to the caller until a record takes it.
-   @param [&out] initialized
-*>
-fn gpu::TextureHandle[] retain_pending_texture_inits(
+   into a new heap array, pinning each until its initialization retires. The
+   take counts them per access bucket; they stay outstanding until the take
+   is settled (`PendingTextureInits.settle`) or restored
+   (`restore_pending_texture_inits`). Takes resource_mutex, so callers must
+   not hold a queue lock. The array belongs to the caller until a record
+   takes it. *>
+fn PendingInitTake retain_pending_texture_inits(
     VkDeviceState* state,
     gpu::QueueRoles roles,
-    gpu::QueueRoles* initialized,
 ) {
-    *initialized = {};
-    uint access_union = 0;
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     state.pending_init_mutex.lock()!!;
     defer state.pending_init_mutex.unlock();
     uint total = state.pending_inits.compatible_count(roles);
     if (total == 0) return {};
-    gpu::TextureHandle[] out = mem::new_array(gpu::TextureHandle, total);
-    uint taken = state.pending_inits.take(roles, out);
+    PendingInitTake take = {
+        .handles = mem::new_array(gpu::TextureHandle, total),
+    };
+    (void)state.pending_inits.take(roles, &take);
+    // A handle whose slot is gone is dropped and settled here, so the take
+    // keeps exactly the pinned textures and their counts.
     uint count = 0;
-    for (uint i = 0; i < taken; i++) {
-        TextureSlot*? slot = state.textures.get(out[i]);
-        if (catch err = slot) continue;
-        (void)slot.internal_references.add(1, AtomicOrdering.RELAXED);
-        access_union |= (uint)slot.access;
-        out[count++] = out[i];
+    uint index = 0;
+    for (uint bucket = 0; bucket < PENDING_INIT_BUCKETS; bucket++) {
+        uint in_bucket = take.bucket_counts[bucket];
+        for (uint i = 0; i < in_bucket; i++) {
+            gpu::TextureHandle handle = take.handles[index++];
+            TextureSlot*? slot = state.textures.get(handle);
+            if (catch err = slot) {
+                take.bucket_counts[bucket]--;
+                state.pending_inits.count_outstanding(
+                    pending_init_bucket_roles(bucket),
+                    1,
+                    false,
+                );
+                continue;
+            }
+            (void)slot.internal_references.add(1, AtomicOrdering.RELAXED);
+            take.handles[count++] = handle;
+        }
     }
-    *initialized = (gpu::QueueRoles)access_union;
     if (count == 0) {
-        mem::free(out.ptr);
+        mem::free(take.handles.ptr);
         return {};
     }
-    return out[:count];
+    take.handles = take.handles[:count];
+    return take;
 }
 
-<* End the outstanding counts of textures whose initialization was just
-   published; the pins stay with the record until it retires. *>
-fn void settle_pending_texture_inits(
-    VkDeviceState* state,
-    gpu::TextureHandle[] handles,
-) {
-    state.resource_mutex.lock()!!;
-    defer state.resource_mutex.unlock();
-    state.pending_init_mutex.lock()!!;
-    defer state.pending_init_mutex.unlock();
-    foreach (handle : handles) {
-        TextureSlot*? slot = state.textures.get(handle);
-        if (catch err = slot) continue;
-        state.pending_inits.settle(slot.access);
-    }
-}
-
-<* Return textures retained by a submit that failed to the pending list and
-   unpin them, under resource_mutex so a destroy cannot slip between the two.
-   Frees the array; the caller must not hold a queue lock. *>
+<* Return the textures of a take whose initialization was not submitted to
+   the pending list and unpin them, under resource_mutex so a destroy cannot
+   slip between the two. Frees the array and empties the take; an empty take
+   is a no-op. The caller must not hold a queue lock.
+   @param [&inout] take
+*>
 fn void restore_pending_texture_inits(
     VkDeviceState* state,
-    gpu::TextureHandle[] handles,
+    PendingInitTake* take,
 ) {
-    if (handles.len == 0) return;
+    if (take.handles.len == 0) return;
     {
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
         state.pending_init_mutex.lock()!!;
         defer state.pending_init_mutex.unlock();
-        foreach (handle : handles) {
-            TextureSlot*? slot = state.textures.get(handle);
-            if (catch err = slot) continue;
-            (void)state.pending_inits.requeue(handle, slot.access);
-            (void)slot.internal_references.sub(1, AtomicOrdering.RELAXED);
+        uint index = 0;
+        for (uint bucket = 0; bucket < PENDING_INIT_BUCKETS; bucket++) {
+            for (uint i = 0; i < take.bucket_counts[bucket]; i++) {
+                gpu::TextureHandle handle = take.handles[index++];
+                (void)state.pending_inits.requeue(
+                    handle,
+                    pending_init_bucket_roles(bucket),
+                );
+                TextureSlot*? slot = state.textures.get(handle);
+                if (catch err = slot) continue;
+                (void)slot.internal_references.sub(1, AtomicOrdering.RELAXED);
+            }
         }
     }
-    mem::free(handles.ptr);
+    mem::free(take.handles.ptr);
+    *take = {};
 }
 
 <* Drop the pins of a retired initialization and free the array. Runs under

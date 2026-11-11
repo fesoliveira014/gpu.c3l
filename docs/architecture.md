@@ -332,9 +332,9 @@ and queue locks. So: recording through distinct allocators runs in parallel,
 and completion polling does not serialize a native submit. Submits to
 distinct native queues are independent, except that in unified mode a submit
 that takes pending texture initializations holds the device-wide
-texture-init-submit lock while it submits them as their own batch and
-publishes them, and a submit on another queue that may access one of those
-textures waits for that lock.
+texture-init-submit lock while it validates its own inputs and submits and
+publishes the initializations as their own batch, and a submit on another
+queue that may access one of those textures waits for that lock.
 
 ## Diagnostics and cost
 

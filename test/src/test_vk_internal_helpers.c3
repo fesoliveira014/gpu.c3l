@@ -188,22 +188,29 @@ fn void pending_inits_take_only_compatible_buckets() @test {
         && pending_test_outstanding(&list, 1) == 1
         && pending_test_outstanding(&list, 2) == 2);
 
-    gpu::TextureHandle[8] taken;
+    gpu::TextureHandle[8] storage_taken;
+    PendingInitTake take = { .handles = storage_taken[..] };
     assert(list.compatible_count({ .transfer }) == 2);
-    assert(list.take({ .transfer }, taken[..]) == 2, "a transfer queue takes the two transfer-accessible textures");
-    assert((taken[0] == shared || taken[1] == shared) && (taken[0] == transfer_only || taken[1] == transfer_only));
+    assert(list.take({ .transfer }, &take) == 2, "a transfer queue takes the two transfer-accessible textures");
+    gpu::TextureHandle[] taken = take.handles;
+    assert(taken.len == 2, "the take shrinks to what it took");
+    assert(taken[0] == transfer_only && taken[1] == shared, "a take lists its handles in bucket order");
+    assert(take.bucket_counts[pending_init_bucket({ .transfer })] == 1
+        && take.bucket_counts[pending_init_bucket({ .graphics, .transfer })] == 1);
+    assert((uint)take.roles() == (uint)(gpu::QueueRoles){ .graphics, .transfer },
+        "the take's roles are the union of its buckets");
     uint unshared_bucket = pending_init_bucket({ .graphics, .compute });
     assert(list.count() == 1 && pending_test_bucket_holds(&list, unshared_bucket, unshared),
         "the unshared texture stays queued");
     assert(list.compatible_count({ .transfer }) == 0);
     assert(list.has_outstanding({ .transfer }), "taken textures stay outstanding until settled");
 
-    list.settle({ .graphics, .transfer });
-    list.settle({ .transfer });
+    list.settle(&take);
     assert(!list.has_outstanding({ .transfer }), "settling ends the transfer role's count");
     assert(list.has_outstanding({ .graphics }) && list.has_outstanding({ .compute }));
 
-    assert(list.take({ .compute }, taken[..]) == 1 && taken[0] == unshared);
+    take = { .handles = storage_taken[..] };
+    assert(list.take({ .compute }, &take) == 1 && take.handles[0] == unshared);
     assert(list.requeue(unshared, { .graphics, .compute }), "a failed submit puts the texture back");
     assert(list.count() == 1 && pending_test_outstanding(&list, 0) == 1 && pending_test_outstanding(&list, 1) == 1,
         "a requeue does not count the texture twice");
@@ -221,10 +228,11 @@ fn void pending_inits_full_list_drops_and_settles() @test {
     assert(pending_test_outstanding(&list, 0) == 2, "a dropped push is not counted");
 
     gpu::TextureHandle[2] taken;
-    assert(list.take({ .graphics }, taken[..]) == 2);
+    PendingInitTake take = { .handles = taken[..] };
+    assert(list.take({ .graphics }, &take) == 2);
     assert(list.push(pending_test_handle(4), { .graphics }));
     assert(list.push(pending_test_handle(5), { .graphics }));
-    assert(list.requeue(taken[0], { .graphics }) == false, "a requeue into a full list drops the texture");
+    assert(list.requeue(take.handles[0], { .graphics }) == false, "a requeue into a full list drops the texture");
     assert(pending_test_outstanding(&list, 0) == 3, "the dropped requeue is settled");
 }
 
@@ -269,19 +277,26 @@ fn void pending_inits_match_a_reference_model() @test {
         } else {
             gpu::QueueRoles roles = (gpu::QueueRoles)(1u << ((random >> 6) % QUEUE_ROLE_SLOTS));
             gpu::TextureHandle[CAPACITY] taken;
+            PendingInitTake take = { .handles = taken[..] };
             uint expected = list.compatible_count(roles);
-            uint count = list.take(roles, taken[..]);
-            assert(count == expected);
+            uint count = list.take(roles, &take);
+            assert(count == expected && take.handles.len == count);
+            uint bucket = 0;
+            uint left_in_bucket = take.bucket_counts[0];
             for (uint i = 0; i < count; i++) {
-                uint index = taken[i].index;
+                while (left_in_bucket == 0) left_in_bucket = take.bucket_counts[++bucket];
+                left_in_bucket--;
+                uint index = take.handles[i].index;
                 assert(queued[index] && queue_roles_overlap(reference_access[index], roles),
                     "take returns only queued textures the roles may access");
+                assert(pending_init_bucket(reference_access[index]) == bucket,
+                    "the bucket counts describe the handles in order");
                 queued[index] = false;
-                list.settle(reference_access[index]);
                 for (uint role = 0; role < QUEUE_ROLE_SLOTS; role++) {
                     if (((uint)reference_access[index] & (1u << role)) != 0) outstanding[role]--;
                 }
             }
+            list.settle(&take);
             assert(list.compatible_count(roles) == 0);
         }
         uint live;

@@ -161,6 +161,12 @@ ray stages.
 
 On success every list token and the readiness are consumed. On any
 failure the lists stay executable and readiness stays unconsumed.
+Under `DeviceDesc.unified_layouts`, a submit that initializes textures
+submits that initialization as a batch of its own, with its own completion
+point, just before its lists and only once its inputs are accepted: a
+rejected submit submits nothing, but when the native submission of the lists
+fails after it, the initialization stays submitted. The returned point is
+the later one.
 Submitting commands and holding a completion point do not retain application
 resources; keep them alive and unmodified as required until their last GPU use
 completes. Destroy and update calls do not infer shader use or wait for completion.

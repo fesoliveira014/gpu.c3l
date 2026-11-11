@@ -137,7 +137,7 @@ struct VkDeviceState @public {
     Mutex                      pending_init_mutex;
     PendingTextureInits        pending_inits;
     // Unified mode: held from taking pending initializations through
-    // publishing or restoring them; see submit_pending_texture_inits.
+    // submitting or restoring them; see take_pending_texture_inits.
     Mutex                      init_submit_mutex;
     uint                       acceleration_structure_heap_capacity;
     VkAccelerationStructureDispatch* acceleration_structure_operations;

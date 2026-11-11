@@ -815,3 +815,126 @@ fn void unified_init_concurrent_queues_stay_validation_clean() @test {
         "every texture was initialized or removed and settled");
     assert(validation.errors == 0, "concurrent graphics and transfer submits stay validation clean");
 }
+
+const uint INIT_SETTLE_SPIN_LIMIT = 1_000_000;
+
+struct InitSettleGate {
+    Atomic{bool} entered;
+    Atomic{bool} release;
+}
+
+struct InitSettleWorker {
+    vk::VkDeviceState*   state;
+    gpu::Queue           queue;
+    InitSettleGate*      gate;
+    gpu::CompletionPoint point;
+}
+
+fn void gate_init_publication(void* user_data, vk::SubmissionCheckpoint checkpoint) {
+    if (checkpoint != vk::SubmissionCheckpoint.INIT_PUBLISHED) return;
+    InitSettleGate* gate = (InitSettleGate*)user_data;
+    gate.entered.store(true);
+    while (!gate.release.load()) thread::yield();
+}
+
+fn int init_settle_worker(void* raw_args) {
+    InitSettleWorker* args = (InitSettleWorker*)raw_args;
+    @pool_init(&allocators::LIBC_ALLOCATOR, 64 * 1024) {
+        gpu::SubmitDesc empty = {};
+        args.point = vk::vk_submit_with_checkpoint(
+            state:      args.state,
+            queue:      args.queue,
+            desc:       &empty,
+            submit_fn:  &capture_init_submit,
+            checkpoint: &gate_init_publication,
+            user_data:  args.gate,
+        )!!;
+    };
+    return 0;
+}
+
+fn void unified_init_settles_before_its_batch_can_retire() @test {
+    VulkanValidationCapture validation;
+    gpu::Device device = make_unified_device(&validation);
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+    validation.errors = 0;
+    reset_submit_capture();
+    gpu::QueueRoles every_role = { .graphics, .compute, .transfer };
+    gpu::TextureHandle texture = make_unified_heap_texture(&device, "settled_init");
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    assert(state.pending_inits.has_outstanding(every_role));
+
+    InitSettleGate gate;
+    InitSettleWorker worker = { .state = state, .queue = graphics, .gate = &gate };
+    Thread worker_thread;
+    worker_thread.create(&init_settle_worker, &worker)!!;
+    for (uint spin = 0; spin < INIT_SETTLE_SPIN_LIMIT && !gate.entered.load(); spin++) {
+        thread::yield();
+    }
+    assert(gate.entered.load(), "the submit publishes its initialization batch");
+    // Checked after the gate opens, so a failure cannot leave the worker parked.
+    bool settled_at_publication = !state.pending_inits.has_outstanding(every_role);
+
+    // The batch holds one barrier. Once the GPU has run it, a destroy retires
+    // it, which unpins the texture and frees the batch's handle array, while
+    // the submit that published it has not returned yet.
+    bool destroyed = false;
+    for (uint spin = 0; spin < INIT_SETTLE_SPIN_LIMIT; spin++) {
+        fault result = @catch(gpu::destroy_texture(&device, texture));
+        destroyed = !result;
+        if (result != gpu::RESOURCE_IN_USE) break;
+        thread::yield();
+    }
+    gate.release.store(true);
+    assert(worker_thread.join()!! == 0);
+    assert(settled_at_publication, "the take is settled before its batch can retire");
+    assert(destroyed, "a destroy retires the initialization before the submit returns");
+    assert(state.pending_inits.count() == 0 && !state.pending_inits.has_outstanding(every_role),
+        "a texture destroyed after its take leaves no outstanding count");
+    gpu::wait_completion(worker.point)!!;
+    assert(validation.errors == 0);
+}
+
+fn void unified_rejected_submit_leaves_no_initialization_work() @test {
+    VulkanValidationCapture validation;
+    gpu::Device device = make_unified_device(&validation);
+    defer destroy_test_device(&device)!!;
+    vk::VkDeviceState* state = gpu::internal::device_slots[device.index].data.state;
+    validation.errors = 0;
+    reset_submit_capture();
+    gpu::QueueRoles every_role = { .graphics, .compute, .transfer };
+    gpu::TextureHandle texture = make_unified_heap_texture(&device, "rejected_submit_init");
+    defer gpu::destroy_texture(&device, texture)!!;
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    vk::QueueCompletionState* completion = &state.queue_completions[graphics.id];
+    ulong next_sequence = completion.next_sequence;
+
+    gpu::CompletionPoint unpublished = gpu::internal::make_completion_point(
+        graphics,
+        completion.published_sequence.load() + 1,
+    )!!;
+    gpu::CompletionWait[1] waits = {{ .point = unpublished, .before = { .all } }};
+    gpu::SubmitDesc rejected = { .completion_waits = waits[..] };
+    fault failure = @catch(vk::vk_submit_with(
+        state:     state,
+        queue:     graphics,
+        desc:      &rejected,
+        submit_fn: &capture_init_submit,
+    ));
+    assert(failure == gpu::INVALID_HANDLE, "a wait on an unpublished point is rejected");
+    assert(submit_capture.calls.load() == 0, "the rejected submit reaches no native submit");
+    assert(completion.next_sequence == next_sequence, "the rejected submit uses no completion point");
+    assert(state.pending_inits.count() == 1 && state.pending_inits.has_outstanding(every_role),
+        "the texture stays pending");
+    assert(completion.internal_allocator.live_executables == 0
+        && completion.internal_allocator.live_recordings == 0,
+        "the rejected submit records no initialization list");
+
+    gpu::CompletionPoint done = submit_empty_captured(state, graphics);
+    assert(submit_capture.calls.load() == 2 && submit_capture.submits[0].command_buffers == 1,
+        "the next valid submit initializes the texture");
+    assert(state.pending_inits.count() == 0 && !state.pending_inits.has_outstanding(every_role));
+    gpu::wait_completion(done)!!;
+    assert(validation.errors == 0);
+}

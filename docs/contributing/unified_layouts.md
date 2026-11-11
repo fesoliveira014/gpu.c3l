@@ -44,28 +44,36 @@ reuse without a second ring.
 The pending-texture queue is one array of seven buckets, one per non-empty
 subset of the graphics, compute and transfer roles, guarded by a leaf mutex.
 A submit takes the buckets that overlap its queue's roles, under the device
-resource lock so a concurrent destroy cannot interleave, and records them
-into one initialization list. That list is submitted alone, signalling its
-own point on the queue's timeline: it waits on nothing but an earlier sparse
-bind on the same queue, so a queue that waits for it waits only for the
-initializing queue's earlier work, not for the batch submitted after it. The
-point is then published for every other queue identity whose roles overlap
-the initialized textures, and those queues add a timeline wait at all
-commands while the point is unretired and not already covered by an
-application wait at all stages on the same queue. The wait is repeated on
-each batch until retirement because a semaphore wait orders only its own
-batch. A failed initialization batch puts its textures back and fails the
-submit; a failure of the caller's batch after it leaves the initialization
-done.
+resource lock so a concurrent destroy cannot interleave, before it takes its
+queue's submission lock. It records them into one initialization list only
+after the submit's own inputs are validated and claimed under that lock, so a
+rejected submit puts the textures back and leaves no GPU work. That list is
+submitted alone, signalling its own point on the queue's timeline: it waits
+on nothing but an earlier sparse bind on the same queue, so a queue that
+waits for it waits only for the initializing queue's earlier work, not for
+the batch submitted after it. Once that native submit succeeds, the point is
+stored for every other queue identity whose roles overlap the initialized
+textures, and those queues add a timeline wait at all commands while the
+point is unretired and not already covered by an application wait at all
+stages on the same queue. The wait is repeated on each batch until
+retirement because a semaphore wait orders only its own batch. A failed
+initialization batch puts its textures back and fails the submit; a failure
+of the caller's batch after it leaves the initialization done.
 
 A device-wide init-submit mutex is held from the take through the
-publication or the restore, so the two look atomic to other submits. It sits
-under the device operation pin and above the resource lock, and no path takes
-it while holding a resource, queue, or retirement lock. A per-role count of
-textures queued or taken but not yet published lets a submit skip the mutex:
-the count drops only after the point is published (both sequentially
-consistent), so a zero count for every role of the queue means every texture
-created before the call is either initialized and published or destroyed.
+initialization batch's publication or the restore, so the two look atomic to
+other submits. It sits under the device operation pin and above the resource
+lock, and no path takes it while holding a resource, queue, or retirement
+lock. A per-role count of textures queued or taken but not yet settled lets
+a submit skip the mutex: a take is settled after its point is stored for the
+other queues (both sequentially consistent), so a zero count for every role
+of the queue means every texture created before the call is either
+initialized with its point stored or destroyed. The take records how many
+textures it took from each bucket and is settled from those counts, never
+from the texture slots, and before the initialization record and its point
+are published. Once they are published, any thread that observes completion
+may retire the record, which unpins the textures and frees its handle array,
+and a texture may then be destroyed; neither can lose or corrupt a count.
 
 Roles, not families, decide compatibility. A role in a texture's `access`
 puts that role's family in its sharing set, so a role match is always a
