@@ -124,7 +124,7 @@ c3c test vk_sparse_bind --path test --test-show-output
 
 | Target | Covers |
 |---|---|
-| `vk_unified_layouts` | the `vk_core` sources built with `UNIFIED_LAYOUTS`: one image layout per texture, barriers and render passes through the unified path |
+| `vk_unified_layouts` | the `vk_core` sources built with `UNIFIED_LAYOUTS`: one image layout per texture, barriers and render passes through the unified path; texture initialization on a compatible queue with cross-queue waits, capability-gated on distinct graphics, compute and transfer families |
 | `vk_sparse_texture` | sparse descriptor validation, flags, requirement translation, transaction rollback, cached queries, capability-gated image lifecycle |
 | `vk_sparse_bind` | tile and tail geometry, unbind, allocation compatibility and overlap, allocation-failure rollback, timeline chaining, result mapping, retention and retirement, cross-thread lock boundaries, capability-gated bind/use/unbind with readback |
 | `vk_core` | device selection, allocations, spans, textures, views, samplers, reflection and root ABI, pipelines and cache, command lifecycle, graphics/compute/transfer output, depth, threading, queues, submission and completion, timestamps, diagnostics, rollback |

@@ -530,85 +530,127 @@ fn gpu::TextureState swapchain_prior_state(TextureSlot* slot, bool unified) {
 }
 
 <* Unified mode: queue a published texture for its UNDEFINED -> GENERAL
-   transition at the next submit. The list is sized to the texture table and
-   holds each live texture at most once; a full list only follows a failed
-   submit that restored stale handles, and the dropped texture then stays
-   uninitialized. *>
+   transition at the next submit on a queue whose roles overlap `access`. The
+   list is sized to the texture table and holds each live texture at most
+   once, so it is never full here. *>
 fn void note_pending_texture_init(
     VkDeviceState* state,
     gpu::TextureHandle handle,
+    gpu::QueueRoles access,
 ) {
     if (!state.unified_layouts) return;
     state.pending_init_mutex.lock()!!;
     defer state.pending_init_mutex.unlock();
-    if (state.pending_init_count < state.pending_init_textures.len) {
-        state.pending_init_textures[state.pending_init_count++] = handle;
-    }
+    (void)state.pending_inits.push(handle, access);
 }
 
 fn void forget_pending_texture_init(
     VkDeviceState* state,
     gpu::TextureHandle handle,
+    gpu::QueueRoles access,
 ) {
     if (!state.unified_layouts) return;
     state.pending_init_mutex.lock()!!;
     defer state.pending_init_mutex.unlock();
-    for (uint i = 0; i < state.pending_init_count; i++) {
-        if (state.pending_init_textures[i] != handle) continue;
-        state.pending_init_textures[i] =
-            state.pending_init_textures[--state.pending_init_count];
-        return;
-    }
+    (void)state.pending_inits.remove(handle, access);
 }
 
-<* Unified mode: move the pending textures into a new heap array, pinning each
-   live texture until initialization retires; stale handles are dropped. Takes
-   resource_mutex, so callers must not hold a queue lock. The array belongs to the caller
-   until a prologue record takes it. *>
-fn gpu::TextureHandle[] retain_pending_texture_inits(VkDeviceState* state) {
+<* Unified mode: move the pending textures a queue with `roles` may access
+   into a new heap array, pinning each until its initialization retires. The
+   take counts them per access bucket; they stay outstanding until the take
+   is settled (`PendingTextureInits.settle`) or restored
+   (`restore_pending_texture_inits`). Takes resource_mutex, so callers must
+   not hold a queue lock. The array belongs to the caller until a record
+   takes it. *>
+fn PendingInitTake retain_pending_texture_inits(
+    VkDeviceState* state,
+    gpu::QueueRoles roles,
+) {
     state.resource_mutex.lock()!!;
     defer state.resource_mutex.unlock();
     state.pending_init_mutex.lock()!!;
     defer state.pending_init_mutex.unlock();
-    uint total = state.pending_init_count;
+    uint total = state.pending_inits.compatible_count(roles);
     if (total == 0) return {};
-    gpu::TextureHandle[] out = mem::new_array(gpu::TextureHandle, total);
+    PendingInitTake take = {
+        .handles = mem::new_array(gpu::TextureHandle, total),
+    };
+    (void)state.pending_inits.take(roles, &take);
+    // A handle whose slot is gone is dropped and settled here, so the take
+    // keeps exactly the pinned textures and their counts.
     uint count = 0;
-    for (uint i = 0; i < total; i++) {
-        TextureSlot*? slot = state.textures.get(state.pending_init_textures[i]);
-        if (catch err = slot) continue;
-        (void)slot.internal_references.add(1, AtomicOrdering.RELAXED);
-        out[count++] = state.pending_init_textures[i];
+    uint index = 0;
+    for (uint bucket = 0; bucket < PENDING_INIT_BUCKETS; bucket++) {
+        uint in_bucket = take.bucket_counts[bucket];
+        for (uint i = 0; i < in_bucket; i++) {
+            gpu::TextureHandle handle = take.handles[index++];
+            TextureSlot*? slot = state.textures.get(handle);
+            if (catch err = slot) {
+                take.bucket_counts[bucket]--;
+                state.pending_inits.count_outstanding(
+                    pending_init_bucket_roles(bucket),
+                    1,
+                    false,
+                );
+                continue;
+            }
+            (void)slot.internal_references.add(1, AtomicOrdering.RELAXED);
+            take.handles[count++] = handle;
+        }
     }
-    state.pending_init_count = 0;
     if (count == 0) {
-        mem::free(out.ptr);
+        mem::free(take.handles.ptr);
         return {};
     }
-    return out[:count];
+    take.handles = take.handles[:count];
+    return take;
 }
 
-<* Drop the references taken by `retain_pending_texture_inits`; `restore`
-   returns the textures to the pending list for the next submit. Frees the
-   array. *>
+<* Return the textures of a take whose initialization was not submitted to
+   the pending list and unpin them, under resource_mutex so a destroy cannot
+   slip between the two. Frees the array and empties the take; an empty take
+   is a no-op. The caller must not hold a queue lock.
+   @param [&inout] take
+*>
+fn void restore_pending_texture_inits(
+    VkDeviceState* state,
+    PendingInitTake* take,
+) {
+    if (take.handles.len == 0) return;
+    {
+        state.resource_mutex.lock()!!;
+        defer state.resource_mutex.unlock();
+        state.pending_init_mutex.lock()!!;
+        defer state.pending_init_mutex.unlock();
+        uint index = 0;
+        for (uint bucket = 0; bucket < PENDING_INIT_BUCKETS; bucket++) {
+            for (uint i = 0; i < take.bucket_counts[bucket]; i++) {
+                gpu::TextureHandle handle = take.handles[index++];
+                (void)state.pending_inits.requeue(
+                    handle,
+                    pending_init_bucket_roles(bucket),
+                );
+                TextureSlot*? slot = state.textures.get(handle);
+                if (catch err = slot) continue;
+                (void)slot.internal_references.sub(1, AtomicOrdering.RELAXED);
+            }
+        }
+    }
+    mem::free(take.handles.ptr);
+    *take = {};
+}
+
+<* Drop the pins of a retired initialization and free the array. Runs under
+   a retirement lock, possibly inside vk_destroy_texture's resource_mutex. *>
 fn void release_pending_texture_inits(
     VkDeviceState* state,
     gpu::TextureHandle[] handles,
-    bool restore,
 ) {
     if (handles.len == 0) return;
     foreach (handle : handles) {
         TextureSlot*? slot = state.textures.get(handle);
         if (catch err = slot) continue;
         (void)slot.internal_references.sub(1, AtomicOrdering.RELAXED);
-    }
-    if (restore) {
-        state.pending_init_mutex.lock()!!;
-        defer state.pending_init_mutex.unlock();
-        foreach (handle : handles) {
-            if (state.pending_init_count == state.pending_init_textures.len) break;
-            state.pending_init_textures[state.pending_init_count++] = handle;
-        }
     }
     mem::free(handles.ptr);
 }
@@ -1029,7 +1071,7 @@ fn gpu::TextureHandle? vk_create_texture(
         state.resource_mutex.lock()!!;
         defer state.resource_mutex.unlock();
         if (try handle = state.textures.alloc(slot)) {
-            note_pending_texture_init(state, handle);
+            note_pending_texture_init(state, handle, slot.access);
             return handle;
         }
     }
@@ -1340,7 +1382,7 @@ fn gpu::TextureHandle? create_placed_texture_for_state_with_ops(
     }
 
     gpu::TextureHandle handle = state.textures.alloc(slot)!;
-    note_pending_texture_init(state, handle);
+    note_pending_texture_init(state, handle, slot.access);
     owns_image = false;
     owns_view = false;
     retained_placement = false;
@@ -1554,7 +1596,7 @@ fn gpu::DedicatedTexture? create_dedicated_texture_for_state_with_ops(
         } else {
             texture = published;
         }
-        note_pending_texture_init(state, texture);
+        note_pending_texture_init(state, texture, texture_slot.access);
         state.allocations.get(allocation)!!.live_placements = 1;
     }
     owns_view = false;
@@ -1621,9 +1663,10 @@ fn void? vk_destroy_texture(
     vk::ImageView default_view = slot.default_view;
     TextureImageOwnership ownership = texture_image_ownership(slot);
     gpu::GpuAllocation placement = slot.placement;
+    gpu::QueueRoles access = slot.access;
     destroy_cached_views(state, slot);
     state.textures.free(handle)!;
-    forget_pending_texture_init(state, handle);
+    forget_pending_texture_init(state, handle, access);
     if (default_view != null) {
         vk::destroy_image_view(state.device, default_view, null);
     }

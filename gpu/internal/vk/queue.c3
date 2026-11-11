@@ -27,6 +27,8 @@ enum SubmissionCheckpoint : uint @feat(TESTING) {
     NATIVE_ACCEPTED,
     BATCHES_PUBLISHED,
     TOKEN_PUBLISHED,
+    // Unified mode: a texture initialization batch and its point are published.
+    INIT_PUBLISHED,
 }
 
 struct QueueSubmitOps @private {
@@ -71,6 +73,10 @@ struct QueueCompletionState {
     Atomic{ulong}                 published_sequence;
     Atomic{ulong}                 retired_sequence;
     ulong                         pending_sparse_sequence;
+    // Unified mode: the latest point on this queue whose batch initialized
+    // textures queue identity j may access; j's later batches wait for it.
+    Atomic{ulong}[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES]
+                                  init_sequence_for;
     CommandAllocatorSlot*         internal_allocator;
     bool                          bound;
 }
@@ -90,8 +96,11 @@ struct QueueSubmitScratch {
         batch;
     vk::CommandBufferSubmitInfo[gpu::internal::MAX_SUBMIT_COMMAND_LISTS + 2]
         command_buffer_infos;
-    vk::SemaphoreSubmitInfo[gpu::internal::MAX_SUBMIT_COMPLETION_WAITS + 2]
-        wait_infos;
+    vk::SemaphoreSubmitInfo[
+        gpu::internal::MAX_SUBMIT_COMPLETION_WAITS
+            + 2
+            + gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES
+    ] wait_infos;
 }
 
 struct SubmitInputs {
@@ -916,6 +925,9 @@ fn void? create_queue_completions(
         completion.submit_scratch = mem::new(QueueSubmitScratch);
         completion.published_sequence.store(0, AtomicOrdering.RELAXED);
         completion.retired_sequence.store(0, AtomicOrdering.RELAXED);
+        foreach (&sequence : completion.init_sequence_for) {
+            sequence.store(0, AtomicOrdering.RELAXED);
+        }
     }
 
     bind_queue_completion_role(
@@ -1326,17 +1338,16 @@ fn void rollback_submit_claim(
     }
 }
 
-<* Unified mode: prepend the initialization and acquire transitions and
-   append the present transition as library-recorded lists. `pending` holds
-   retained textures; the prologue record takes ownership of the array on
-   success and every created list is discarded on failure. *>
+<* Unified mode: prepend the acquire transition and append the present
+   transition as library-recorded lists; every created list is discarded on
+   failure. Texture initialization goes in its own batch
+   (`submit_texture_init_batch_locked`). *>
 fn CommandRecord*[]? record_unified_batch(
     VkDeviceState* state,
     QueueCompletionState* completion,
     gpu::Queue queue,
     CommandRecord*[] records,
     SwapchainSlot* swapchain,
-    gpu::TextureHandle[] pending,
     QueueSubmitOps* ops,
 ) @private {
     BarrierEmitOps barrier_ops = barrier_emit_ops_real();
@@ -1348,24 +1359,20 @@ fn CommandRecord*[]? record_unified_batch(
     usz created_count = 0;
     defer catch {
         for (usz i = 0; i < created_count; i++) {
-            created[i].init_textures = {};
             discard_internal_commands(state, created[i]);
         }
     }
     usz count = 0;
-    if (pending.len > 0 || swapchain != null) {
+    if (swapchain != null) {
         CommandRecord* prologue = begin_internal_commands(state, completion, queue)!;
         created[created_count++] = prologue;
-        record_texture_init_barriers(state, prologue, pending);
-        if (swapchain != null) {
-            record_swapchain_transition(
-                state:   state,
-                record:  prologue,
-                texture: swapchain.textures[swapchain.pending_image],
-                acquire: true,
-                ops:     &barrier_ops,
-            );
-        }
+        record_swapchain_transition(
+            state:   state,
+            record:  prologue,
+            texture: swapchain.textures[swapchain.pending_image],
+            acquire: true,
+            ops:     &barrier_ops,
+        );
         end_internal_commands(state, prologue)!;
         scratch.batch[count++] = prologue;
     }
@@ -1383,8 +1390,190 @@ fn CommandRecord*[]? record_unified_batch(
         end_internal_commands(state, epilogue)!;
         scratch.batch[count++] = epilogue;
     }
-    if (pending.len > 0) created[0].init_textures = pending;
     return scratch.batch[:count];
+}
+
+<* Unified mode: take every pending texture a queue with `roles` may access
+   into `take` and return whether init_submit_mutex is now held: it is held
+   exactly while the take is non-empty, from the take until the take is
+   submitted (`submit_texture_init_batch_locked`) or restored
+   (`restore_pending_texture_inits`), so the two look atomic to other
+   submits. Lock order: device operation pin > init submit > device/resource
+   > pending init, and init submit > queue submission. Only the submit path
+   takes it, never with a resource, queue or retirement lock held.
+
+   Fast path, without the mutex: a texture created before this call counts in
+   `pending_inits.outstanding` for each of its roles until its initialization
+   point is stored in `init_sequence_for` (a seq_cst store before the seq_cst
+   decrement) or it is destroyed. A zero load for every role of this queue
+   therefore means each such texture's point is already stored, so the wait
+   computed later from a seq_cst load of `init_sequence_for` covers it. A
+   non-zero load takes the mutex, which waits for an in-flight submitter.
+   @param [&out] take
+*>
+fn bool take_pending_texture_inits(
+    VkDeviceState* state,
+    gpu::QueueRoles roles,
+    PendingInitTake* take,
+) @private {
+    *take = {};
+    if (!state.pending_inits.has_outstanding(roles)) return false;
+    state.init_submit_mutex.lock()!!;
+    *take = retain_pending_texture_inits(state, roles);
+    if (take.handles.len > 0) return true;
+    state.init_submit_mutex.unlock();
+    return false;
+}
+
+<* Unified mode: record one initialization list for the textures of `take`
+   and submit it as a batch of its own, which waits on nothing but an earlier
+   sparse bind on the same queue, so other queues that wait for it wait only
+   for this queue's earlier work. Requires the queue's submission lock and
+   init_submit_mutex.
+
+   Once the native submit succeeds, its point is stored in
+   `init_sequence_for` for every other queue identity that may access the
+   textures and the take is settled, both before the record and the point are
+   published: from then on a retirement on any thread may unpin the textures
+   and free the array, which the record owns. Waiting on the point is valid
+   as soon as its signal is submitted. On success the take is emptied; on
+   failure it is unchanged and the caller restores it. *>
+fn void? submit_texture_init_batch_locked(
+    VkDeviceState* state,
+    QueueCompletionState* completion,
+    gpu::Queue queue,
+    PendingInitTake* take,
+    QueueSubmitOps* ops,
+) @private {
+    CommandRecord* record = begin_internal_commands(state, completion, queue)!;
+    defer catch discard_internal_commands(state, record);
+    record_texture_init_barriers(state, record, take.handles);
+    end_internal_commands(state, record)!;
+
+    vk::CommandBufferSubmitInfo command_info = vk::command_buffer_submit_info()
+        .set_command_buffer(record.command_buffer);
+    vk::SemaphoreSubmitInfo signal_info = vk::semaphore_submit_info()
+        .set_semaphore(completion.timeline)
+        .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
+    vk::SubmitInfo2 submit = vk::submit_info2()
+        .set_command_buffer_infos((&command_info)[:1]);
+    vk::SemaphoreSubmitInfo sparse_wait;
+    if (completion.pending_sparse_sequence > 0) {
+        sparse_wait = vk::semaphore_submit_info()
+            .set_semaphore(completion.timeline)
+            .set_value(completion.pending_sparse_sequence)
+            .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
+        submit = submit.set_wait_semaphore_infos((&sparse_wait)[:1]);
+    }
+
+    drain_queue_if_needed_with_query(
+        state,
+        completion,
+        ops.counter_query,
+    )!;
+    require_queue_completion_headroom_with_query(
+        state:      state,
+        completion: completion,
+        query_fn:   ops.counter_query,
+    )!;
+    gpu::CompletionPoint point = reserve_queue_completion_locked(
+        state,
+        queue,
+    )!;
+    ulong sequence = gpu::internal::completion_point_sequence(point);
+    signal_info.value = sequence;
+    submit = submit.set_signal_semaphore_infos((&signal_info)[:1]);
+    vk::Result result = ops.submit(
+        completion.queue,
+        1,
+        &submit,
+        (vk::Fence)null,
+    );
+    if (result != vk::Result.SUCCESS) {
+        cancel_queue_completion_locked(state, point)!!;
+        check_backend_result(
+            state:     state,
+            operation: "submit",
+            result:    result,
+        )!;
+    }
+
+    gpu::QueueRoles[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] identity_roles;
+    foreach (i, &other : state.queue_completions) {
+        if (other.bound) identity_roles[i] = other.roles;
+    }
+    uint targets = texture_init_targets(
+        identity_roles[:state.queue_completions.len],
+        queue.id,
+        take.roles(),
+    );
+    foreach (i, &sequence_for : completion.init_sequence_for) {
+        if ((targets & (1u << (uint)i)) == 0) continue;
+        sequence_for.store(sequence, AtomicOrdering.SEQ_CONSISTENT);
+    }
+    state.pending_inits.settle(take);
+
+    record.init_textures = take.handles;
+    *take = {};
+    completion.retirement_mutex.lock()!!;
+    publish_pending_commands_locked(
+        state,
+        completion,
+        (&record)[:1],
+        point,
+    );
+    completion.retirement_mutex.unlock();
+    record.state = gpu::internal::CommandState.SUBMITTED;
+    publish_queue_completion_locked(state, point)!!;
+    $if env::TESTING:
+        reach_submission_checkpoint(
+            ops,
+            SubmissionCheckpoint.INIT_PUBLISHED,
+        );
+    $endif
+}
+
+<* Unified mode: wait for other queues' published texture initializations
+   that this queue may touch and that neither retired nor an application
+   wait at every stage already covers. Requires the queue's submission lock;
+   `take_pending_texture_inits` explains why the loads see every
+   initialization of a texture created before the submit call. *>
+fn usz append_texture_init_wait_infos(
+    VkDeviceState* state,
+    gpu::Queue queue,
+    vk::SemaphoreSubmitInfo[] waits,
+    usz next_wait,
+    ResolvedCompletionWait[] completion_waits,
+) @private {
+    if (!state.unified_layouts) return next_wait;
+    foreach (i, &source : state.queue_completions) {
+        if ((uint)i == queue.id || !source.bound) continue;
+        ulong sequence = source.init_sequence_for[queue.id].load(
+            AtomicOrdering.SEQ_CONSISTENT,
+        );
+        if (sequence == 0) continue;
+        ulong covered = 0;
+        foreach (&wait : completion_waits) {
+            if (wait.source != source || wait.sequence <= covered) continue;
+            if (((ulong)wait.stages
+                & (ulong)vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT) == 0) {
+                continue;
+            }
+            covered = wait.sequence;
+        }
+        if (!texture_init_wait_needed(
+            sequence,
+            source.retired_sequence.load(AtomicOrdering.ACQUIRE),
+            covered,
+        )) {
+            continue;
+        }
+        waits[next_wait++] = vk::semaphore_submit_info()
+            .set_semaphore(source.timeline)
+            .set_value(sequence)
+            .set_stage_mask(vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT);
+    }
+    return next_wait;
 }
 
 fn SubmitInputs? resolve_and_claim_submit_inputs(
@@ -1526,13 +1715,21 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     )!;
     QueueSubmitScratch* scratch = completion.submit_scratch;
     if (scratch == null) unreachable();
-    gpu::TextureHandle[] pending = state.unified_layouts
-        ? retain_pending_texture_inits(state)
-        : (gpu::TextureHandle[]){};
-    bool pending_owned = pending.len > 0;
-    defer catch {
-        if (pending_owned) release_pending_texture_inits(state, pending, true);
+    // Unified mode: pending textures are taken before the queue lock, since
+    // the take pins them under the resource lock, but initialized only once
+    // the caller's inputs are valid, so a rejected submit leaves no GPU work.
+    // The unlock is registered before the restore, so a restore runs with
+    // init_submit_mutex held.
+    PendingInitTake init_take;
+    bool init_locked = state.unified_layouts && take_pending_texture_inits(
+        state,
+        completion.roles,
+        &init_take,
+    );
+    defer {
+        if (init_locked) state.init_submit_mutex.unlock();
     }
+    defer catch restore_pending_texture_inits(state, &init_take);
     completion.submission_mutex.lock()!!;
     defer completion.submission_mutex.unlock();
 
@@ -1550,6 +1747,17 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     defer catch {
         if (claimed) rollback_submit_claim(state, records);
     }
+    if (init_locked) {
+        submit_texture_init_batch_locked(
+            state:      state,
+            completion: completion,
+            queue:      queue,
+            take:       &init_take,
+            ops:        ops,
+        )!;
+        state.init_submit_mutex.unlock();
+        init_locked = false;
+    }
     if (state.unified_layouts) {
         records = record_unified_batch(
             state:      state,
@@ -1557,7 +1765,6 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
             queue:      queue,
             records:    records,
             swapchain:  inputs.swapchain,
-            pending:    pending,
             ops:        ops,
         )!;
         claimed = records.len > 0;
@@ -1577,34 +1784,35 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
 
     SwapchainSlot* swapchain = inputs.swapchain;
     bool waits_for_sparse_bind = completion.pending_sparse_sequence > 0;
-    usz wait_count = desc.completion_waits.len
-        + (swapchain != null ? 1 : 0)
-        + (waits_for_sparse_bind ? 1 : 0);
-    if (wait_count > 0) {
-        usz next_wait;
-        next_wait = append_completion_wait_infos(
-            waits:            scratch.wait_infos[..],
-            next_wait:        next_wait,
-            completion_waits: inputs.completion_waits,
-        );
-        if (swapchain != null) {
-            scratch.wait_infos[next_wait++] = vk::semaphore_submit_info()
-                .set_semaphore(swapchain.pending_acquire_semaphore)
-                .set_stage_mask(inputs.readiness_stages);
-        }
-        if (waits_for_sparse_bind) {
-            scratch.wait_infos[next_wait++] = vk::semaphore_submit_info()
-                .set_semaphore(completion.timeline)
-                .set_value(completion.pending_sparse_sequence)
-                .set_stage_mask(
-                    vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
-                );
-        }
-        if (next_wait > 0) {
-            submit = submit.set_wait_semaphore_infos(
-                scratch.wait_infos[:next_wait],
+    usz next_wait = append_completion_wait_infos(
+        waits:            scratch.wait_infos[..],
+        next_wait:        0,
+        completion_waits: inputs.completion_waits,
+    );
+    if (swapchain != null) {
+        scratch.wait_infos[next_wait++] = vk::semaphore_submit_info()
+            .set_semaphore(swapchain.pending_acquire_semaphore)
+            .set_stage_mask(inputs.readiness_stages);
+    }
+    if (waits_for_sparse_bind) {
+        scratch.wait_infos[next_wait++] = vk::semaphore_submit_info()
+            .set_semaphore(completion.timeline)
+            .set_value(completion.pending_sparse_sequence)
+            .set_stage_mask(
+                vk::PipelineStageFlagBits2.STAGE_2_ALL_COMMANDS_BIT,
             );
-        }
+    }
+    next_wait = append_texture_init_wait_infos(
+        state:            state,
+        queue:            queue,
+        waits:            scratch.wait_infos[..],
+        next_wait:        next_wait,
+        completion_waits: inputs.completion_waits,
+    );
+    if (next_wait > 0) {
+        submit = submit.set_wait_semaphore_infos(
+            scratch.wait_infos[:next_wait],
+        );
     }
 
     usz signal_count = (usz)(swapchain != null ? 1 : 0) + 1;
@@ -1698,7 +1906,6 @@ fn gpu::CompletionPoint? vk_submit_with_ops(
     $endif
     submitted = point;
     claimed = false;
-    pending_owned = false;
     return submitted;
 }
 

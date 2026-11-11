@@ -85,10 +85,15 @@ and `PRESENT`.
 Under `DeviceDesc.unified_layouts` every layout except `UNDEFINED` lowers
 to one image layout. Barriers keep their stage and access meaning and their
 subresource scope; the per-layout usage and access rules do not apply, so a
-texture may be written as storage and sampled within one interval. New
-textures are initialized by the library at the next submit; a texture
-created after one submit and first used by another is initialized by the
-second.
+texture may be written as storage and sampled within one interval. The
+library initializes a new texture at the first submit, after its creation, on
+a queue whose roles overlap the texture's `access`; submits on other queues
+leave it pending. Later batches on other queues whose roles overlap that
+`access` wait for the initialization at all commands, so a texture created
+before a submit call is initialized before that submit's lists run,
+whichever queue initialized it. A placed texture is also
+initialized at that submit, not at its own first use: the memory it aliases
+must be idle by the next submit on a queue that may access it.
 
 Build a transition and record it:
 
@@ -156,6 +161,12 @@ ray stages.
 
 On success every list token and the readiness are consumed. On any
 failure the lists stay executable and readiness stays unconsumed.
+Under `DeviceDesc.unified_layouts`, a submit that initializes textures
+submits that initialization as a batch of its own, with its own completion
+point, just before its lists and only once its inputs are accepted: a
+rejected submit submits nothing, but when the native submission of the lists
+fails after it, the initialization stays submitted. The returned point is
+the later one.
 Submitting commands and holding a completion point do not retain application
 resources; keep them alive and unmodified as required until their last GPU use
 completes. Destroy and update calls do not infer shader use or wait for completion.

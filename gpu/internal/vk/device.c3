@@ -135,8 +135,10 @@ struct VkDeviceState @public {
     bool                       unified_layouts_extension;
     // Leaf lock: nothing else is taken while it is held.
     Mutex                      pending_init_mutex;
-    gpu::TextureHandle[]       pending_init_textures;
-    uint                       pending_init_count;
+    PendingTextureInits        pending_inits;
+    // Unified mode: held from taking pending initializations through
+    // submitting or restoring them; see take_pending_texture_inits.
+    Mutex                      init_submit_mutex;
     uint                       acceleration_structure_heap_capacity;
     VkAccelerationStructureDispatch* acceleration_structure_operations;
     VkRayTracingPipelineDispatch*    ray_tracing_pipeline_operations;
@@ -765,6 +767,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.debug_names = config.debug_names;
     state.resource_mutex.init()!;
     state.pending_init_mutex.init()!;
+    state.init_submit_mutex.init()!;
     state.pipeline_creation_mutex.init()!;
     state.texture_view_cache_mutex.init()!;
     state.command_mutex.init()!;
@@ -1286,7 +1289,7 @@ fn gpu::Device? create_vk_device_from_runtime(
     state.caps.queues = queue_selection.selected;
     create_queue_completions(state, &queue_selection)!;
     if (state.unified_layouts) {
-        state.pending_init_textures = mem::new_array(
+        state.pending_inits.handles = mem::new_array(
             gpu::TextureHandle,
             state.textures.slots.len,
         );
@@ -1443,9 +1446,10 @@ fn void destroy_state(VkDeviceState* state) @private {
     state.instance = (vk::Instance)null;
     if (state.resource_mutex.is_initialized())       (void)state.resource_mutex.destroy();
     if (state.pending_init_mutex.is_initialized())   (void)state.pending_init_mutex.destroy();
-    if (state.pending_init_textures.ptr != null) {
-        mem::free(state.pending_init_textures.ptr);
-        state.pending_init_textures = {};
+    if (state.init_submit_mutex.is_initialized())    (void)state.init_submit_mutex.destroy();
+    if (state.pending_inits.handles.ptr != null) {
+        mem::free(state.pending_inits.handles.ptr);
+        state.pending_inits.handles = {};
     }
     if (state.pipeline_creation_mutex.is_initialized()) (void)state.pipeline_creation_mutex.destroy();
     if (state.texture_view_cache_mutex.is_initialized()) (void)state.texture_view_cache_mutex.destroy();
