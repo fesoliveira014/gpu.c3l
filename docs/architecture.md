@@ -249,8 +249,10 @@ and the stages that must wait for it.
 `DeviceDesc.unified_layouts` selects a second mode. Every texture lives in
 one layout; a `TextureBarrier` keeps its resource scope and its stage and
 access masks, and its layouts lower to that one layout (`UNDEFINED` keeps
-its discard meaning). The library initializes new textures at the next
-submit and transitions swapchain images inside the readiness submit.
+its discard meaning). The library initializes a new texture at the next
+submit on a queue whose roles overlap the texture's `access`, and later
+batches on other queues that share the texture wait for that
+initialization. It transitions swapchain images inside the readiness submit.
 `DeviceCaps.unified_layouts_optimal` reports that the driver guarantees the
 one layout costs nothing.
 
@@ -315,18 +317,24 @@ Not an API contract. Listed so contributors can reason about contention.
 
 ```text
 device operation pin
-  device / resource
-    texture-view cache  |  queue submission
-                            queue retirement
-                              allocator
-                                command record
+  texture init submit (unified layouts)
+    device / resource
+      texture-view cache  |  queue submission
+                              queue retirement
+                                allocator
+                                  command record
 ```
 
 No path reacquires the device domain while holding a queue, retirement,
-allocator, or command-record lock. No path holds two retirement locks. So:
-recording through distinct allocators runs in parallel, submits to distinct
-native queues are independent, and completion polling does not serialize a
-native submit.
+allocator, or command-record lock. No path holds two retirement locks. Only a
+unified-mode submit takes the texture-init-submit lock, before its resource
+and queue locks. So: recording through distinct allocators runs in parallel,
+and completion polling does not serialize a native submit. Submits to
+distinct native queues are independent, except that in unified mode a submit
+that takes pending texture initializations holds the device-wide
+texture-init-submit lock while it submits them as their own batch and
+publishes them, and a submit on another queue that may access one of those
+textures waits for that lock.
 
 ## Diagnostics and cost
 
@@ -341,7 +349,11 @@ work storage, and finish backend-owned texture initialization and sparse binds.
 This work depends on the submitted workload.
 
 Non-wait operations insert no implicit GPU wait. Explicit completion waits
-still block as requested. These guarantees imply neither fixed driver latency
+still block as requested. In unified mode the library adds queue-side waits:
+a batch waits, at all commands, for another queue's not yet retired
+initialization of a texture both queues may access. The initialization is a
+batch of its own, so that wait covers the initializing queue's earlier work,
+not the batch submitted after it. No host wait is added. These guarantees imply neither fixed driver latency
 nor allocation-free Vulkan calls. See [benchmarking](https://github.com/fesoliveira014/gpu.c3l/blob/main/docs/contributing/benchmarking.md)
 for measurement guidance.
 
