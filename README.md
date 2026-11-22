@@ -79,7 +79,8 @@ python3 lib/gpu.c3l/scripts/fetch_vma_libs.py
 ```
 
 The `gpu` artifact holds the library, the `gpu_shaders` tool, shader include
-files, licenses, and consumer documentation.
+files, licenses, and consumer documentation. VMA is linked into every program
+built on the library; ship `LICENSE.vulkan-memory-allocator.mit` with it.
 
 [Getting started](docs/getting_started.md#install) shows the `project.json`
 that resolves the four packages and the shader build.

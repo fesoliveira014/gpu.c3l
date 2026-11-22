@@ -363,5 +363,6 @@ features. Unsupported adapters fail `create_device` with
 `UNSUPPORTED_FEATURE`.
 
 Vendored dependencies: `vk`, `vma`, and `spvreflect` binding packages plus a
-static VMA library per target. Shader compilation is an application build
+static VMA library per target. VMA is linked into every program; its licence
+ships as `LICENSE.vulkan-memory-allocator.mit` beside `LICENSE`. Shader compilation is an application build
 step.

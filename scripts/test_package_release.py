@@ -42,6 +42,7 @@ class PackageReleaseTests(unittest.TestCase):
                 manifest = archive.read("manifest.json").decode("utf-8")
                 bundle = json.loads(archive.read("BUNDLE.json"))
                 license_text = archive.read("LICENSE").decode("utf-8")
+                vma_license_text = archive.read("LICENSE.vulkan-memory-allocator.mit").decode("utf-8")
             members = set(names)
             package_release.validate_consumer_doc_links(members, first)
 
@@ -52,6 +53,7 @@ class PackageReleaseTests(unittest.TestCase):
         self.assert_bundle_metadata(bundle)
         self.assertIn("MIT License", license_text)
         self.assertIn("Copyright (c) 2026 fesoliveira014", license_text)
+        self.assertIn("Advanced Micro Devices, Inc.", vma_license_text)
 
     def test_rejects_invalid_versions(self) -> None:
         with tempfile.TemporaryDirectory() as output_dir:
@@ -66,6 +68,7 @@ class PackageReleaseTests(unittest.TestCase):
         required = {
             "BUNDLE.json",
             "LICENSE",
+            "LICENSE.vulkan-memory-allocator.mit",
             "README.md",
             "manifest.json",
             "gpu/gpu.c3",
