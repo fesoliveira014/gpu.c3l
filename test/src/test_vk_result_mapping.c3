@@ -174,6 +174,8 @@ fn void backend_and_wsi_result_mapping_is_specific() @test {
     assert(init == gpu::UNSUPPORTED_BACKEND, "backend initialization failure is bootstrap-specific");
     assert(driver == gpu::UNSUPPORTED_BACKEND, "incompatible driver is unsupported backend");
     assert(physical_init == gpu::UNSUPPORTED_BACKEND, "physical-device initialization failure remains bootstrap-specific");
+    assert(gpu::internal::vk::map_loader_fault(vk::LOADER_NOT_FOUND) == gpu::BACKEND_LOADER_MISSING, "a missing loader has its own fault");
+    assert(gpu::internal::vk::map_loader_fault(vk::LOADER_INCOMPLETE) == gpu::UNSUPPORTED_BACKEND, "a loader without the 1.3 core commands cannot run the backend");
     assert(surface == gpu::SURFACE_LOST, "surface loss remains recoverable and distinct");
     assert(surface_window == gpu::INVALID_RESOURCE_STATE, "native surface ownership is a resource state");
     assert(surface_fill == gpu::SURFACE_LOST, "surface loss remains exact during enumeration");

@@ -159,6 +159,7 @@ back into the library. Message pointers are valid only during the call.
 
 | Symptom | Cause | Action |
 |---|---|---|
+| `create_runtime` returns `BACKEND_LOADER_MISSING` | No Vulkan loader installed (a PC without a GPU driver, a VM, Windows Sandbox) | Install a Vulkan 1.3 driver; tell the user so. |
 | `create_runtime` returns `UNSUPPORTED_FEATURE` with Vulkan validation on | Khronos validation layers not installed | Install them or set `enable_vulkan_validation = false`. |
 | No Vulkan driver in an elevated Windows shell | Elevated processes ignore loader environment variables | Register the ICD in the system registry. |
 | Pipeline cache blob is a few bytes on lavapipe | The software driver does not persist shaders | Expected. Measure on the production driver. |

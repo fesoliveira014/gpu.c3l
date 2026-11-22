@@ -22,7 +22,7 @@ python3 scripts/fetch_vma_libs.py     # VMA static libraries
 python3 scripts/fetch_spvreflect_lib.py  # Windows only: spvreflect import library
 ```
 
-Vulkan targets need a Vulkan 1.3 loader, the VMA static library, SPIRV-Reflect,
+Vulkan targets need a Vulkan 1.3 loader at run time (nothing links it), the VMA static library, SPIRV-Reflect,
 and a driver meeting the [required profile](../features_and_limitations.md#required-device-profile).
 Shader fixtures need `glslc` and `spirv-as`.
 
@@ -107,6 +107,19 @@ c3c build smoke --path test
 ./test/build/smoke
 ```
 
+No program links the Vulkan loader. CI checks that the smoke import table
+names no `vulkan-1.dll` (Windows) or `libvulkan` (Linux), and runs
+`loader_missing`, which makes the loader unfindable through
+`vk::set_loader_library` and expects `BACKEND_LOADER_MISSING` from
+`create_runtime` (exit 3 with `--missing-only`), then retries with the system
+loader:
+
+```sh
+c3c build loader_missing --path test
+./test/build/loader_missing --missing-only   # exit 3
+./test/build/loader_missing                  # exit 0; needs an ICD
+```
+
 ## Vulkan tests
 
 Every `test` target in `test/project.json` runs in CI; the list here, the
@@ -158,7 +171,8 @@ CPU unit and shader ABI tests
 generator tests and ABI drift check
 shader build
 benchmark builds
-smoke link and run
+smoke link and run, import-table check
+missing Vulkan loader
 vk_core, vk_wsi, vk_optional_generated_work, vk_ray_tracing
 ```
 
@@ -182,6 +196,8 @@ for target in resource_create_bench upload_throughput_bench command_path_baselin
 done
 c3c build smoke --path test
 ./test/build/smoke
+c3c build loader_missing --path test
+./test/build/loader_missing
 c3c test vk_core --path test --test-show-output
 c3c test vk_unified_layouts --path test --test-show-output
 c3c test vk_wsi --path test --test-show-output

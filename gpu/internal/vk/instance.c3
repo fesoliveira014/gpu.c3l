@@ -94,6 +94,19 @@ fn bool should_report_debug_messenger_unavailable(
     bool requested,
 ) => requested && !capabilities.debug_utils;
 
+<* Open the Vulkan loader before anything calls into Vulkan.
+   @return? gpu::BACKEND_LOADER_MISSING, gpu::UNSUPPORTED_BACKEND *>
+fn void? load_vulkan_loader() {
+    if (catch failure = vk::load_loader()) return map_loader_fault(failure)~;
+}
+
+<* A missing loader has its own fault; one lacking a Vulkan 1.3 core command
+   cannot run the backend at all. *>
+fn fault map_loader_fault(fault failure) {
+    if (failure == vk::LOADER_NOT_FOUND) return gpu::BACKEND_LOADER_MISSING;
+    return gpu::UNSUPPORTED_BACKEND;
+}
+
 <* Create one Vulkan 1.3 discovery instance from backend-owned configuration. *>
 fn VkInstanceCreateResult? create_vk_instance(VkInstanceDesc* desc) {
     VkInstanceCreateResult result;
