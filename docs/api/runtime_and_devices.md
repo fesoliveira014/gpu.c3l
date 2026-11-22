@@ -54,6 +54,24 @@ the runtime is destroyed.
 pointer. A call that breaks a rule panics in a safe build (`-O0`, `-O1`, or
 `--safe=yes`); other builds do not check it.
 
+The library links no Vulkan library: the first successful `create_runtime`
+opens the system Vulkan loader (`vulkan-1.dll` on Windows, `libvulkan.so.1` on
+Linux) and keeps it open until the process exits. On a machine without one, the
+program still starts and `create_runtime` returns `BACKEND_LOADER_MISSING`, so
+it can say that it needs a Vulkan 1.3 driver. A loader too old to export the
+Vulkan 1.3 core commands, or one without a driver, gives `UNSUPPORTED_BACKEND`.
+A failed call can be repeated; the first load is thread-safe.
+
+```c3
+gpu::Runtime? runtime = gpu::create_runtime(&desc);
+if (catch err = runtime) {
+    if (err == gpu::BACKEND_LOADER_MISSING || err == gpu::UNSUPPORTED_BACKEND) {
+        io::printn("This program needs a graphics driver with Vulkan 1.3.");
+    }
+    return err~;
+}
+```
+
 `destroy_runtime` fails with `RESOURCE_IN_USE` while a device or surface is
 live. Runtime and surface creation and destruction are externally
 synchronized process-wide.

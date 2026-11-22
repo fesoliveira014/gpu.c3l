@@ -193,6 +193,9 @@ faultdef
     // Runtime failure: the requested backend or Vulkan 1.3 driver is absent,
     // or backend creation failed.
     UNSUPPORTED_BACKEND,
+    // Runtime failure: create_runtime found no Vulkan loader on this machine
+    // (vulkan-1.dll on Windows, libvulkan.so.1 on Linux). Nothing was created.
+    BACKEND_LOADER_MISSING,
     // Runtime failure: a valid capability, layer, presentation path, feature,
     // or exact semantic capacity is unavailable.
     UNSUPPORTED_FEATURE,

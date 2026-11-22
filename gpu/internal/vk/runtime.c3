@@ -167,6 +167,7 @@ fn VkInstanceDesc runtime_instance_desc(
 }
 
 fn gpu::Runtime? create_vk_runtime(gpu::RuntimeDesc* desc) {
+    load_vulkan_loader()!;
     VkRuntimeState* state = mem::new(VkRuntimeState);
     defer catch {
         destroy_vk_runtime_state(state);
