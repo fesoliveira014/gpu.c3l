@@ -299,6 +299,22 @@ fn vk::Result fail_native_submit(
     return vk::Result.ERROR_OUT_OF_HOST_MEMORY;
 }
 
+Atomic{uint} lost_native_calls;
+
+fn vk::Result lose_native_submit(
+    vk::Queue queue,
+    uint submit_count,
+    vk::SubmitInfo2* submits,
+    vk::Fence fence,
+) {
+    (void)queue;
+    (void)submit_count;
+    (void)submits;
+    (void)fence;
+    lost_native_calls.add(1);
+    return vk::Result.ERROR_DEVICE_LOST;
+}
+
 fn void unified_failed_submit_keeps_textures_pending() @test {
     gpu::Device device = make_unified_device();
     defer destroy_test_device(&device)!!;
@@ -323,6 +339,21 @@ fn void unified_failed_submit_keeps_textures_pending() @test {
     gpu::CompletionPoint point = gpu::submit(queue, &desc)!!;
     assert(state.pending_inits.count() == 0, "the retry drains the pending list");
     gpu::wait_completion(point)!!;
+
+    // Device loss is no fault: the initialization batch absorbs it, and the
+    // lost device then takes no native call from the next submit.
+    gpu::TextureHandle lost_texture = make_unified_heap_texture(&device, "unified_lost_texture");
+    lost_native_calls.store(0);
+    gpu::SubmitDesc empty = {};
+    gpu::CompletionPoint? lost_point = vk::vk_submit_with(state, queue, &empty, &lose_native_submit);
+    assert(!@catch(lost_point), "a submit that observes device loss returns no fault");
+    assert(gpu::is_device_lost(&device) && lost_native_calls.load() == 1);
+    gpu::CompletionPoint? after_loss = vk::vk_submit_with(state, queue, &empty, &lose_native_submit);
+    assert(!@catch(after_loss) && lost_native_calls.load() == 1,
+        "a submit on a lost device returns no fault and makes no native call");
+    gpu::wait_completion(lost_point!!)!!;
+    gpu::wait_completion(after_loss!!)!!;
+    (void)@catch(gpu::destroy_texture(&device, lost_texture));
 }
 
 const uint INIT_CAPTURE_CALLS = 16;

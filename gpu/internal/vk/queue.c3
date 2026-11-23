@@ -1479,19 +1479,24 @@ fn void? submit_texture_init_batch_locked(
     ulong sequence = gpu::internal::completion_point_sequence(point);
     signal_info.value = sequence;
     submit = submit.set_signal_semaphore_infos((&signal_info)[:1]);
-    vk::Result result = ops.submit(
-        completion.queue,
-        1,
-        &submit,
-        (vk::Fence)null,
-    );
-    if (result != vk::Result.SUCCESS) {
-        cancel_queue_completion_locked(state, point);
-        check_backend_result(
-            state:     state,
-            operation: "submit",
-            result:    result,
-        )!;
+    // A lost device consumes the batch without native work, like the
+    // caller's batch; the point is complete once published.
+    if (!device_lost(state)) {
+        vk::Result result = ops.submit(
+            completion.queue,
+            1,
+            &submit,
+            (vk::Fence)null,
+        );
+        if (!absorb_device_loss(state, "submit", result)
+            && result != vk::Result.SUCCESS) {
+            cancel_queue_completion_locked(state, point);
+            check_backend_result(
+                state:     state,
+                operation: "submit",
+                result:    result,
+            )!;
+        }
     }
 
     gpu::QueueRoles[gpu::internal::MAX_SELECTED_QUEUE_IDENTITIES] identity_roles;
