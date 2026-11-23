@@ -204,6 +204,8 @@ fn bool Queue.equals(self, Queue other) @operator(==) {
 }
 
 <* Initialize backend discovery. Importing gpu performs no initialization.
+   The first successful call opens the system Vulkan loader, which stays open
+   until the process exits; a machine without one gets BACKEND_LOADER_MISSING.
    The descriptor is borrowed only for the call; callback user data must remain
    valid for every callback until runtime destruction.
    @param desc : "Borrowed runtime configuration."

@@ -23,6 +23,13 @@
       "type": "executable",
       "sources": [ "src/smoke.c3" ]
     },
+    // create_runtime with the Vulkan loader made unfindable through
+    // vk::set_loader_library, then with the system loader. Needs a loader and
+    // an ICD for the retry; --missing-only runs the first half alone.
+    "loader_missing": {
+      "type": "executable",
+      "sources": [ "src/loader_missing.c3" ]
+    },
     // Advisory pipeline-cache lookup timing; executable so it never gates CI.
     // Needs an ICD — pin lavapipe via VK_DRIVER_FILES when running this target.
     "pipeline_cache_bench": {

@@ -6,8 +6,9 @@ import vk;
 import vma;
 import std::core::mem;
 
-<* Create the per-device VMA allocator. Static-linked VMA needs no Vulkan
-   function table (`vulkan_functions = null`). The buffer-device-address flag is
+<* Create the per-device VMA allocator. VMA is built with static Vulkan
+   functions, which resolve to the entry points vk.c3l defines over the loader
+   it opened at run time, so it needs no function table (`vulkan_functions = null`). The buffer-device-address flag is
    mandatory; the memory-budget flag tracks the enabled extension. *>
 fn void? create_vk_allocator(VkDeviceState* state) {
     vma::AllocatorCreateInfo info = {

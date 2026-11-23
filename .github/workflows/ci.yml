@@ -163,7 +163,19 @@ jobs:
       - name: Link proof (smoke)
         run: |
           c3c build smoke --path test
+          objdump -p test/build/smoke | grep NEEDED
+          if objdump -p test/build/smoke | grep -qF libvulkan; then echo "smoke links the Vulkan loader"; exit 1; fi
           ./test/build/smoke
+
+      - name: Missing Vulkan loader
+        run: |
+          c3c build loader_missing --path test
+          if objdump -p test/build/loader_missing | grep -qF libvulkan; then echo "loader_missing links the Vulkan loader"; exit 1; fi
+          set +e
+          ./test/build/loader_missing --missing-only
+          test $? -eq 3 || exit 1
+          set -e
+          ./test/build/loader_missing
 
       - name: Test sweep (lavapipe)
         run: |
@@ -259,8 +271,8 @@ jobs:
           ls "$HOME/tools/VulkanSDK" || true
 
       - name: Install Vulkan runtime (loader dll)
-        # The portable SDK ships no vulkan-1.dll; every linked binary needs the
-        # loader on PATH at process start. LunarG publishes it standalone.
+        # The portable SDK ships no vulkan-1.dll; the programs open the loader
+        # at run time and find it on PATH. LunarG publishes it standalone.
         run: |
           if [ ! -f ~/tools/VulkanRT/x64/vulkan-1.dll ]; then
             curl -fsSL -o /tmp/vulkanrt.zip \
@@ -281,11 +293,6 @@ jobs:
             --version "$RELEASE_VERSION" \
             --output-dir dist
 
-      - name: Stage vulkan-1 import library
-        # vk.c3l links `vulkan-1` but is bindings-only; vma.c3l's linked-libs
-        # dir is already on the linker search path, so the import lib rides there.
-        run: cp "$HOME/tools/VulkanSDK/Lib/vulkan-1.lib" lib/vma.c3l/linked-libs/windows-x64/
-
       - name: Shader tool tests
         run: |
           c3c test unit --path tools/gpu_shaders
@@ -305,10 +312,11 @@ jobs:
           done
 
       - name: Link proof (smoke)
+        # Nothing links vulkan-1: the import table names no Vulkan DLL.
         run: |
           c3c build smoke --path test
-          find test -iname "smoke*" | head
-          ldd test/build/smoke.exe || true
+          objdump -p test/build/smoke.exe | grep "DLL Name"
+          if objdump -p test/build/smoke.exe | grep -qi vulkan-1; then echo "smoke.exe imports the Vulkan loader"; exit 1; fi
           ./test/build/smoke.exe
 
       - name: CPU test targets
@@ -371,6 +379,16 @@ jobs:
             "$CONSUMER/lib/gpu.c3l/tools/gpu_shaders/build/gpu_shaders.exe" --shader-dir "$CONSUMER/shaders"
           c3c build hello_gpu --path "$CONSUMER"
           "$CONSUMER/build/hello_gpu.exe"
+
+      - name: Missing Vulkan loader
+        run: |
+          c3c build loader_missing --path test
+          if objdump -p test/build/loader_missing.exe | grep -qi vulkan-1; then echo "loader_missing.exe imports the Vulkan loader"; exit 1; fi
+          set +e
+          ./test/build/loader_missing.exe --missing-only
+          test $? -eq 3 || exit 1
+          set -e
+          ./test/build/loader_missing.exe
 
       - name: Vulkan sweep (lavapipe)
         run: |

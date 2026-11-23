@@ -85,6 +85,7 @@ lifetimes. Enable Vulkan validation explicitly for development diagnostics.
 | Fault | Meaning | Retry |
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | No Vulkan 1.3 driver or backend creation failed | no |
+| `BACKEND_LOADER_MISSING` | `create_runtime` found no Vulkan loader on the machine | no; tell the user to install a Vulkan 1.3 driver |
 | `UNSUPPORTED_FEATURE` | Capability, layer, format, or capacity unavailable | no |
 | `INVALID_RESOURCE_STATE` | Transition or command state contradicts prior state | fix order |
 | `OUT_OF_HOST_MEMORY`, `OUT_OF_DEVICE_MEMORY` | Allocation failed | release memory |

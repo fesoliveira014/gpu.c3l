@@ -355,7 +355,9 @@ for measurement guidance.
 
 ## Platform
 
-Targets are `linux-x64` and `windows-x64` on C3 0.8.5_1. Required at runtime: a
+Targets are `linux-x64` and `windows-x64` on C3 0.8.5_1. Nothing links the
+Vulkan loader: `create_runtime` opens it at run time, so a program starts
+without one and gets `BACKEND_LOADER_MISSING`. Required at runtime: a
 Vulkan 1.3 loader and driver with synchronization2, dynamic rendering,
 timeline semaphores, buffer device address, descriptor indexing, and extended
 dynamic state. The library requires all of them; it does not emulate missing
@@ -363,5 +365,6 @@ features. Unsupported adapters fail `create_device` with
 `UNSUPPORTED_FEATURE`.
 
 Vendored dependencies: `vk`, `vma`, and `spvreflect` binding packages plus a
-static VMA library per target. Shader compilation is an application build
-step.
+static VMA library per target. VMA is linked into every program; its licence
+ships as `LICENSE.vulkan-memory-allocator.mit` beside `LICENSE`. Shader
+compilation is an application build step.

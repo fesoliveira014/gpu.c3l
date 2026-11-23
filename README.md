@@ -37,7 +37,9 @@ The current release targets **C3 0.8.5_1** and a Vulkan 1.3 implementation with
 the required modern synchronization, dynamic-rendering, descriptor-indexing,
 buffer-device-address, and dynamic-state features. Supported library targets
 are `linux-x64` and `windows-x64`. SDL3 is used by the samples, not by the
-library itself.
+library itself. Nothing links the Vulkan loader: a program built on the library
+starts on a machine without Vulkan, and `create_runtime` reports
+`BACKEND_LOADER_MISSING` so the program can say so.
 
 This project is pre-1.0. See
 [features and limitations](docs/features_and_limitations.md) before adopting
@@ -79,7 +81,8 @@ python3 lib/gpu.c3l/scripts/fetch_vma_libs.py
 ```
 
 The `gpu` artifact holds the library, the `gpu_shaders` tool, shader include
-files, licenses, and consumer documentation.
+files, licenses, and consumer documentation. VMA is linked into every program
+built on the library; ship `LICENSE.vulkan-memory-allocator.mit` with it.
 
 [Getting started](docs/getting_started.md#install) shows the `project.json`
 that resolves the four packages and the shader build.
