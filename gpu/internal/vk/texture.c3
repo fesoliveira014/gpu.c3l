@@ -641,8 +641,8 @@ fn void restore_pending_texture_inits(
                     handle,
                     pending_init_bucket_roles(bucket),
                 );
-                TextureSlot*? slot = state.textures.get(handle);
-                if (catch err = slot) continue;
+                TextureSlot* slot = state.textures.find(handle);
+                if (slot == null) continue;
                 (void)slot.internal_references.sub(1, AtomicOrdering.RELAXED);
             }
         }

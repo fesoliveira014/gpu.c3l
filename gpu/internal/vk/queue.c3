@@ -1486,7 +1486,7 @@ fn void? submit_texture_init_batch_locked(
         (vk::Fence)null,
     );
     if (result != vk::Result.SUCCESS) {
-        cancel_queue_completion_locked(state, point)!!;
+        cancel_queue_completion_locked(state, point);
         check_backend_result(
             state:     state,
             operation: "submit",
@@ -1520,7 +1520,7 @@ fn void? submit_texture_init_batch_locked(
     );
     completion.retirement_mutex.unlock();
     record.state = gpu::internal::CommandState.SUBMITTED;
-    publish_queue_completion_locked(state, point)!!;
+    publish_queue_completion_locked(state, point);
     $if env::TESTING:
         reach_submission_checkpoint(
             ops,

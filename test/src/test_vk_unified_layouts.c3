@@ -485,8 +485,8 @@ fn void unified_init_skips_queues_outside_texture_access() @test {
 
     gpu::TextureHandle unshared = make_init_texture(&device, { .graphics, .compute }, "unshared_init");
     defer gpu::destroy_texture(&device, unshared)!!;
-    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CompletionPoint transfer_done = submit_empty_captured(state, transfer);
     gpu::wait_completion(transfer_done)!!;
     assert(state.pending_inits.count() == 1,
@@ -522,8 +522,8 @@ fn void unified_init_orders_other_queues_sharing_the_texture() @test {
 
     gpu::TextureHandle shared = make_init_texture(&device, { .graphics, .transfer }, "shared_init");
     defer gpu::destroy_texture(&device, shared)!!;
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
+    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
     vk::QueueCompletionState* graphics_state = &state.queue_completions[graphics.id];
     gpu::CompletionPoint graphics_done = submit_empty_captured(state, graphics);
     assert(submit_capture.calls.load() == 2, "graphics submits the initialization, then its own batch");
@@ -602,8 +602,8 @@ fn void unified_init_destroyed_while_waiting_for_a_compatible_queue() @test {
     reset_submit_capture();
 
     gpu::TextureHandle unshared = make_init_texture(&device, { .graphics, .compute }, "dropped_init");
-    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     gpu::CompletionPoint transfer_done = submit_empty_captured(state, transfer);
     assert(state.pending_inits.count() == 1);
     gpu::destroy_texture(&device, unshared)!!;
@@ -645,8 +645,8 @@ fn void unified_failed_init_restores_only_its_textures() @test {
     defer gpu::destroy_texture(&device, unshared)!!;
     gpu::TextureHandle transfer_only = make_init_texture(&device, { .transfer }, "restore_transfer");
     defer gpu::destroy_texture(&device, transfer_only)!!;
-    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     vk::QueueCompletionState* transfer_state = &state.queue_completions[transfer.id];
 
     gpu::SubmitDesc empty = {};
@@ -717,8 +717,8 @@ fn void unified_init_publication_is_atomic_to_other_queues() @test {
 
     gpu::TextureHandle shared = make_init_texture(&device, { .graphics, .transfer }, "racing_init");
     defer gpu::destroy_texture(&device, shared)!!;
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
+    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
     vk::QueueCompletionState* graphics_state = &state.queue_completions[graphics.id];
     submit_capture.gated_queue = graphics_state.queue;
 
@@ -791,8 +791,8 @@ fn void unified_init_concurrent_queues_stay_validation_clean() @test {
     gpu::Device device = created;
     defer destroy_test_device(&device)!!;
     validation.errors = 0;
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
-    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER)!!;
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
+    gpu::Queue transfer = gpu::get_queue(&device, gpu::QueueKind.TRANSFER);
     InitStressWorker creator = {
         .device          = &device,
         .queue           = graphics,
@@ -862,7 +862,7 @@ fn void unified_init_settles_before_its_batch_can_retire() @test {
     reset_submit_capture();
     gpu::QueueRoles every_role = { .graphics, .compute, .transfer };
     gpu::TextureHandle texture = make_unified_heap_texture(&device, "settled_init");
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     assert(state.pending_inits.has_outstanding(every_role));
 
     InitSettleGate gate;
@@ -906,23 +906,26 @@ fn void unified_rejected_submit_leaves_no_initialization_work() @test {
     gpu::QueueRoles every_role = { .graphics, .compute, .transfer };
     gpu::TextureHandle texture = make_unified_heap_texture(&device, "rejected_submit_init");
     defer gpu::destroy_texture(&device, texture)!!;
-    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS)!!;
+    gpu::Queue graphics = gpu::get_queue(&device, gpu::QueueKind.GRAPHICS);
     vk::QueueCompletionState* completion = &state.queue_completions[graphics.id];
     ulong next_sequence = completion.next_sequence;
 
-    gpu::CompletionPoint unpublished = gpu::internal::make_completion_point(
-        graphics,
-        completion.published_sequence.load() + 1,
-    )!!;
-    gpu::CompletionWait[1] waits = {{ .point = unpublished, .before = { .all } }};
-    gpu::SubmitDesc rejected = { .completion_waits = waits[..] };
+    // Listing one executable list twice fails the claim step, which is the
+    // validation that runs before the initialization batch.
+    gpu::CommandAllocator allocator = gpu::create_command_allocator(&device, graphics)!!;
+    defer gpu::destroy_command_allocator(&allocator)!!;
+    gpu::CommandList cmd = gpu::begin_commands(&allocator)!!;
+    gpu::ExecutableCommandList executable = gpu::end_commands(&cmd)!!;
+    defer discard_test_executable(&executable)!!;
+    gpu::ExecutableCommandList[2] twice = { executable, executable };
+    gpu::SubmitDesc rejected = { .command_lists = twice[..] };
     fault failure = @catch(vk::vk_submit_with(
         state:     state,
         queue:     graphics,
         desc:      &rejected,
         submit_fn: &capture_init_submit,
     ));
-    assert(failure == gpu::INVALID_HANDLE, "a wait on an unpublished point is rejected");
+    assert(failure == gpu::COMMAND_RECORDING_ERROR, "a repeated command list is rejected");
     assert(submit_capture.calls.load() == 0, "the rejected submit reaches no native submit");
     assert(completion.next_sequence == next_sequence, "the rejected submit uses no completion point");
     assert(state.pending_inits.count() == 1 && state.pending_inits.has_outstanding(every_role),
