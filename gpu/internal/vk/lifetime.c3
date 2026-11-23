@@ -102,7 +102,7 @@ fn CommandRecord* release_pending_command_locked(
     gpu::internal::CommandListHandle identity = record.identity;
     gpu::Device owner = record.device;
     if (record.init_textures.len > 0) {
-        release_pending_texture_inits(state, record.init_textures, false);
+        release_pending_texture_inits(state, record.init_textures);
         record.init_textures = {};
     }
     record.submitted_completion = {};
