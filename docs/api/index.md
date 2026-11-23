@@ -58,6 +58,7 @@ lifetimes. Enable Vulkan validation explicitly for development diagnostics.
 | Fault | Meaning | Retry |
 |---|---|---|
 | `UNSUPPORTED_BACKEND` | No Vulkan 1.3 driver or backend creation failed | no |
+| `BACKEND_LOADER_MISSING` | `create_runtime` found no Vulkan loader on the machine | no; tell the user to install a Vulkan 1.3 driver |
 | `UNSUPPORTED_FEATURE` | Capability, layer, format, or capacity unavailable | no |
 | `INVALID_ARGUMENT` | Descriptor or parameter rejected | fix input |
 | `INVALID_HANDLE` | Zero, stale, consumed, or foreign handle | fix input |

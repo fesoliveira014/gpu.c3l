@@ -32,6 +32,10 @@ COMPONENTS = (
     },
 )
 
+# Notices of third-party code that ends up in a consumer's executable: the
+# VMA static library every gpu.c3l program links.
+THIRD_PARTY_LICENSES = ("LICENSE.vulkan-memory-allocator.mit",)
+
 CONSUMER_DOCS = (
     "docs/index.md",
     "docs/concepts.md",
@@ -160,7 +164,7 @@ def add_file(files: dict[str, Path], root: Path, relative: str) -> None:
 
 def collect_release_files(root: Path) -> dict[str, Path]:
     files: dict[str, Path] = {}
-    for relative in ("LICENSE", "README.md", "manifest.json", *CONSUMER_DOCS):
+    for relative in ("LICENSE", *THIRD_PARTY_LICENSES, "README.md", "manifest.json", *CONSUMER_DOCS):
         add_file(files, root, relative)
 
     for source in sorted((root / "gpu").rglob("*")):

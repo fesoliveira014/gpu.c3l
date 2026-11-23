@@ -75,7 +75,8 @@ When the API changes:
 ## Build and verification
 
 Native libraries are resolved from dependency manifests. The backend requires a
-Vulkan 1.3 loader and the VMA static library. `vma.c3l` publishes that library
+Vulkan 1.3 loader at run time (`vk.c3l` opens it; nothing links it) and the VMA
+static library. `vma.c3l` publishes that library
 as release assets, not in git; `scripts/fetch_vma_libs.py` pins the release
 that matches `lib/vma.c3l`, so moving the submodule means updating its tag,
 commit, and checksums. SDL3 belongs to the separate samples repository, not
