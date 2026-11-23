@@ -163,13 +163,13 @@ jobs:
         run: |
           c3c build smoke --path test
           objdump -p test/build/smoke | grep NEEDED
-          ! objdump -p test/build/smoke | grep -F libvulkan
+          if objdump -p test/build/smoke | grep -qF libvulkan; then echo "smoke links the Vulkan loader"; exit 1; fi
           ./test/build/smoke
 
       - name: Missing Vulkan loader
         run: |
           c3c build loader_missing --path test
-          ! objdump -p test/build/loader_missing | grep -F libvulkan
+          if objdump -p test/build/loader_missing | grep -qF libvulkan; then echo "loader_missing links the Vulkan loader"; exit 1; fi
           set +e
           ./test/build/loader_missing --missing-only
           test $? -eq 3 || exit 1
@@ -315,7 +315,7 @@ jobs:
         run: |
           c3c build smoke --path test
           objdump -p test/build/smoke.exe | grep "DLL Name"
-          ! objdump -p test/build/smoke.exe | grep -Fi vulkan-1
+          if objdump -p test/build/smoke.exe | grep -qi vulkan-1; then echo "smoke.exe imports the Vulkan loader"; exit 1; fi
           ./test/build/smoke.exe
 
       - name: CPU test targets
@@ -380,7 +380,7 @@ jobs:
       - name: Missing Vulkan loader
         run: |
           c3c build loader_missing --path test
-          ! objdump -p test/build/loader_missing.exe | grep -Fi vulkan-1
+          if objdump -p test/build/loader_missing.exe | grep -qi vulkan-1; then echo "loader_missing.exe imports the Vulkan loader"; exit 1; fi
           set +e
           ./test/build/loader_missing.exe --missing-only
           test $? -eq 3 || exit 1
